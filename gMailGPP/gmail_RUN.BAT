@@ -11,4 +11,4 @@ echo TIME=%TIME%  >>  log.txt
 
 del mail.txt
 copy  mailbody.txt + log.txt  mail.txt
-gmail_send.exe  meklkcfwfukbffuk   mail.txt 
+gmail_send.exe  ****************   mail.txt 
