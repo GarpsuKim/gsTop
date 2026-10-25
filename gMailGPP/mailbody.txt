@@ -1,0 +1,5 @@
+garpsu@kakao.com,garpsu@naver.com,garpsu@gmail.com
+PC login 결과 안내
+-----------------------
+PC에 다음과 같이 로그인하였습니다.
+-----------------------
