@@ -1,0 +1,4 @@
+rem  rdp_client.bat
+cd c:\tools\rdpMini 
+cd /d "%~dp0"
+rdp_client.exe 192.168.0.118   7071 R8#vQ2!mZ7@kL4$xP9wT
