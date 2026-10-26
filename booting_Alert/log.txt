@@ -1,5 +1,0 @@
-PC=GSKIM-WIN11  
-USERNAME=******  
-IP=****** 
-DATE=2026-10-25  
-TIME=21:18:41.41  
