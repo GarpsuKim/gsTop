@@ -25,10 +25,11 @@
 //   - 동작    : NET_WAIT_SEC(기본 60), RETRY_COUNT(기본 2), RETRY_DELAY_SEC(기본 10),
 //               KAKAO_ALERT_PHONE, ALERT_INTERVAL_HOURS(기본 24)
 //
-// 발송 순서: SMS -> 텔레그램 -> 이메일 -> 카카오 (카카오 인증 문제가 다른 채널을 지연시키지 않도록 마지막)
-//   - 시작할 때 네트워크(DNS)가 준비될 때까지 NET_WAIT_SEC 초까지 대기 (부팅 직후 대비)
+// 발송 방식: 서비스(SMS / 텔레그램 / 이메일 / 카카오)마다 별도 쓰레드를 만들어 동시에 발송 (순서 없음)
+//   - 각 쓰레드는 자기 서비스의 호스트가 DNS 로 확인될 때까지 NET_WAIT_SEC 초까지 대기 (부팅 직후 대비)
 //   - 연결 오류로 실패하면 RETRY_DELAY_SEC 초 간격으로 RETRY_COUNT 회 재시도 (설정/인증 오류는 재시도 안 함)
-//   - 종료 코드: 0=모두 성공, 1=설정/인자 오류, 2=발송 실패
+//   - 발송 결과(성공/실패)는 확인하지 않음. 모든 쓰레드가 끝날 때까지 기다리기만 함 (먼저 종료되면 쓰레드가 중간에 죽음)
+//   - 종료 코드: 0=발송 시도 완료(결과 무관), 1=설정/인자 오류(발송 시도 전)
 //
 // 이메일 : 첨부폴더를 지정하면 그 폴더 바로 아래의 모든 파일을 첨부 (하위 폴더 제외, 총 약 18MB 까지)
 //          EMAIL_BCC 는 To 헤더에 나타나지 않는 숨은 참조. 명령줄 인자는 영문/ASCII 만 사용
@@ -53,7 +54,7 @@
 //   EmailNotifier   [email_notifier.*]    Gmail SMTP
 //   LocalCallbackServer [local_callback_server.*]  OAuth 리다이렉트 수신용 로컬 서버
 //   KakaoNotifier   [kakao_notifier.*]    카카오톡 나에게 보내기 + OAuth 인증
-//   NetworkWaiter / RetryPolicy / Dispatcher [dispatcher.*]  네트워크 대기, 재시도, 순차 발송
+//   NetworkWaiter / RetryPolicy / Dispatcher [dispatcher.*]  네트워크 대기, 재시도, 서비스별 쓰레드 동시 발송
 //   App / main      [main.cpp]            인자 해석과 전체 흐름
 //
 //  서비스 클래스끼리는 서로 참조하지 않음 (카카오의 재인증 알림은 App 이 넘겨주는 AlertFn 콜백으로 연결).
@@ -79,6 +80,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1247,7 +1249,7 @@ SendResult KakaoNotifier::execute(const Message* m) {
 }
 
 // ============================================================================
-// [dispatcher.h] 네트워크 대기 / 재시도 / 순차 발송
+// [dispatcher.h] 네트워크 대기 / 재시도 / 서비스별 쓰레드 동시 발송
 // ============================================================================
 class NetworkWaiter {
 	public:
@@ -1273,7 +1275,8 @@ class Dispatcher {
 	public:
     explicit Dispatcher(const Config& cfg) : cfg_(cfg), retry_(cfg) {}
     void add(std::unique_ptr<Notifier> n) { notifiers_.push_back(std::move(n)); }
-    // 네트워크 대기 후 add 한 순서대로 발송. 가장 큰 종료 코드를 반환
+    // add 한 서비스마다 쓰레드를 하나씩 만들어 동시에 발송 (쓰레드 안에서 네트워크 대기 -> 재시도 포함 발송).
+    // 결과는 확인하지 않고, 모든 쓰레드가 끝나길 기다린 뒤 항상 0 을 반환
     int run(const Message& m);
 	
 	private:
@@ -1325,17 +1328,20 @@ SendResult RetryPolicy::run(const char* name, const std::function<SendResult()>&
 }
 
 int Dispatcher::run(const Message& m) {
-    std::vector<std::string> hosts;
-    for (const auto& n : notifiers_)
-	for (const auto& h : n->hosts()) hosts.push_back(h);
-    NetworkWaiter::wait(cfg_, hosts);
-	
-    int fail = 0;
+    // 서비스마다 쓰레드 하나. 각자 자기 호스트만 기다리므로 한 서비스가 느려도 다른 서비스는 영향 없음.
+    // join 은 결과를 보려는 것이 아님: main 이 먼저 끝나면 프로세스가 종료되어 쓰레드가 중간에 죽기 때문.
+    std::vector<std::thread> threads;
     for (const auto& n : notifiers_) {
-        SendResult r = retry_.run(n->name(), [&] { return n->send(m); });
-        fail = std::max(fail, r.code);
-	}
-    return fail;
+        Notifier* p = n.get();
+        threads.emplace_back([this, p, &m] {
+            try {
+                NetworkWaiter::wait(cfg_, p->hosts());
+                retry_.run(p->name(), [&] { return p->send(m); });   // 반환값(결과)은 버림
+            } catch (...) {}   // 쓰레드 밖으로 예외가 나가면 프로세스가 종료되므로 삼킴
+        });
+    }
+    for (auto& t : threads) t.join();
+    return 0;
 }
 
 // ============================================================================
@@ -1452,7 +1458,7 @@ int App::run(int argc, char** argv) {
     msg.plain = util::trim(text.substr(pos));      // SMS / 텔레그램 / 카카오 본문
     msg.bodyCrlf = util::toCrlf(text.substr(pos)); // 이메일 본문
 	
-    // 발송 순서: SMS -> 텔레그램 -> 이메일 -> 카카오 (카카오 인증 문제가 다른 채널을 지연시키지 않도록 마지막)
+    // 서비스별 쓰레드로 동시에 발송 (add 순서는 의미 없음)
     Dispatcher dispatcher(cfg_);
     if (!rcp.phones.empty()) dispatcher.add(std::make_unique<SmsNotifier>(cfg_, rcp.phones));
     if (rcp.telegram) dispatcher.add(std::make_unique<TelegramNotifier>(cfg_));

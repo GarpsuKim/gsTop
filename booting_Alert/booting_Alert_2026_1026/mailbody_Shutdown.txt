@@ -1,0 +1,4 @@
+■■ PC Shutdown alert 
+---
+PC 'Shutdown' 발생 통보
+---
