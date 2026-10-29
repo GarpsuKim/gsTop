@@ -39,12 +39,17 @@
 //          (같은 알림은 ALERT_INTERVAL_HOURS 안에는 반복하지 않음)
 // 텔레그램: 봇이 "나에게" 발송 (4096자 초과 시 분할). chat id 는 봇에게 메시지를 보내 두면 자동 탐색/저장
 //
+// 로그    : 실행 파일 폴더의 BootingLog.txt 에 계속 추가 (UTF-8, 한 줄에 시각/프로세스/쓰레드/서비스 태그)
+//          화면에 나오는 모든 메시지 + 설정 로드, 네트워크 대기, 재시도, HTTP/SMTP 호출 요약, 쓰레드 시작/종료 직전을 기록
+//          비밀번호 / 토큰 / API 키 / URL 쿼리(code 등)는 기록하지 않음. 최종 결과(code)도 로그에만 남기며 종료 코드는 기존과 동일
+//
 // 빌드: build.bat 참고 (g++ ... -lcurl -lbcrypt -lws2_32 -lshell32)
 //
 // ============================================================================
 // 구조 (지금은 한 파일, 나중에 아래 단위로 .h/.cpp 분리 예정. 각 구역 머리의 [파일명] 이 분리 후보)
 //
 //   util            [util.h]              문자열/인코딩/파일/해시 등 순수 함수 (namespace util)
+//   logx            [logger.h]            파일 로그 (BootingLog.txt) + 화면 출력 겸용 (namespace logx)
 //   Config          [config.h/.cpp]       ini + 환경변수 설정
 //   Http            [http.h/.cpp]         libcurl POST 래퍼
 //   Message/SendResult/Notifier [notifier.h]   모든 서비스가 구현하는 공통 인터페이스
@@ -65,12 +70,14 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <share.h>
 #include <bcrypt.h>
 #include <curl/curl.h>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -79,6 +86,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -350,6 +358,131 @@ namespace util {
 	
 }  // namespace util
 
+// ============================================================================
+// [logger.h] 파일 로그: 실행 파일 폴더의 BootingLog.txt 에 계속 추가 (UTF-8, 새 파일이면 BOM)
+//   한 줄 형식: 날짜 시각.밀리초 [P프로세스ID T쓰레드ID] [서비스 태그] 내용
+//   - say / sayf : 화면에도 출력하고 로그에도 기록 (기존 puts / printf 대체)
+//   - logf       : 로그 파일에만 기록
+//   - conf       : 화면에만 출력 (진행률, 토큰/인증 URL 처럼 로그에 남기면 안 되는 값)
+//   - 쓰레드가 시작되면 setTag(서비스 이름) 을 호출 -> 그 쓰레드의 모든 로그 줄에 태그가 붙음 (기본 "main")
+//   - 매 줄마다 파일을 열고 닫음: 프로세스가 중간에 죽어도 그때까지의 기록이 남고, 다른 프로세스(keepalive 등)와 동시에 써도 됨
+//   - 로그 기록 중 오류(디스크 등)가 나도 발송 동작에는 영향을 주지 않음 (조용히 무시)
+// ============================================================================
+#if defined(__GNUC__)
+#define LOGX_PRINTF(a, b) __attribute__((format(gnu_printf, a, b)))
+#else
+#define LOGX_PRINTF(a, b)
+#endif
+
+namespace logx {
+
+    inline std::mutex& gate() { static std::mutex m; return m; }   // 화면 출력과 파일 기록이 섞이지 않게 하는 잠금
+
+    inline std::string& threadTag() { thread_local std::string t = "main"; return t; }
+    inline void setTag(const std::string& t) { threadTag() = t; }
+
+    inline std::string prefix() {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char b[96];
+        snprintf(b, sizeof b, "%04d-%02d-%02d %02d:%02d:%02d.%03d [P%lu T%lu] [",
+                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+                 (unsigned long)GetCurrentProcessId(), (unsigned long)GetCurrentThreadId());
+        return std::string(b) + threadTag() + "] ";
+    }
+
+    // gate() 를 잡은 상태에서 호출. 여러 줄이면 줄마다 접두어를 붙이고, 빈 줄은 기록하지 않음
+    inline void appendFile(const std::string& msg) {
+        std::string out, pre = prefix(), line;
+        size_t pos = 0;
+        while (util::nextLine(msg, pos, line))
+            if (!util::trim(line).empty()) out += pre + line + "\r\n";
+        if (out.empty()) return;
+        static const std::wstring path = util::exeDirFile(L"BootingLog.txt");
+        FILE* f = _wfsopen(path.c_str(), L"ab", _SH_DENYNO);   // 기존 파일 뒤에 추가
+        if (!f) return;
+        std::fseek(f, 0, SEEK_END);
+        if (std::ftell(f) == 0) std::fwrite("\xEF\xBB\xBF", 1, 3, f);   // 새 파일이면 UTF-8 BOM (메모장 호환)
+        std::fwrite(out.data(), 1, out.size(), f);
+        std::fclose(f);
+    }
+
+    inline std::string vfmt(const char* fmt, va_list ap) {
+        va_list cp;
+        va_copy(cp, ap);
+        int n = vsnprintf(nullptr, 0, fmt, cp);
+        va_end(cp);
+        if (n <= 0) return {};
+        std::string s((size_t)n, '\0');
+        vsnprintf(&s[0], (size_t)n + 1, fmt, ap);
+        return s;
+    }
+
+    inline void emit(const std::string& text, bool console, bool newline, bool file) {
+        std::lock_guard<std::mutex> g(gate());
+        if (console) { std::fputs(text.c_str(), stdout); if (newline) std::fputc('\n', stdout); }
+        if (file) { try { appendFile(text); } catch (...) {} }
+    }
+
+    inline void say(const char* s) { emit(s, true, true, true); }   // puts 대체 (줄바꿈 자동)
+
+    LOGX_PRINTF(1, 2) inline void sayf(const char* fmt, ...) {      // printf 대체 (화면 + 로그)
+        va_list ap;
+        va_start(ap, fmt);
+        std::string s = vfmt(fmt, ap);
+        va_end(ap);
+        emit(s, true, false, true);
+    }
+
+    LOGX_PRINTF(1, 2) inline void logf(const char* fmt, ...) {      // 로그 파일에만
+        va_list ap;
+        va_start(ap, fmt);
+        std::string s = vfmt(fmt, ap);
+        va_end(ap);
+        emit(s, false, false, true);
+    }
+
+    LOGX_PRINTF(1, 2) inline void conf(const char* fmt, ...) {      // 화면에만
+        va_list ap;
+        va_start(ap, fmt);
+        std::string s = vfmt(fmt, ap);
+        va_end(ap);
+        emit(s, true, false, false);
+    }
+
+    // URL 에서 호스트만 (경로/쿼리에 토큰이 들어 있을 수 있어 로그에는 호스트만 남김)
+    inline std::string hostOf(const std::string& url) {
+        size_t s = url.find("://");
+        s = (s == std::string::npos) ? 0 : s + 3;
+        size_t e = url.find_first_of("/?:", s);
+        return url.substr(s, e == std::string::npos ? std::string::npos : e - s);
+    }
+
+    // 응답 본문을 로그에 남길 때 토큰 값을 가림
+    inline std::string redact(std::string s) {
+        static const char* const keys[] = {"access_token", "refresh_token", "id_token"};
+        for (const char* k : keys) {
+            std::string pat = std::string("\"") + k + "\"";
+            size_t p = 0;
+            while ((p = s.find(pat, p)) != std::string::npos) {
+                p += pat.size();
+                size_t c = s.find(':', p);
+                if (c == std::string::npos) break;
+                size_t q1 = s.find('"', c);
+                if (q1 == std::string::npos) break;
+                size_t q2 = s.find('"', q1 + 1);
+                if (q2 == std::string::npos) break;
+                s.replace(q1 + 1, q2 - q1 - 1, "***");
+                p = q1 + 4;
+            }
+        }
+        return s;
+    }
+
+    inline double secSince(Clock::time_point t) { return std::chrono::duration<double>(Clock::now() - t).count(); }
+
+}  // namespace logx
+
 // libcurl 전역 초기화/정리 (프로그램 전체에서 한 번)
 struct CurlGlobal {
     CurlGlobal() { curl_global_init(CURL_GLOBAL_DEFAULT); }
@@ -368,6 +501,7 @@ class Config {
     bool has(const std::string& key) const { return !get(key).empty(); }
     bool getBool(const std::string& key) const;   // TRUE / 1 / Y / YES / ON
     int getInt(const std::string& key, int def) const;
+    size_t count() const { return ini_.size(); }   // ini 에서 읽은 키 개수 (로그용)
 	
 	private:
     std::map<std::string, std::string> ini_;
@@ -376,7 +510,7 @@ class Config {
 // ---- [config.cpp] ----
 bool Config::loadIni(const std::wstring& path) {
     std::string t;
-    if (!util::readBin(path, t)) return false;
+    if (!util::readBin(path, t)) { logx::logf("ini 파일을 읽지 못했습니다 (없거나 접근 불가): %s", util::utf8(path).c_str()); return false; }
     if (t.compare(0, 3, "\xEF\xBB\xBF") == 0) t.erase(0, 3);
     size_t pos = 0;
     std::string line;
@@ -467,10 +601,14 @@ HttpResponse Http::post(const std::string& url, const std::string& body, const c
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &r.body);
     curl_easy_setopt(c, CURLOPT_ERRORBUFFER, err);
     curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+    logx::logf("HTTP POST 시작: host=%s, 본문 %zu바이트", logx::hostOf(url).c_str(), body.size());
+    auto h0 = Clock::now();
     CURLcode rc = curl_easy_perform(c);
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &r.status);
     r.ok = (rc == CURLE_OK);
     if (!r.ok) r.error = err[0] ? err : curl_easy_strerror(rc);
+    logx::logf("HTTP POST 완료: host=%s, curl=%d, HTTP %ld, 응답 %zu바이트, %.2f초%s%s", logx::hostOf(url).c_str(), (int)rc, r.status,
+               r.body.size(), logx::secSince(h0), r.ok ? "" : ", 오류=", r.ok ? "" : r.error.c_str());
     curl_slist_free_all(hdr);
     curl_easy_cleanup(c);
     return r;
@@ -595,16 +733,17 @@ class SmsNotifier : public Notifier {
 
 // ---- [sms_notifier.cpp] ----
 SendResult SmsNotifier::send(const Message& m) {
+    logx::logf("SMS 발송 시작: 수신 %zu명, 제목 길이 %zu바이트, 본문 %zu바이트", phones_.size(), m.subject.size(), m.plain.size());
     std::string key = cfg_.get("SOLAPI_API_KEY"), secret = cfg_.get("SOLAPI_API_SECRET"), from = cfg_.get("SOLAPI_FROM");
     if (key.empty() || secret.empty() || from.empty()) {
-        puts("오류: SMS 설정 필요 (SOLAPI_API_KEY, SOLAPI_API_SECRET, SOLAPI_FROM)");
+        logx::say("오류: SMS 설정 필요 (SOLAPI_API_KEY, SOLAPI_API_SECRET, SOLAPI_FROM)");
         return SendResult::configError();
 	}
 	
     std::string full = "[" + m.subject + "] " + m.plain;
     bool lms = util::krLen(full) > 90;
     std::string content = util::krCut(m.plain, 2000);
-    if (lms && content.size() < m.plain.size()) puts("경고: 본문이 2000바이트를 넘어 잘렸습니다.");
+    if (lms && content.size() < m.plain.size()) logx::say("경고: 본문이 2000바이트를 넘어 잘렸습니다.");
 	
     std::string json = "{\"messages\":[";
     for (size_t i = 0; i < phones_.size(); ++i) {
@@ -622,12 +761,12 @@ SendResult SmsNotifier::send(const Message& m) {
     std::strftime(date, sizeof date, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
     std::string salt, sig;
     if (!util::randomSalt(salt) || !util::hmacSha256Hex(secret, std::string(date) + salt, sig)) {
-        puts("오류: 서명 계산 실패");
+        logx::say("오류: 서명 계산 실패");
         return SendResult::fail();
 	}
     std::string auth = "Authorization: HMAC-SHA256 apiKey=" + key + ", date=" + date + ", salt=" + salt + ", signature=" + sig;
 	
-    printf("SMS(%s) %zu명 발송 요청 중... (%zu바이트)\n", lms ? "LMS" : "SMS", phones_.size(), util::krLen(full));
+    logx::sayf("SMS(%s) %zu명 발송 요청 중... (%zu바이트)\n", lms ? "LMS" : "SMS", phones_.size(), util::krLen(full));
     HttpResponse r = Http::postJson("https://api.solapi.com/messages/v4/send-many/detail", json, {auth});
 	
     // 접수 실패 건은 응답의 failedMessageList 에 담겨 옴 (비어 있으면 성공)
@@ -638,9 +777,9 @@ SendResult SmsNotifier::send(const Message& m) {
         failedItems = (p != std::string::npos && r.body[p] != ']');
 	}
     bool ok = (r.ok && r.status >= 200 && r.status < 300 && !failedItems);
-    if (ok) { puts("SMS 접수 성공"); return SendResult::ok(); }
-    if (!r.ok) printf("SMS 실패: %s\n", r.error.c_str());
-    else printf("SMS 실패 (HTTP %ld): %s\n", r.status, r.body.c_str());
+    if (ok) { logx::say("SMS 접수 성공"); return SendResult::ok(); }
+    if (!r.ok) logx::sayf("SMS 실패: %s\n", r.error.c_str());
+    else logx::sayf("SMS 실패 (HTTP %ld): %s\n", r.status, r.body.c_str());
     return SendResult::fail(!r.ok);
 }
 
@@ -677,8 +816,8 @@ std::string TelegramNotifier::apiUrl(const char* method) const {
 // getUpdates 응답에서 chat id 를 나온 순서대로 (오래된 것 -> 최근 것)
 bool TelegramNotifier::fetchIds(std::vector<std::string>& ids, bool& netFail) {
     HttpResponse r = Http::postForm(apiUrl("getUpdates"), "");
-    if (!r.ok) { netFail = true; printf("연결 실패: %s\n", r.error.c_str()); return false; }
-    if (r.status != 200) { printf("텔레그램 조회 실패 (HTTP %ld): %s\n", r.status, r.body.c_str()); return false; }
+    if (!r.ok) { netFail = true; logx::sayf("연결 실패: %s\n", r.error.c_str()); return false; }
+    if (r.status != 200) { logx::sayf("텔레그램 조회 실패 (HTTP %ld): %s\n", r.status, r.body.c_str()); return false; }
     const std::string k = "\"chat\":{\"id\":";
     size_t p = 0;
     while ((p = r.body.find(k, p)) != std::string::npos) {
@@ -692,12 +831,13 @@ bool TelegramNotifier::fetchIds(std::vector<std::string>& ids, bool& netFail) {
 
 bool TelegramNotifier::resolveChat(std::string& chat, bool& netFail) {
     std::string cfgChat = cfg_.get("TELEGRAM_CHAT_ID");
-    if (!cfgChat.empty()) { chat = cfgChat; return true; }
+    if (!cfgChat.empty()) { chat = cfgChat; logx::logf("텔레그램 chat id: 설정값(TELEGRAM_CHAT_ID) 사용"); return true; }
 	
     std::wstring f = util::exeDirFile(L"telegram_chat.txt");
     std::string saved;
-    if (util::readBin(f, saved) && !util::trim(saved).empty()) { chat = util::trim(saved); return true; }
+    if (util::readBin(f, saved) && !util::trim(saved).empty()) { chat = util::trim(saved); logx::logf("텔레그램 chat id: telegram_chat.txt 에 저장된 값 사용"); return true; }
 	
+    logx::logf("텔레그램 chat id: 설정/저장값 없음 -> getUpdates 로 자동 탐색");
     std::vector<std::string> ids;
     if (!fetchIds(ids, netFail)) return false;
     std::vector<std::string> priv;   // 개인 채팅(양수 id)만, 중복 제거
@@ -705,20 +845,21 @@ bool TelegramNotifier::resolveChat(std::string& chat, bool& netFail) {
 	if (id[0] != '-' && std::find(priv.begin(), priv.end(), id) == priv.end()) priv.push_back(id);
 	
     if (priv.empty()) {
-        puts("텔레그램: 봇에게 먼저 아무 메시지나 보내세요. 그러면 나 자신의 chat id 를 자동으로 찾습니다.");
+        logx::say("텔레그램: 봇에게 먼저 아무 메시지나 보내세요. 그러면 나 자신의 chat id 를 자동으로 찾습니다.");
         return false;
 	}
     if (priv.size() > 1) {
-        puts("텔레그램: 봇과 대화한 사람이 여러 명입니다. 본인 id 를 TELEGRAM_CHAT_ID 에 직접 지정하세요 (booting_Alert --telegram-chatid).");
+        logx::say("텔레그램: 봇과 대화한 사람이 여러 명입니다. 본인 id 를 TELEGRAM_CHAT_ID 에 직접 지정하세요 (booting_Alert --telegram-chatid).");
         return false;
 	}
     chat = priv[0];
-    if (util::writeBin(f, chat)) puts("텔레그램 chat id 를 자동으로 찾아 telegram_chat.txt 에 저장했습니다.");
+    if (util::writeBin(f, chat)) logx::say("텔레그램 chat id 를 자동으로 찾아 telegram_chat.txt 에 저장했습니다.");
     return true;
 }
 
 SendResult TelegramNotifier::send(const Message& m) {
-    if (!configured()) { puts("오류: TELEGRAM_BOT_TOKEN 이 필요합니다."); return SendResult::configError(); }
+    logx::logf("텔레그램 발송 시작: 본문 %zu바이트", m.plain.size());
+    if (!configured()) { logx::say("오류: TELEGRAM_BOT_TOKEN 이 필요합니다."); return SendResult::configError(); }
 	
     bool netFail = false;
     std::string chat;
@@ -727,31 +868,33 @@ SendResult TelegramNotifier::send(const Message& m) {
     std::string full = m.subject.empty() ? m.plain : "[" + m.subject + "] " + m.plain;
     std::string url = apiUrl("sendMessage");
 	
-    puts("텔레그램(나에게) 발송 요청 중...");
+    logx::say("텔레그램(나에게) 발송 요청 중...");
     size_t pos = 0;
     while (pos < full.size()) {
         std::string chunk = util::cutChars(full.substr(pos), 4000);
         if (chunk.empty()) break;
+        logx::logf("텔레그램 조각 전송 시작: 위치 %zu/%zu바이트, 이 조각 %zu바이트", pos, full.size(), chunk.size());
         HttpResponse r = Http::postForm(url, "chat_id=" + util::pctEncode(chat) + "&text=" + util::pctEncode(chunk));
-        if (!r.ok) { printf("연결 실패: %s\n", r.error.c_str()); return SendResult::fail(true); }
+        if (!r.ok) { logx::sayf("연결 실패: %s\n", r.error.c_str()); return SendResult::fail(true); }
         if (r.status != 200 || r.body.find("\"ok\":true") == std::string::npos) {
-            printf("텔레그램 발송 실패 (HTTP %ld): %s\n", r.status, r.body.c_str());
+            logx::sayf("텔레그램 발송 실패 (HTTP %ld): %s\n", r.status, r.body.c_str());
             return SendResult::fail();
 		}
         pos += chunk.size();
+        logx::logf("텔레그램 조각 전송 완료: 누적 %zu/%zu바이트", pos, full.size());
 	}
-    puts("텔레그램 발송 성공");
+    logx::say("텔레그램 발송 성공");
     return SendResult::ok();
 }
 
 int TelegramNotifier::listChatIds() {
-    if (!configured()) { puts("오류: TELEGRAM_BOT_TOKEN 이 필요합니다."); return 1; }
+    if (!configured()) { logx::say("오류: TELEGRAM_BOT_TOKEN 이 필요합니다."); return 1; }
     std::vector<std::string> ids, uniq;
     bool netFail = false;
     if (!fetchIds(ids, netFail)) return 2;
     for (const auto& id : ids) if (std::find(uniq.begin(), uniq.end(), id) == uniq.end()) uniq.push_back(id);
-    if (uniq.empty()) { puts("받은 메시지가 없습니다. 텔레그램에서 봇에게 아무 메시지나 보낸 뒤 다시 실행하세요."); return 2; }
-    for (const auto& id : uniq) printf("TELEGRAM_CHAT_ID=%s\n", id.c_str());
+    if (uniq.empty()) { logx::say("받은 메시지가 없습니다. 텔레그램에서 봇에게 아무 메시지나 보낸 뒤 다시 실행하세요."); return 2; }
+    for (const auto& id : uniq) logx::sayf("TELEGRAM_CHAT_ID=%s\n", id.c_str());
     return 0;
 }
 
@@ -848,13 +991,14 @@ size_t EmailNotifier::readCb(char* ptr, size_t size, size_t nmemb, void* userp) 
     u->pos += n;
     if (n > 0) u->last = Clock::now();
     int pct = u->data->empty() ? 100 : (int)(u->pos * 100 / u->data->size());
-    if (pct >= u->pct + 5) { printf("\r  업로드 %d%%", pct); fflush(stdout); u->pct = pct; }
+    if (pct >= u->pct + 5) { logx::conf("\r  업로드 %d%%", pct); fflush(stdout); u->pct = pct; }
     return n;
 }
 
 SendResult EmailNotifier::send(const Message& m) {
+    logx::logf("이메일 발송 시작: 수신 %zu건, 첨부 폴더=%s", rcpts_.size(), attachDir_.empty() ? "(없음)" : attachDir_.c_str());
     if (pass_.empty()) {
-        puts("오류: Gmail 앱 비밀번호가 없습니다. booting_Alert.ini 의 GMAIL_APP_PASSWORD 를 설정하거나 인자로 전달하세요.");
+        logx::say("오류: Gmail 앱 비밀번호가 없습니다. booting_Alert.ini 의 GMAIL_APP_PASSWORD 를 설정하거나 인자로 전달하세요.");
         return SendResult::configError();
 	}
 	
@@ -862,10 +1006,11 @@ SendResult EmailNotifier::send(const Message& m) {
     std::vector<Attach> attachments;
     if (!attachDir_.empty()) {
         std::string aerr;
-        if (!loadFolder(attachDir_, attachments, aerr)) { puts(("오류: " + aerr).c_str()); return SendResult::configError(); }
+        if (!loadFolder(attachDir_, attachments, aerr)) { logx::say(("오류: " + aerr).c_str()); return SendResult::configError(); }
 	}
 	
     auto t1 = Clock::now();
+    logx::logf("이메일 첨부 로드 완료: %zu개", attachments.size());
 	
     // 메시지 조립 (Date, Message-ID 는 Gmail 이 자동으로 채움)
     const std::string B = "----=_booting_Alert_8f3c1a7e";   // Base64 문자에 없는 '-', '=', '_' 포함 -> 충돌 없음
@@ -892,10 +1037,11 @@ SendResult EmailNotifier::send(const Message& m) {
     msg += "--" + B + "--\r\n";
 	
     auto t2 = Clock::now();
+    logx::logf("이메일 메시지 조립 완료: %.2f MB", msg.size() / 1048576.0);
 	
     // 전송
     CURL* curl = curl_easy_init();
-    if (!curl) { puts("오류: curl 초기화 실패"); return SendResult::fail(); }
+    if (!curl) { logx::say("오류: curl 초기화 실패"); return SendResult::fail(); }
     char err[CURL_ERROR_SIZE] = {0};
     Upload up{&msg, 0, 0, false, {}, {}};
 	
@@ -917,29 +1063,30 @@ SendResult EmailNotifier::send(const Message& m) {
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, err);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);
 	
-    printf("%s -> %s 전송 중... (메시지 %.1f MB, 수신 %zu건)\n", from_.c_str(), toHeader_.c_str(), msg.size() / 1048576.0, rcpts_.size());
+    logx::sayf("%s -> %s 전송 중... (메시지 %.1f MB, 수신 %zu건)\n", from_.c_str(), toHeader_.c_str(), msg.size() / 1048576.0, rcpts_.size());
     for (const Attach& a : attachments)
-	printf("  첨부: %s (%zu KB)\n", a.name.c_str(), (a.data.size() + 1023) / 1024);
+	logx::sayf("  첨부: %s (%zu KB)\n", a.name.c_str(), (a.data.size() + 1023) / 1024);
 	
     CURLcode rc = curl_easy_perform(curl);
     auto t3 = Clock::now();
-    printf("\n");
+    logx::logf("SMTP 전송 종료: curl=%d (0=성공)", (int)rc);
+    logx::sayf("\n");
     bool retryable = false;
-    if (rc == CURLE_OK) puts("전송 성공");
+    if (rc == CURLE_OK) logx::say("전송 성공");
     else {
         // 접속/통신 단계 오류만 재시도 대상 (로그인 거부 등은 제외)
         retryable = (rc == CURLE_COULDNT_RESOLVE_HOST || rc == CURLE_COULDNT_CONNECT || rc == CURLE_OPERATION_TIMEDOUT ||
 		rc == CURLE_SEND_ERROR || rc == CURLE_RECV_ERROR);
-        printf("전송 실패: %s\n", err[0] ? err : curl_easy_strerror(rc));
+        logx::sayf("전송 실패: %s\n", err[0] ? err : curl_easy_strerror(rc));
 	}
 	
     auto sec = [](Clock::time_point a, Clock::time_point b) { return std::chrono::duration<double>(b - a).count(); };
     curl_off_t speed = 0;   // 바이트/초
     curl_easy_getinfo(curl, CURLINFO_SPEED_UPLOAD_T, &speed);
-    printf("시간: 읽기 %.2f초 / 인코딩 %.2f초 / 전송 %.2f초 (업로드 평균 %.2f MB/s)\n",
+    logx::sayf("시간: 읽기 %.2f초 / 인코딩 %.2f초 / 전송 %.2f초 (업로드 평균 %.2f MB/s)\n",
 	sec(t0_, t1), sec(t1, t2), sec(t2, t3), (double)speed / 1048576.0);
     if (up.started)
-	printf("전송 세부: 연결·로그인 %.2f초 / 데이터 업로드 %.2f초 / 서버 응답 대기 %.2f초\n",
+	logx::sayf("전송 세부: 연결·로그인 %.2f초 / 데이터 업로드 %.2f초 / 서버 응답 대기 %.2f초\n",
 	sec(t2, up.first), sec(up.first, up.last), sec(up.last, t3));
 	
     curl_slist_free_all(rcpt);
@@ -990,6 +1137,7 @@ bool LocalCallbackServer::waitForCode(int port, const std::string& path, const s
         return false;
 	}
 	
+    logx::logf("콜백 서버 대기 시작: 127.0.0.1:%d%s (최대 %d초)", port, path.c_str(), timeoutSec);
     bool done = false, ok = false;
     auto deadline = Clock::now() + std::chrono::seconds(timeoutSec);
     while (!done && Clock::now() < deadline) {
@@ -1024,6 +1172,7 @@ bool LocalCallbackServer::waitForCode(int port, const std::string& path, const s
 		}
         size_t qp = target.find('?');
         std::string pathPart = target.substr(0, qp);
+        logx::logf("콜백 서버 요청 수신: 경로=%s (쿼리는 기록하지 않음)", pathPart.c_str());
         std::string query = (qp == std::string::npos) ? std::string() : target.substr(qp + 1);
 		
         std::string html;
@@ -1055,6 +1204,7 @@ bool LocalCallbackServer::waitForCode(int port, const std::string& path, const s
     closesocket(ls);
     WSACleanup();
     if (!done) errMsg = "시간 초과 (브라우저에서 동의를 완료하지 않음)";
+    logx::logf("콜백 서버 종료: %s", ok ? "code 수신 성공" : errMsg.c_str());
     return ok;
 }
 
@@ -1098,34 +1248,34 @@ bool KakaoNotifier::authorizeFlow(const std::string& key, const std::string& sec
     std::string redirect = cfg_.get("KAKAO_REDIRECT_URI", "http://localhost:8080/callback");
 	
     std::string state;
-    if (!util::randomSalt(state)) { puts("오류: 난수 생성 실패"); return false; }
+    if (!util::randomSalt(state)) { logx::say("오류: 난수 생성 실패"); return false; }
 	
     std::string url = "https://kauth.kakao.com/oauth/authorize?client_id=" + util::pctEncode(key) +
 	"&redirect_uri=" + util::pctEncode(redirect) +
 	"&response_type=code&scope=talk_message&state=" + state;
 	
-    puts("[카카오 인증] 브라우저를 엽니다. 로그인 후 '카카오톡 메시지 전송'에 동의하세요.");
-    printf("  (자동으로 안 열리면 아래 주소를 직접 여세요)\n  %s\n", url.c_str());
+    logx::say("[카카오 인증] 브라우저를 엽니다. 로그인 후 '카카오톡 메시지 전송'에 동의하세요.");
+    logx::say("  (자동으로 안 열리면 아래 주소를 직접 여세요)"); logx::conf("  %s\n", url.c_str());
     ShellExecuteW(nullptr, L"open", util::wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 	
     std::string code, err;
     int port = 0;
     std::string path;
     if (LocalCallbackServer::parseUri(redirect, port, path)) {
-        puts("  동의 완료를 기다리는 중... (최대 3분)");
+        logx::say("  동의 완료를 기다리는 중... (최대 3분)");
         if (!LocalCallbackServer::waitForCode(port, path, state, code, err, 180)) {
-            printf("인증 실패: %s\n", err.c_str());
+            logx::sayf("인증 실패: %s\n", err.c_str());
             return false;
 		}
 		} else {
         // localhost 가 아닌 Redirect URI: 주소창 전체 URL 을 붙여넣기
-        puts("  동의 후 이동된 페이지의 주소창 URL 전체를 복사해서 붙여넣고 Enter:");
+        logx::say("  동의 후 이동된 페이지의 주소창 URL 전체를 복사해서 붙여넣고 Enter:");
         char line[4096];
         if (!fgets(line, sizeof line, stdin)) return false;
         std::string u = util::trim(line);
         size_t q = u.find('?');
         code = util::queryParam(q == std::string::npos ? u : u.substr(q + 1), "code");
-        if (code.empty()) { puts("오류: URL 에서 code 를 찾지 못했습니다."); return false; }
+        if (code.empty()) { logx::say("오류: URL 에서 code 를 찾지 못했습니다."); return false; }
 	}
 	
     // code -> 토큰
@@ -1133,28 +1283,28 @@ bool KakaoNotifier::authorizeFlow(const std::string& key, const std::string& sec
 	"&redirect_uri=" + util::pctEncode(redirect) + "&code=" + util::pctEncode(code);
     if (!secret.empty()) form += "&client_secret=" + util::pctEncode(secret);
     HttpResponse r = Http::postForm(kKakaoTokenUrl, form);
-    if (!r.ok) { printf("연결 실패: %s\n", r.error.c_str()); return false; }
+    if (!r.ok) { logx::sayf("연결 실패: %s\n", r.error.c_str()); return false; }
 	
     std::string rt = util::jsonStr(r.body, "refresh_token");
     if (r.status != 200 || rt.empty()) {
-        printf("토큰 발급 실패 (HTTP %ld): %s\n", r.status, r.body.c_str());
+        logx::sayf("토큰 발급 실패 (HTTP %ld): %s\n", r.status, logx::redact(r.body).c_str());
         return false;
 	}
     if (util::jsonStr(r.body, "scope").find("talk_message") == std::string::npos) {
-        puts("오류: 토큰에 talk_message 권한이 없습니다.");
-        puts("  카카오 콘솔에서 [동의항목 > 카카오톡 메시지 전송] 설정과");
-        puts("  [제품 설정 > 카카오톡 메시지] 활성화를 확인한 뒤 다시 실행하세요.");
+        logx::say("오류: 토큰에 talk_message 권한이 없습니다.");
+        logx::say("  카카오 콘솔에서 [동의항목 > 카카오톡 메시지 전송] 설정과");
+        logx::say("  [제품 설정 > 카카오톡 메시지] 활성화를 확인한 뒤 다시 실행하세요.");
         return false;
 	}
 	
-    if (!util::writeBin(tokenFile, rt)) { puts("오류: kakao_token.txt 를 저장하지 못했습니다."); return false; }
-    puts("[카카오 인증] 완료. refresh_token 을 kakao_token.txt 에 저장했습니다.");
+    if (!util::writeBin(tokenFile, rt)) { logx::say("오류: kakao_token.txt 를 저장하지 못했습니다."); return false; }
+    logx::say("[카카오 인증] 완료. refresh_token 을 kakao_token.txt 에 저장했습니다.");
     return true;
 }
 
 SendResult KakaoNotifier::authorize() {
     std::string key = cfg_.get("KAKAO_REST_API_KEY");
-    if (key.empty()) { puts("오류: KAKAO_REST_API_KEY 가 필요합니다."); return SendResult::configError(); }
+    if (key.empty()) { logx::say("오류: KAKAO_REST_API_KEY 가 필요합니다."); return SendResult::configError(); }
     return authorizeFlow(key, cfg_.get("KAKAO_CLIENT_SECRET"), kakaoTokenPath()) ? SendResult::ok() : SendResult::fail();
 }
 
@@ -1166,26 +1316,30 @@ void KakaoNotifier::notifyReauthNeeded() {
     if (util::readBin(af, t)) last = std::atoll(util::trim(t).c_str());
     int hours = cfg_.getInt("ALERT_INTERVAL_HOURS", 24);
     if (hours > 0 && last > 0 && now >= last && now - last < (long long)hours * 3600) {
-        printf("재인증 알림은 최근 %d시간 안에 이미 보냈습니다. 이번에는 건너뜁니다.\n", hours);
+        logx::sayf("재인증 알림은 최근 %d시간 안에 이미 보냈습니다. 이번에는 건너뜁니다.\n", hours);
         return;
 	}
+    logx::logf("카카오 재인증 알림 발송 시작 (SMS/텔레그램 콜백)");
     if (alert_) alert_("카카오 재인증 필요. PC에서 booting_Alert.exe --kakao-auth 실행");
+    logx::logf("카카오 재인증 알림 발송 호출 끝");
     util::writeBin(af, std::to_string(now));
 }
 
 SendResult KakaoNotifier::execute(const Message* m) {
+    logx::logf("카카오 작업 시작: %s", m ? "메시지 발송" : "토큰 갱신만(keepalive)");
     std::string key = cfg_.get("KAKAO_REST_API_KEY");
-    if (key.empty()) { puts("오류: KAKAO_REST_API_KEY 가 필요합니다."); return SendResult::configError(); }
+    if (key.empty()) { logx::say("오류: KAKAO_REST_API_KEY 가 필요합니다."); return SendResult::configError(); }
     std::string secret = cfg_.get("KAKAO_CLIENT_SECRET");
     std::string link = cfg_.get("KAKAO_LINK_URL", "https://developers.kakao.com");   // 앱 플랫폼(Web)에 등록된 도메인
     bool noAuth = cfg_.getBool("KAKAO_NO_AUTH");   // 무인 모드: 브라우저 인증을 시도하지 않음
     std::wstring tf = kakaoTokenPath();
+    logx::logf("카카오 설정: 무인모드=%d, 토큰파일=%s", (int)noAuth, util::utf8(tf).c_str());
 	
     std::string text;
     if (m) {
         std::string full = "[" + m->subject + "] " + m->plain;
         text = util::cutChars(full, 200);
-        if (text.size() < full.size()) puts("경고: 카카오톡 메시지는 200자까지라 뒤쪽이 잘렸습니다.");
+        if (text.size() < full.size()) logx::say("경고: 카카오톡 메시지는 200자까지라 뒤쪽이 잘렸습니다.");
 	}
 	
     bool netFail = false, needAlert = false, reauthed = false;
@@ -1193,9 +1347,10 @@ SendResult KakaoNotifier::execute(const Message* m) {
 	
     for (;;) {
         bool need = false;   // 재인증 필요 여부
+        logx::logf("카카오 시도 시작 (재인증 %s)", reauthed ? "후" : "전");
         std::string rt;
         if (!util::readBin(tf, rt) || util::trim(rt).empty()) {
-            puts("kakao_token.txt 가 없거나 비어 있습니다.");
+            logx::say("kakao_token.txt 가 없거나 비어 있습니다.");
             need = true;
 			} else {
             rt = util::trim(rt);
@@ -1203,29 +1358,30 @@ SendResult KakaoNotifier::execute(const Message* m) {
             std::string form = "grant_type=refresh_token&client_id=" + util::pctEncode(key) + "&refresh_token=" + util::pctEncode(rt);
             if (!secret.empty()) form += "&client_secret=" + util::pctEncode(secret);
             HttpResponse r = Http::postForm(kKakaoTokenUrl, form);
-            if (!r.ok) { netFail = true; printf("연결 실패: %s\n", r.error.c_str()); break; }
+            if (!r.ok) { netFail = true; logx::sayf("연결 실패: %s\n", r.error.c_str()); break; }
             std::string at = util::jsonStr(r.body, "access_token");
+            logx::logf("카카오 토큰 갱신 응답: HTTP %ld, access_token %s", r.status, at.empty() ? "없음" : "받음");
             if (r.status != 200 || at.empty()) {
-                printf("카카오 토큰 갱신 실패 (HTTP %ld): %s\n", r.status, r.body.c_str());
+                logx::sayf("카카오 토큰 갱신 실패 (HTTP %ld): %s\n", r.status, logx::redact(r.body).c_str());
                 need = (r.body.find("invalid_grant") != std::string::npos);
                 if (!need) break;
 				} else {
                 std::string nrt = util::jsonStr(r.body, "refresh_token");   // 남은 기간이 짧을 때만 새로 옴
                 if (!nrt.empty()) {
-                    if (util::writeBin(tf, nrt)) puts("카카오 refresh_token 갱신됨");
-                    else printf("경고: 새 refresh_token 저장 실패. 직접 갱신하세요: %s\n", nrt.c_str());
+                    if (util::writeBin(tf, nrt)) logx::say("카카오 refresh_token 갱신됨");
+                    else { logx::conf("경고: 새 refresh_token 저장 실패. 직접 갱신하세요: %s\n", nrt.c_str()); logx::logf("경고: 새 refresh_token 저장 실패 (토큰 값은 로그에 남기지 않음)"); }
 				}
 				
-                if (!m) { puts("카카오 토큰 정상 (갱신만 수행)"); result = 0; break; }
+                if (!m) { logx::say("카카오 토큰 정상 (갱신만 수행)"); result = 0; break; }
 				
                 // 2) 나에게 보내기
                 std::string tmpl = "{\"object_type\":\"text\",\"text\":\"" + util::jsonEsc(text) + "\",\"link\":{\"web_url\":\"" +
 				util::jsonEsc(link) + "\",\"mobile_web_url\":\"" + util::jsonEsc(link) + "\"}}";
-                puts("카카오톡(나에게) 발송 요청 중...");
+                logx::say("카카오톡(나에게) 발송 요청 중...");
                 HttpResponse s = Http::postForm(kKakaoMemoUrl, "template_object=" + util::pctEncode(tmpl), {"Authorization: Bearer " + at});
-                if (!s.ok) { netFail = true; printf("연결 실패: %s\n", s.error.c_str()); break; }
-                if (s.status == 200) { puts("카카오톡 발송 성공"); result = 0; break; }
-                printf("카카오톡 발송 실패 (HTTP %ld): %s\n", s.status, s.body.c_str());
+                if (!s.ok) { netFail = true; logx::sayf("연결 실패: %s\n", s.error.c_str()); break; }
+                if (s.status == 200) { logx::say("카카오톡 발송 성공"); result = 0; break; }
+                logx::sayf("카카오톡 발송 실패 (HTTP %ld): %s\n", s.status, s.body.c_str());
                 need = (s.body.find("insufficient scopes") != std::string::npos);   // talk_message 권한 없음
                 if (!need) break;
 			}
@@ -1233,16 +1389,17 @@ SendResult KakaoNotifier::execute(const Message* m) {
 		
         if (!need) break;
         if (noAuth) {
-            puts("카카오 재인증이 필요합니다 (무인 모드). PC에서 booting_Alert.exe --kakao-auth 를 실행하세요.");
+            logx::say("카카오 재인증이 필요합니다 (무인 모드). PC에서 booting_Alert.exe --kakao-auth 를 실행하세요.");
             needAlert = true;
             break;
 		}
         if (reauthed) break;
         reauthed = true;
-        puts("카카오 재인증을 시작합니다...");
+        logx::say("카카오 재인증을 시작합니다...");
         if (!authorizeFlow(key, secret, tf)) break;
 	}
 	
+    logx::logf("카카오 작업 결과: result=%d (0=성공), 연결오류=%d, 재인증알림필요=%d", result, (int)netFail, (int)needAlert);
     if (needAlert) notifyReauthNeeded();
     if (result == 0) DeleteFileW(kakaoAlertPath().c_str());   // 정상 복구되면 알림 기록 초기화
     return result == 0 ? SendResult::ok() : SendResult::fail(netFail);
@@ -1274,7 +1431,7 @@ class RetryPolicy {
 class Dispatcher {
 	public:
     explicit Dispatcher(const Config& cfg) : cfg_(cfg), retry_(cfg) {}
-    void add(std::unique_ptr<Notifier> n) { notifiers_.push_back(std::move(n)); }
+    void add(std::unique_ptr<Notifier> n) { logx::logf("서비스 등록: %s", n->name()); notifiers_.push_back(std::move(n)); }
     // add 한 서비스마다 쓰레드를 하나씩 만들어 동시에 발송 (쓰레드 안에서 네트워크 대기 -> 재시도 포함 발송).
     // 결과는 확인하지 않고, 모든 쓰레드가 끝나길 기다린 뒤 항상 0 을 반환
     int run(const Message& m);
@@ -1299,29 +1456,34 @@ bool NetworkWaiter::dnsOk(const std::string& host) {
 
 void NetworkWaiter::wait(const Config& cfg, const std::vector<std::string>& hosts) {
     int maxSec = cfg.getInt("NET_WAIT_SEC", 60);
-    if (maxSec <= 0 || hosts.empty()) return;
+    if (maxSec <= 0 || hosts.empty()) { logx::logf("네트워크 대기 생략 (NET_WAIT_SEC=%d, 호스트 %zu개)", maxSec, hosts.size()); return; }
+    { std::string hs; for (const auto& h : hosts) hs += (hs.empty() ? "" : ",") + h; logx::logf("네트워크 대기 시작: hosts=%s, 최대 %d초", hs.c_str(), maxSec); }
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return;
     auto start = Clock::now();
     bool waited = false, ready = false;
     for (;;) {
-        for (const auto& h : hosts) if (dnsOk(h)) { ready = true; break; }
+        for (const auto& h : hosts) if (dnsOk(h)) { ready = true; logx::logf("DNS 확인됨: %s", h.c_str()); break; }
         if (ready) break;
         if (std::chrono::duration<double>(Clock::now() - start).count() >= maxSec) break;
-        if (!waited) { printf("네트워크 연결 대기 중... (최대 %d초)\n", maxSec); waited = true; }
+        if (!waited) { logx::sayf("네트워크 연결 대기 중... (최대 %d초)\n", maxSec); waited = true; }
+        logx::logf("DNS 미확인, 3초 후 재확인 (경과 %.0f초)", logx::secSince(start));
         Sleep(3000);
 	}
-    if (!ready) puts("경고: 네트워크가 확인되지 않았지만 발송을 시도합니다.");
-    else if (waited) puts("네트워크 연결 확인됨");
+    if (!ready) logx::say("경고: 네트워크가 확인되지 않았지만 발송을 시도합니다.");
+    else if (waited) logx::say("네트워크 연결 확인됨");
+    logx::logf("네트워크 대기 종료: ready=%d, 경과 %.1f초", (int)ready, logx::secSince(start));
     WSACleanup();
 }
 
 SendResult RetryPolicy::run(const char* name, const std::function<SendResult()>& fn) const {
     SendResult r;
     for (int i = 0;; ++i) {
+        logx::logf("%s: 발송 시도 %d/%d 시작", name, i + 1, tries_ + 1);
         r = fn();
+        logx::logf("%s: 발송 시도 %d 결과 code=%d (0=성공,1=설정오류,2=실패), 재시도가능=%d", name, i + 1, r.code, (int)r.retryable);
         if (r.code == 0 || !r.retryable || i >= tries_) break;
-        printf("%s: 네트워크 오류, %d초 후 재시도 (%d/%d)\n", name, delaySec_, i + 1, tries_);
+        logx::sayf("%s: 네트워크 오류, %d초 후 재시도 (%d/%d)\n", name, delaySec_, i + 1, tries_);
         Sleep((DWORD)delaySec_ * 1000);
 	}
     return r;
@@ -1330,17 +1492,28 @@ SendResult RetryPolicy::run(const char* name, const std::function<SendResult()>&
 int Dispatcher::run(const Message& m) {
     // 서비스마다 쓰레드 하나. 각자 자기 호스트만 기다리므로 한 서비스가 느려도 다른 서비스는 영향 없음.
     // join 은 결과를 보려는 것이 아님: main 이 먼저 끝나면 프로세스가 종료되어 쓰레드가 중간에 죽기 때문.
+    logx::logf("발송 쓰레드 %zu개 생성 시작", notifiers_.size());
     std::vector<std::thread> threads;
     for (const auto& n : notifiers_) {
         Notifier* p = n.get();
         threads.emplace_back([this, p, &m] {
+            logx::setTag(p->name());   // 이 쓰레드의 모든 로그 줄에 서비스 이름이 붙음
+            auto tStart = Clock::now();
+            logx::logf("=== 쓰레드 시작 ===");
+            SendResult res = SendResult::fail();
             try {
                 NetworkWaiter::wait(cfg_, p->hosts());
-                retry_.run(p->name(), [&] { return p->send(m); });   // 반환값(결과)은 버림
-            } catch (...) {}   // 쓰레드 밖으로 예외가 나가면 프로세스가 종료되므로 삼킴
+                res = retry_.run(p->name(), [&] { return p->send(m); });   // 결과는 로그에만 남기고 프로그램 동작에는 영향 없음
+            } catch (const std::exception& e) {
+                logx::logf("예외 발생: %s", e.what());
+            } catch (...) {   // 쓰레드 밖으로 예외가 나가면 프로세스가 종료되므로 삼킴
+                logx::logf("알 수 없는 예외 발생");
+            }
+            logx::logf("=== 쓰레드 종료 직전: 최종 결과 code=%d (0=성공,1=설정오류,2=실패), 소요 %.1f초 ===", res.code, logx::secSince(tStart));
         });
     }
     for (auto& t : threads) t.join();
+    logx::logf("모든 발송 쓰레드 종료 확인 (join 완료)");
     return 0;
 }
 
@@ -1360,10 +1533,10 @@ class App {
 };
 
 int App::usage() const {
-    puts("사용법: booting_Alert <메일파일(UTF-8)> [첨부폴더]   (앱 비밀번호는 booting_Alert.ini 의 GMAIL_APP_PASSWORD)");
-    puts("        booting_Alert <앱비밀번호> <메일파일(UTF-8)> [첨부폴더]");
-    puts("        booting_Alert --kakao-auth | --kakao-keepalive | --telegram-chatid");
-    puts("메일 파일 형식: 1줄=수신자ID, 2줄=제목, 3줄~=본문  (ini 에 수신자가 있으면 1줄=제목, 2줄~=본문)");
+    logx::say("사용법: booting_Alert <메일파일(UTF-8)> [첨부폴더]   (앱 비밀번호는 booting_Alert.ini 의 GMAIL_APP_PASSWORD)");
+    logx::say("        booting_Alert <앱비밀번호> <메일파일(UTF-8)> [첨부폴더]");
+    logx::say("        booting_Alert --kakao-auth | --kakao-keepalive | --telegram-chatid");
+    logx::say("메일 파일 형식: 1줄=수신자ID, 2줄=제목, 3줄~=본문  (ini 에 수신자가 있으면 1줄=제목, 2줄~=본문)");
     return 1;
 }
 
@@ -1371,6 +1544,7 @@ int App::usage() const {
 KakaoNotifier::AlertFn App::makeAlert() {
     return [this](const std::string& text) {
         Message am{"booting_Alert", text, ""};
+        logx::logf("재인증 알림 콜백 호출: SMS번호 설정=%d, 텔레그램 설정=%d", (int)cfg_.has("KAKAO_ALERT_PHONE"), (int)cfg_.has("TELEGRAM_BOT_TOKEN"));
         std::string ph;
         if (util::toPhone(cfg_.get("KAKAO_ALERT_PHONE"), ph)) SmsNotifier(cfg_, std::vector<std::string>{ph}).send(am);
         TelegramNotifier tg(cfg_);
@@ -1379,19 +1553,24 @@ KakaoNotifier::AlertFn App::makeAlert() {
 }
 
 int App::keepAlive() {   // 토큰 갱신만 (스케줄러용)
+    logx::setTag("kakao-keepalive");
+    logx::logf("=== keepalive 시작 ===");
     KakaoNotifier kakao(cfg_, makeAlert());
     NetworkWaiter::wait(cfg_, kakao.hosts());
-    return RetryPolicy(cfg_).run(kakao.name(), [&] { return kakao.keepAlive(); }).code;
+    SendResult kr = RetryPolicy(cfg_).run(kakao.name(), [&] { return kakao.keepAlive(); });
+    logx::logf("=== keepalive 종료 직전: code=%d ===", kr.code);
+    return kr.code;
 }
 
 int App::run(int argc, char** argv) {
-    cfg_.loadIni(util::exeDirFile(L"booting_Alert.ini"));
+    bool iniOk = cfg_.loadIni(util::exeDirFile(L"booting_Alert.ini"));
+    logx::logf("ini 로드: %s (키 %zu개, 값은 기록하지 않음)", iniOk ? "성공" : "실패/없음", cfg_.count());
 	
     if (argc == 2) {
         std::string a = argv[1];
-        if (a == "--telegram-chatid") return TelegramNotifier(cfg_).listChatIds();
-        if (a == "--kakao-auth") return KakaoNotifier(cfg_, nullptr).authorize().code;
-        if (a == "--kakao-keepalive") return keepAlive();
+        if (a == "--telegram-chatid") { logx::logf("모드: --telegram-chatid"); return TelegramNotifier(cfg_).listChatIds(); }
+        if (a == "--kakao-auth") { logx::logf("모드: --kakao-auth"); return KakaoNotifier(cfg_, nullptr).authorize().code; }
+        if (a == "--kakao-keepalive") { logx::logf("모드: --kakao-keepalive"); return keepAlive(); }
 	}
     auto t0 = Clock::now();
 	
@@ -1403,18 +1582,19 @@ int App::run(int argc, char** argv) {
     if (argc == 2) { mailArg = argv[1]; }
     else if (argc == 3 && util::isDir(argv[2])) { mailArg = argv[1]; attArg = argv[2]; }
     else if (argc == 3 || argc == 4) { pass = argv[1]; mailArg = argv[2]; if (argc == 4) attArg = argv[3]; }
-    else return usage();
+    else { logx::logf("인자 개수가 맞지 않아 사용법을 출력하고 종료합니다 (argc=%d)", argc); return usage(); }
     pass.erase(std::remove(pass.begin(), pass.end(), ' '), pass.end());
+    logx::logf("인자 해석: 메일파일=%s, 첨부폴더=%s, 앱 비밀번호 %s (값은 기록하지 않음)", mailArg.c_str(), attArg.empty() ? "(없음)" : attArg.c_str(), pass.empty() ? "없음" : "있음");
 	
     std::string from = cfg_.get("GMAIL_USER", EmailNotifier::kDefaultSender);
     if (from.find('@') == std::string::npos) {
-        puts("오류: 발신자 주소가 없습니다. GMAIL_USER 설정 또는 EmailNotifier::kDefaultSender 수정.");
+        logx::say("오류: 발신자 주소가 없습니다. GMAIL_USER 설정 또는 EmailNotifier::kDefaultSender 수정.");
         return 1;
 	}
 	
     // 메일 파일 파싱 (UTF-8, BOM 제거)
     std::string text;
-    if (!util::readBin(util::wide(mailArg), text)) { puts("오류: 메일 파일을 열 수 없습니다."); return 1; }
+    if (!util::readBin(util::wide(mailArg), text)) { logx::say("오류: 메일 파일을 열 수 없습니다."); return 1; }
     if (text.compare(0, 3, "\xEF\xBB\xBF") == 0) text.erase(0, 3);
 	
     size_t pos = 0;
@@ -1425,7 +1605,7 @@ int App::run(int argc, char** argv) {
         to = cfgTo;
         util::nextLine(text, pos, subject);
         if (Recipients::looksLikeList(util::trim(subject)))
-		puts("경고: ini 에 수신자가 있으면 메일 파일 1줄은 제목입니다. 1줄의 옛 수신자 줄을 삭제하세요.");
+		logx::say("경고: ini 에 수신자가 있으면 메일 파일 1줄은 제목입니다. 1줄의 옛 수신자 줄을 삭제하세요.");
 		} else {
         // 기존 방식: 메일 파일 1줄=수신자, 2줄=제목, 3줄~=본문
         util::nextLine(text, pos, to);
@@ -1433,6 +1613,7 @@ int App::run(int argc, char** argv) {
 	}
     subject = util::trim(subject);
     if (subject.empty()) subject = "(제목 없음)";
+    logx::logf("메일 파일 로드: 전체 %zu바이트, 제목='%s', 수신자 출처=%s", text.size(), subject.c_str(), cfgTo.empty() ? "메일 파일 1줄" : "ini/환경변수");
 	
     Recipients rcp = Recipients::parse(to);
 	
@@ -1442,8 +1623,9 @@ int App::run(int argc, char** argv) {
 	if (std::find(rcp.emails.begin(), rcp.emails.end(), r) == rcp.emails.end() &&
 	std::find(bcc.begin(), bcc.end(), r) == bcc.end()) bcc.push_back(r);
 	
+    logx::logf("수신자 집계: 이메일 %zu, 숨은참조 %zu, 전화 %zu, 카카오 %d, 텔레그램 %d", rcp.emails.size(), bcc.size(), rcp.phones.size(), (int)rcp.kakao, (int)rcp.telegram);
     if (rcp.empty() && bcc.empty()) {
-        puts("오류: 수신자가 없습니다 (메일 파일 1줄 또는 ini 의 EMAIL_TO / SOLAPI_TO / KAKAO / TELEGRAM).");
+        logx::say("오류: 수신자가 없습니다 (메일 파일 1줄 또는 ini 의 EMAIL_TO / SOLAPI_TO / KAKAO / TELEGRAM).");
         return 1;
 	}
 	
@@ -1465,12 +1647,24 @@ int App::run(int argc, char** argv) {
     if (!rcptAll.empty())
 	dispatcher.add(std::make_unique<EmailNotifier>(from, pass, toHeader, rcptAll, attArg, t0));
     if (rcp.kakao) dispatcher.add(std::make_unique<KakaoNotifier>(cfg_, makeAlert()));
-    return dispatcher.run(msg);
+    int drc = dispatcher.run(msg);
+    logx::logf("발송 처리 완료 (Dispatcher 반환 %d)", drc);
+    return drc;
 }
 
 int main(int argc, char** argv) {
     SetConsoleOutputCP(CP_UTF8);
     CurlGlobal curlGlobal;
     App app;
-    return app.run(argc, argv);
+    logx::logf("========== booting_Alert 시작 (PID %lu, 인자 %d개) ==========", (unsigned long)GetCurrentProcessId(), argc - 1);
+    int rc = 1;
+    try {
+        rc = app.run(argc, argv);
+    } catch (const std::exception& e) {
+        logx::sayf("치명적 오류: %s\n", e.what());
+    } catch (...) {
+        logx::say("치명적 오류: 알 수 없는 예외");
+    }
+    logx::logf("========== booting_Alert 종료: 종료 코드 %d ==========", rc);
+    return rc;
 }
