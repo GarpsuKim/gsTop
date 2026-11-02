@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 
-g++ -O2 -std=c++17 -o screen_telegram.exe screen_telegram.cpp ^
+g++ -O2 -std=c++17 -mwindows -o screen_telegram.exe screen_telegram.cpp ^
     -lgdiplus -lgdi32 -luser32 -lole32 -loleaut32 -lwinhttp -lmfuuid ^
     -static -static-libgcc -static-libstdc++ ^
     > build_ERR.txt 2>&1
