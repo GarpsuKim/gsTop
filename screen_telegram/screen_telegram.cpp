@@ -1,7 +1,7 @@
 // screen_telegram.cpp
 // Windows 11 / MinGW-w64 g++
 //
-// booting_Alert.ini 의 설정:
+// screen_telegram.ini 의 설정:
 //   TELEGRAM_BOT_TOKEN=xxxxxxxxxx
 //   TELEGRAM_CHAT_ID=yyyyyyy
 //   TELEGRAM_INTERVAL=60
@@ -11,6 +11,8 @@
 //   CAMERA=TRUE            (웹캠 캡처 여부, 기본 FALSE)
 //   CAMERA_INDEX=0         (사용할 카메라 번호, 0부터. 기본 0. 목록은 로그에 출력)
 //   MAX_LOOP=9             (캡처/전송 반복 횟수. 이 횟수만큼 실행 후 종료. 0 또는 미기재 시 무제한)
+//   SAVE_ONLY=TRUE         (TRUE 이면 텔레그램 전송 없이 image 폴더에 저장만. 기본 FALSE.
+//                           이 경우 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 는 없어도 됨)
 //
 // 주기적으로 모니터별 화면(및 설정 시 웹캠)을 캡처하여 텔레그램으로 전송한다.
 //
@@ -21,14 +23,14 @@
 //   StopSignal      종료 요청 (Ctrl+C / 콘솔 닫기 / 로그오프) 이벤트
 //   ComScope        COM 초기화/해제 (RAII)
 //   ScopedBitmap    HBITMAP 소유권 관리 (RAII)
-//   Config          booting_Alert.ini 설정
+//   Config          screen_telegram.ini 설정
 //   ImageEncoder    GDI+ 세션 + PNG/JPEG 인코딩
 //   TelegramClient  텔레그램 sendPhoto (WinHTTP) + 재시도
 //   Shot            캡처 결과 1장 (라벨 + 비트맵)
 //   ICaptureSource  캡처 소스 인터페이스
 //   MonitorCapture  모니터 화면 캡처 (ICaptureSource)
 //   CameraCapture   웹캠 캡처, Media Foundation (ICaptureSource)
-//   ScreenTelegramApp  전체 흐름 (설정 로드 -> 주기 반복 캡처/전송)
+//   ScreenTelegramApp  전체 흐름 (설정 로드 -> 주기 반복 캡처 -> image 폴더 저장 -> 전송)
 //
 // 빌드:
 //   g++ -O2 -std=c++17 -o screen_telegram.exe screen_telegram.cpp ^
@@ -43,7 +45,7 @@
 //
 // 실행:
 //   screen_telegram.exe [ini파일경로]
-//   (인자가 없으면 exe 폴더 -> 현재 폴더의 booting_Alert.ini 를 찾음)
+//   (인자가 없으면 exe 폴더 -> 현재 폴더의 screen_telegram.ini 를 찾음)
 
 #include <windows.h>
 #include <objidl.h>
@@ -172,6 +174,32 @@ public:
         return s.empty() ? std::string("PC") : s;
     }
 
+    // 파일명용 시각 (예: 20261102_142400)
+    static std::string fileStamp()
+    {
+        char tbuf[32];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(tbuf, sizeof(tbuf), "%Y%m%d_%H%M%S", &tmv);
+        return tbuf;
+    }
+
+    // 폴더가 없으면 생성. 이미 있거나 생성에 성공하면 true.
+    static bool ensureDir(const std::string& dir)
+    {
+        if (CreateDirectoryA(dir.c_str(), nullptr)) return true;
+        return GetLastError() == ERROR_ALREADY_EXISTS;
+    }
+
+    static bool writeFile(const std::string& path, const std::vector<BYTE>& data)
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        if (!f) return false;
+        f.write((const char*)data.data(), (std::streamsize)data.size());
+        return f.good();
+    }
+
     static std::string timestamp()
     {
         char tbuf[32];
@@ -287,6 +315,7 @@ public:
     bool cameraEnabled = false; // CAMERA=TRUE
     int cameraIndex = 0;        // CAMERA_INDEX=0
     int maxLoop = 0;            // MAX_LOOP=9 (0 = 무제한)
+    bool saveOnly = false;      // SAVE_ONLY=TRUE (전송 생략, 저장만)
 
     // 해당 모니터(1부터 시작하는 순번)가 캡처 대상인지 확인. 미지정 시 기본 true.
     bool isMonitorEnabled(int oneBasedIndex) const
@@ -345,6 +374,9 @@ private:
         else if (key == "TELEGRAM_INTERVAL") {
             int v = atoi(val.c_str());
             if (v > 0) interval = v;
+        }
+        else if (key == "SAVE_ONLY") {
+            saveOnly = StrUtil::parseBool(val, false);
         }
         else if (key == "MAX_LOOP") {
             int v = atoi(val.c_str());
@@ -571,10 +603,12 @@ private:
 // ================================================================ 캡처 소스
 // 캡처 결과 1장: 라벨(예: "Monitor 1/2 (1920x1080)", "Camera") + 비트맵
 struct Shot {
-    std::string label;
+    std::string label;  // 캡션/로그용
+    std::string tag;    // 파일명용 (예: "Monitor1", "Camera")
     ScopedBitmap bmp;
 
-    Shot(std::string l, HBITMAP h) : label(std::move(l)), bmp(h) {}
+    Shot(std::string l, std::string t, HBITMAP h)
+        : label(std::move(l)), tag(std::move(t)), bmp(h) {}
     Shot(Shot&&) noexcept = default;
     Shot& operator=(Shot&&) noexcept = default;
 };
@@ -627,7 +661,7 @@ public:
             char label[96];
             snprintf(label, sizeof(label), "Monitor %zu/%zu (%dx%d)",
                      i + 1, mons.size(), w, h);
-            out.emplace_back(label, hBmp);
+            out.emplace_back(label, "Monitor" + std::to_string(oneBased), hBmp);
         }
     }
 
@@ -727,7 +761,7 @@ public:
             Logger::log("카메라 캡처 실패: %s", err.c_str());
             return;
         }
-        out.emplace_back("Camera", h);
+        out.emplace_back("Camera", "Camera", h);
     }
 
 private:
@@ -996,13 +1030,15 @@ public:
             Logger::log("INI 파일을 열 수 없습니다: %s", ini.c_str());
             return 1;
         }
-        if (cfg_.token.empty() || cfg_.chatId.empty()) {
+        if (!cfg_.saveOnly && (cfg_.token.empty() || cfg_.chatId.empty())) {
             Logger::log("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 INI 에 없습니다.");
             return 1;
         }
         Logger::log("설정 로드: %s (간격 %d초, 카메라 %s, 반복 %s)", ini.c_str(), cfg_.interval,
                     cfg_.cameraEnabled ? "사용" : "사용안함",
                     cfg_.maxLoop > 0 ? std::to_string(cfg_.maxLoop).c_str() : "무제한");
+        if (cfg_.saveOnly)
+            Logger::log("SAVE_ONLY=TRUE: 텔레그램 전송 없이 image 폴더에 저장만 합니다.");
         for (const auto& kv : cfg_.monitorEnabled)
             Logger::log("  MONITOR%d = %s", kv.first, kv.second ? "TRUE" : "FALSE");
 
@@ -1051,11 +1087,26 @@ private:
     static std::string resolveIniPath(int argc, char** argv)
     {
         if (argc >= 2) return argv[1];
-        std::string p1 = SysUtil::exeDir() + "\\booting_Alert.ini";
-        return SysUtil::fileExists(p1) ? p1 : "booting_Alert.ini";
+        std::string p1 = SysUtil::exeDir() + "\\screen_telegram.ini";
+        return SysUtil::fileExists(p1) ? p1 : "screen_telegram.ini";
     }
 
-    // 1회 주기: 모든 소스 캡처 -> 인코딩 -> 텔레그램 전송
+    // 현재 폴더(exe 폴더)의 image 폴더에 "YYYYMMDD_HHMMSS_태그.jpg|png" 로 저장
+    void saveImage(const std::string& tag, const std::vector<BYTE>& img, bool jpeg)
+    {
+        if (!SysUtil::ensureDir(imageDir_)) {
+            Logger::log("image 폴더 생성 실패: %s", imageDir_.c_str());
+            return;
+        }
+        const std::string path = imageDir_ + "\\" + SysUtil::fileStamp() + "_" + tag +
+                                 (jpeg ? ".jpg" : ".png");
+        if (SysUtil::writeFile(path, img))
+            Logger::log("저장: %s (%zu KB)", path.c_str(), img.size() / 1024);
+        else
+            Logger::log("이미지 저장 실패: %s", path.c_str());
+    }
+
+    // 1회 주기: 모든 소스 캡처 -> 인코딩 -> image 폴더 저장 -> 텔레그램 전송
     void cycle(std::vector<std::unique_ptr<ICaptureSource>>& sources,
                const ImageEncoder& encoder, const TelegramClient& telegram)
     {
@@ -1079,6 +1130,10 @@ private:
                 continue;
             }
 
+            // 전송 전에 image 폴더에 저장 (저장 실패해도 전송은 계속)
+            saveImage(shot.tag, img, jpeg);
+            if (cfg_.saveOnly) continue; // 저장만 하고 전송은 생략
+
             const std::string caption = "[" + host + "] " + shot.label + " " + ts;
             std::string resp;
             if (telegram.sendPhotoWithRetry(caption, img, jpeg, resp))
@@ -1091,6 +1146,7 @@ private:
 
     Config cfg_;
     StopSignal stop_;
+    const std::string imageDir_ = SysUtil::exeDir() + "\\image";
 };
 
 // ================================================================ main
