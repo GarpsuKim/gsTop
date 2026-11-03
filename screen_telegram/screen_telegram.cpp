@@ -24,6 +24,8 @@
 //   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
 //   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
 //                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
+//   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
+//    추가한 값은 프로그램을 다시 시작해야 적용된다.)
 //   (캡처/전송 간격 TELEGRAM_INTERVAL 은 텔레그램 명령 /INTERVAL=nnn (5~86400초) 로 바꿀 수 있다.
 //    바로 적용되고 이 INI 의 TELEGRAM_INTERVAL 값도 갱신된다. /INTERVAL 만 보내면 현재 값을 알려 준다.)
 //   (침입 탐지 켜기/끄기는 텔레그램 명령 /detectOn /detectOff 로 한다.
@@ -307,8 +309,14 @@ public:
             out += key + "=" + newVal + eol;
         }
 
+        return replaceFileAtomic(path, out);
+    }
+
+    // 임시 파일에 먼저 쓴 뒤 교체한다. 쓰다 실패해도 원본은 보존된다.
+    static bool replaceFileAtomic(const std::string& path, const std::string& content)
+    {
         const std::string tmp = path + ".tmp";
-        if (!writeFile(tmp, std::vector<BYTE>(out.begin(), out.end()))) {
+        if (!writeFile(tmp, std::vector<BYTE>(content.begin(), content.end()))) {
             DeleteFileW(StrUtil::toWide(tmp).c_str());
             return false;
         }
@@ -318,6 +326,43 @@ public:
             return false;
         }
         return true;
+    }
+
+    // INI 내용에 key(대문자로 전달)가 '활성' 줄(주석 ; # 이나 [섹션] 이 아닌 줄)로 이미 있는지.
+    // Config::load 와 같은 규칙이며 대소문자는 무시한다. 주석 처리된 줄(;KEY=..)은 없는 것으로 본다.
+    static bool iniHasKey(const std::string& content, const std::string& key)
+    {
+        std::istringstream f(content);
+        std::string line;
+        bool first = true;
+        while (std::getline(f, line)) {
+            if (first) { // UTF-8 BOM
+                first = false;
+                if (line.size() >= 3 && (unsigned char)line[0] == 0xEF &&
+                    (unsigned char)line[1] == 0xBB && (unsigned char)line[2] == 0xBF)
+                    line.erase(0, 3);
+            }
+            line = StrUtil::trim(line);
+            if (line.empty() || line[0] == ';' || line[0] == '#' || line[0] == '[') continue;
+            size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            if (StrUtil::upper(StrUtil::trim(line.substr(0, eq))) == StrUtil::upper(key)) return true;
+        }
+        return false;
+    }
+
+    enum class IniAdd { Added, Exists, Error };
+
+    // INI 끝에 "KEY=값" 줄을 추가한다. 같은 키가 이미 있으면 아무것도 바꾸지 않고 Exists 를 돌려준다.
+    static IniAdd addIniKey(const std::string& path, const std::string& key, const std::string& val)
+    {
+        std::string content;
+        if (!readFile(path, content)) return IniAdd::Error;
+        if (iniHasKey(content, key)) return IniAdd::Exists;
+        const std::string eol = content.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+        if (!content.empty() && content.back() != '\n') content += eol;
+        content += key + "=" + val + eol;
+        return replaceFileAtomic(path, content) ? IniAdd::Added : IniAdd::Error;
     }
 
     // 파일 전체를 읽는다 (경로는 UTF-8). 열 수 없으면 false.
@@ -576,6 +621,25 @@ public:
             apply(key, val);
         }
         return true;
+    }
+
+    // 이 프로그램이 해석하는 키인지 (대문자로 전달). /ini 로 추가한 키의 오타 점검용.
+    static bool isKnownKey(const std::string& key)
+    {
+        static const char* const names[] = {
+            "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_INTERVAL", "TELEGRAM_COMMANDS",
+            "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "SAVE_ONLY", "MAX_LOOP",
+            "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES",
+            "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
+            "INTRUSION_CONFIRM_FRAMES", "INTRUSION_COOLDOWN", "INTRUSION_CHECK_MS"
+        };
+        for (const char* n : names)
+            if (key == n) return true;
+        if (key.rfind("MONITOR", 0) == 0) { // MONITOR1, MONITOR2, ...
+            const std::string num = key.substr(7);
+            return !num.empty() && num.find_first_not_of("0123456789") == std::string::npos;
+        }
+        return false;
     }
 
 private:
@@ -1017,6 +1081,7 @@ private:
 // 수신 이벤트 1건: 일반 명령(/shot 등) 또는 인라인 버튼 클릭(callback_query)
 struct BotEvent {
     std::string cmd;        // 명령(소문자, '/' 포함, @봇이름 제거). 버튼 클릭이면 비어 있음
+    std::string arg;        // 명령 뒤의 인자(JSON 이스케이프 해제, 앞뒤 공백 제거, 대소문자 유지). "/ini A=1" -> "A=1"
     std::string cbData;     // 버튼 클릭: callback_data (예: "stop_yes"). 일반 명령이면 비어 있음
     std::string cbId;       // 버튼 클릭: callback_query id (answerCallbackQuery 용)
     std::string messageId;  // 버튼 클릭: 버튼이 붙어 있던 메시지의 id
@@ -1103,8 +1168,10 @@ private:
                 if (ev.cbData.empty()) continue;
                 what = "버튼 " + ev.cbData;
             } else {
-                ev.cmd = extractCommand(extractText(seg));
+                const std::string rawText = extractText(seg);
+                ev.cmd = extractCommand(rawText);
                 if (ev.cmd.empty()) continue;
+                ev.arg = extractArg(rawText);
                 what = ev.cmd;
             }
 
@@ -1192,6 +1259,78 @@ private:
         std::string c = text.substr(0, e);
         for (auto& ch : c) ch = (char)tolower((unsigned char)ch);
         return c;
+    }
+
+    // "/ini@MyBot KEY=값" -> "KEY=값". raw 는 JSON 이스케이프가 그대로 남아 있는 텍스트.
+    static std::string extractArg(const std::string& raw)
+    {
+        size_t e = 1;
+        while (e < raw.size() && raw[e] != ' ' && raw[e] != '@' && raw[e] != '\\') ++e;
+        if (e < raw.size() && raw[e] == '@') // @봇이름 건너뜀
+            while (e < raw.size() && raw[e] != ' ' && raw[e] != '\\') ++e;
+        return StrUtil::trim(unescapeJson(raw.substr(e)));
+    }
+
+    static bool hex4(const std::string& s, size_t pos, unsigned& v)
+    {
+        if (pos + 4 > s.size()) return false;
+        v = 0;
+        for (size_t k = 0; k < 4; ++k) {
+            const char c = s[pos + k];
+            unsigned d;
+            if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
+            else return false;
+            v = (v << 4) | d;
+        }
+        return true;
+    }
+
+    static void appendUtf8(std::string& out, unsigned cp)
+    {
+        if (cp < 0x80) out += (char)cp;
+        else if (cp < 0x800) { out += (char)(0xC0 | (cp >> 6)); out += (char)(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) {
+            out += (char)(0xE0 | (cp >> 12)); out += (char)(0x80 | ((cp >> 6) & 0x3F));
+            out += (char)(0x80 | (cp & 0x3F));
+        } else {
+            out += (char)(0xF0 | (cp >> 18)); out += (char)(0x80 | ((cp >> 12) & 0x3F));
+            out += (char)(0x80 | ((cp >> 6) & 0x3F)); out += (char)(0x80 | (cp & 0x3F));
+        }
+    }
+
+    // JSON 문자열 이스케이프(\" \\ \/ \n \t \uXXXX, 서로게이트 쌍 포함)를 UTF-8 로 되돌린다.
+    static std::string unescapeJson(const std::string& s)
+    {
+        std::string out;
+        for (size_t i = 0; i < s.size(); ++i) {
+            const char c = s[i];
+            if (c != '\\' || i + 1 >= s.size()) { out += c; continue; }
+            const char n = s[++i];
+            switch (n) {
+            case 'n': out += '\n'; break;
+            case 'r': out += '\r'; break;
+            case 't': out += '\t'; break;
+            case 'b': out += '\b'; break;
+            case 'f': out += '\f'; break;
+            case 'u': {
+                unsigned cp = 0;
+                if (!hex4(s, i + 1, cp)) { out += "\\u"; break; }
+                i += 4;
+                unsigned lo = 0;
+                if (cp >= 0xD800 && cp <= 0xDBFF && i + 2 < s.size() && s[i + 1] == '\\' &&
+                    s[i + 2] == 'u' && hex4(s, i + 3, lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                    i += 6;
+                }
+                appendUtf8(out, cp);
+                break;
+            }
+            default: out += n; break; // \" \\ \/ 등
+            }
+        }
+        return out;
     }
 
     const TelegramClient& tg_;
@@ -1990,7 +2129,7 @@ public:
         if (cfg_.commands) {
             listener = std::make_unique<CommandListener>(telegram, cfg_.chatId, cfg_.allowedUsers);
             listener->skipPending();
-            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /stop /help");
+            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /ini /version /stop /help");
             if (cfg_.allowedUsers.empty() && StrUtil::trim(cfg_.chatId)[0] == '-')
                 Logger::log("경고: TELEGRAM_CHAT_ID 가 그룹입니다. TELEGRAM_ALLOWED_USER_IDS 를 설정하지 않으면 명령이 거부됩니다.");
         }
@@ -2154,7 +2293,7 @@ private:
             for (const auto& ev : events) {
                 if (stop_.requested()) break;
                 if (ev.isCallback()) handleCallback(ev, telegram);
-                else handleCommand(ev.cmd, telegram);
+                else handleCommand(ev.cmd, ev.arg, telegram);
             }
         }
     }
@@ -2315,7 +2454,7 @@ private:
     }
 
     // 명령 스레드에서 호출됨. /shot 은 메인 스레드로 넘긴다.
-    void handleCommand(const std::string& cmd, const TelegramClient& telegram)
+    void handleCommand(const std::string& cmd, const std::string& arg, const TelegramClient& telegram)
     {
         Logger::log("명령 수신: %s", cmd.c_str());
         const std::string host = SysUtil::hostName();
@@ -2372,6 +2511,11 @@ private:
                 telegram.sendMessage(msg, resp);
                 Logger::log("침입 탐지 %s (텔레그램 명령)", on ? "켬" : "끔");
             }
+        } else if (cmd == "/version") {
+            telegram.sendMessage("[" + host + "] screen_telegram v" + APP_VERSION_STR +
+                                 "\n빌드: " + __DATE__ + " " + __TIME__, resp);
+        } else if (cmd == "/ini") {
+            handleIni(arg, host, telegram);
         } else if (cmd == "/interval" || cmd.rfind("/interval=", 0) == 0) {
             // /INTERVAL=nnn : 캡처/전송 간격(초) 변경. 명령은 소문자로 정규화되어 들어온다 (/INTERVAL=300 -> /interval=300).
             // 값을 바로 적용하고 INI 의 TELEGRAM_INTERVAL 도 갱신한다. "/INTERVAL" 만 보내면 현재 값과 사용법을 알려 준다.
@@ -2436,8 +2580,65 @@ private:
                     "/resume - 이미지 전송 재개\n/status - 상태 확인\n"
                     "/detectOn - 침입 탐지 켜기\n/detectOff - 침입 탐지 끄기\n"
                     "/INTERVAL=nnn - 캡처 간격(초) 변경 (/INTERVAL 만 보내면 현재 값)\n"
+                    "/ini 키=값 - INI 에 새 키 추가 (이미 있는 키는 경고만, 재시작 후 적용)\n"
+                    "/version - 버전 표시\n"
                     "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
+        }
+    }
+
+    // /ini 키=값 : INI 파일 끝에 새 키를 추가한다. 같은 키(대소문자 무시)가 이미 있으면 경고만 하고 삽입하지 않는다.
+    // 값은 Config 가 시작할 때만 읽으므로 추가한 값은 프로그램을 다시 시작해야 적용된다. (명령 스레드에서 호출)
+    void handleIni(std::string arg, const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /ini 키=값  (예: /ini INTRUSION_COOLDOWN=120)\n"
+                                  "INI 에 새 키만 추가합니다. 이미 있는 키는 바꾸지 않고 경고만 합니다. "
+                                  "추가한 값은 프로그램을 다시 시작해야 적용됩니다. (캡처 간격은 /INTERVAL=nnn)";
+
+        // [키=값] 처럼 대괄호로 감싸 보내도 허용 (= 가 있을 때만. [섹션] 줄은 추가하지 않음)
+        if (arg.size() >= 2 && arg.front() == '[' && arg.back() == ']' && arg.find('=') != std::string::npos)
+            arg = StrUtil::trim(arg.substr(1, arg.size() - 2));
+
+        if (arg.empty()) {
+            telegram.sendMessage(pre + "추가할 내용이 없습니다." + usage, resp);
+            return;
+        }
+        const size_t eq = arg.find('=');
+        if (eq == std::string::npos || arg.find_first_of("\r\n") != std::string::npos) {
+            telegram.sendMessage(pre + "형식이 올바르지 않습니다. 한 줄의 '키=값' 이어야 합니다." + usage, resp);
+            return;
+        }
+        const std::string key = StrUtil::upper(StrUtil::trim(arg.substr(0, eq)));
+        const std::string val = StrUtil::trim(arg.substr(eq + 1));
+        bool keyOk = !key.empty() && key.size() <= 64;
+        for (char c : key)
+            if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) keyOk = false;
+        if (!keyOk || val.size() > 400) {
+            telegram.sendMessage(pre + "키 이름은 영문/숫자/_ 만 쓸 수 있고(64자 이내), 값은 400자 이내여야 합니다." + usage, resp);
+            return;
+        }
+
+        switch (SysUtil::addIniKey(iniPath_, key, val)) {
+        case SysUtil::IniAdd::Exists:
+            telegram.sendMessage(pre + "경고: INI 에 이미 " + key + " 키가 있어 삽입하지 않았습니다. "
+                                 "(기존 값은 그대로입니다. 값을 바꾸려면 INI 파일을 직접 수정하세요)", resp);
+            Logger::log("/ini: 키가 이미 있어 삽입하지 않음: %s", key.c_str());
+            break;
+        case SysUtil::IniAdd::Added: {
+            std::string msg = pre + "INI 에 추가했습니다: " + key + "=" + val +
+                              "\n프로그램을 다시 시작해야 적용됩니다.";
+            if (!Config::isKnownKey(key))
+                msg += "\n주의: 이 프로그램이 사용하지 않는 키 이름입니다. 오타가 아닌지 확인하세요.";
+            telegram.sendMessage(msg, resp);
+            Logger::log("/ini: INI 에 키 추가: %s (값은 로그에 남기지 않음)", key.c_str());
+            break;
+        }
+        default:
+            telegram.sendMessage(pre + "INI 파일을 읽거나 쓰지 못했습니다. (경로/권한 확인)", resp);
+            Logger::log("/ini: INI 쓰기 실패: %s", iniPath_.c_str());
+            break;
         }
     }
 

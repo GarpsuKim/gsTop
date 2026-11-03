@@ -3,8 +3,8 @@
 #ifndef SCREEN_TELEGRAM_VERSION_H
 #define SCREEN_TELEGRAM_VERSION_H
 
-#define APP_VERSION_NUM     1,0,0,0
-#define APP_VERSION_STR     "1.0.0.0"
+#define APP_VERSION_NUM     1,0,0,1
+#define APP_VERSION_STR     "1.0.0.1"
 
 #define APP_COMPANY         "김갑수"
 #define APP_COPYRIGHT       "이 프로그램은 개인에 한하여 비상업적 목적으로 자유롭게 사용 할 수 있습니다. 기업이나 단체 등 개인이 아닌 사용자는 개발자 김갑수와 개별 협의하여야 합니다."
