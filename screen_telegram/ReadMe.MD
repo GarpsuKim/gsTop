@@ -4,7 +4,9 @@
 C:\tools\screen_telegram>dir /b
 screen_telegram.ini   ....... exe 실행에 필요한 파라메터
 screen_telegram.cpp  ...... 이 소스
-build.bat  ............. 컴파일 & 링크
+build.bat  ............. 컴파일 & 링크 (windres 로 버전 리소스 포함)
+version.h  ............. 버전/저작권 정보 (버전을 올릴 때 이 파일만 수정)
+screen_telegram.rc  ..... exe 속성(자세히 탭)에 표시되는 버전 정보 리소스 (UTF-8)
 screen_telegram.exe  ..... 
 screen_telegram_RUN.BAT ..... exe를 구동하는 명령어 파일
 log.txt  ............... 부팅 정보 + 실행 로그 (BAT 실행 시마다 새로 작성)
@@ -23,7 +25,7 @@ screen_telegram.cpp.001 ... 수정전 소스
 - 이미지가 10MB 를 넘으면 품질/해상도를 단계적으로 낮춰 전송. 가로+세로 10000px 초과 또는 비율 20:1 초과이면 원본을 문서(sendDocument)로 전송
 - CAMERA_KEEP_OPEN=TRUE 이면 카메라를 계속 열어 둠 (지연/LED 깜빡임 감소, 대신 다른 앱이 카메라를 쓸 수 없음. 기본 FALSE)
 - SAVE_ONLY=TRUE 이면 이미지를 텔레그램으로 보내지 않고 image 폴더에 저장만 함. 명령 수신(폴링)은 계속 동작하며 /shot 만 전송 (TOKEN/CHAT_ID 가 없으면 명령 수신 없이 저장만)
-- 텔레그램 명령 수신 (TELEGRAM_COMMANDS=TRUE): 봇에게 /shot(화면+카메라 즉시 캡처·전송) /screen(화면만 즉시 캡처·전송) /photo(카메라만 즉시 캡처·전송) /pause(이미지 전송 중단, 저장은 계속) /resume(전송 재개) /status(상태) /detectOn(침입 탐지 켜기) /detectOff(침입 탐지 끄기) /stop(종료, Yes/No 버튼으로 확인) /help 또는 //(도움말) 전송 (명령은 대소문자를 구분하지 않음).
+- 텔레그램 명령 수신 (TELEGRAM_COMMANDS=TRUE): 봇에게 /shot(화면+카메라 즉시 캡처·전송) /screen(화면만 즉시 캡처·전송) /photo(카메라만 즉시 캡처·전송) /pause(이미지 전송 중단, 저장은 계속) /resume(전송 재개) /status(상태) /detectOn(침입 탐지 켜기) /detectOff(침입 탐지 끄기) /INTERVAL=nnn(캡처·전송 간격을 nnn초로 변경, 5~86400. 즉시 적용되고 INI 의 TELEGRAM_INTERVAL 도 갱신됨. /INTERVAL 만 보내면 현재 값 표시) /stop(종료, Yes/No 버튼으로 확인) /help 또는 //(도움말) 전송 (명령은 대소문자를 구분하지 않음).
   * /stop 을 보내면 "종료하시겠습니까?(y/n)" 메시지에 Yes/No 버튼이 붙어 옴. Yes 를 눌러야 종료, No 는 취소. 버튼은 명령과 같은 chat/허용 사용자만 누를 수 있고, 5분이 지났거나 이미 처리한 메시지, 프로그램 재시작 전의 메시지 버튼은 무효(종료되지 않음) TELEGRAM_CHAT_ID 로 설정한 chat 의 명령만 처리. 명령은 별도 스레드가 받으므로 캡처/전송 중에도 /pause /resume /status /stop 은 수 초 내 반응 (/shot 은 진행 중인 캡처가 끝난 뒤 실행)
   * TELEGRAM_CHAT_ID 가 그룹(음수)이면 TELEGRAM_ALLOWED_USER_IDS=111,222 (명령 허용 사용자 ID) 를 반드시 설정해야 명령이 동작. 개인 chat 이면 생략 가능
   * 같은 봇 토큰을 다른 프로그램이 getUpdates/webhook 으로 쓰면 409 충돌이 나므로, 이 프로그램 전용 봇을 쓰는 것을 권장
@@ -40,3 +42,5 @@ screen_telegram.cpp.001 ... 수정전 소스
   * 오탐이 많으면 AREA_PERCENT/PIXEL_THRESHOLD 를 올리고, 놓치면 낮춤
 - 시작 인사말: 준비가 끝나면 텔레그램으로 인사말(간격/카메라/침입 탐지 상태 포함)을 한 번 전송. TELEGRAM_GREETING=FALSE 로 끌 수 있음
 - MAX_LOOP=N 이면 N회 캡처/전송 후 자동 종료 (0 또는 생략 시 무제한)
+- 버전: 1.0.0.0 (exe 속성 > 자세히 탭, 시작 인사말, /status, 로그에 표시)
+- 저작권: 김갑수. 이 프로그램은 개인에 한하여 비상업적 목적으로 자유롭게 사용 할 수 있습니다. 기업이나 단체 등 개인이 아닌 사용자는 개발자 김갑수와 개별 협의하여야 합니다.

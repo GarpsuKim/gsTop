@@ -24,6 +24,8 @@
 //   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
 //   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
 //                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
+//   (캡처/전송 간격 TELEGRAM_INTERVAL 은 텔레그램 명령 /INTERVAL=nnn (5~86400초) 로 바꿀 수 있다.
+//    바로 적용되고 이 INI 의 TELEGRAM_INTERVAL 값도 갱신된다. /INTERVAL 만 보내면 현재 값을 알려 준다.)
 //   (침입 탐지 켜기/끄기는 텔레그램 명령 /detectOn /detectOff 로 한다.
 //    카메라 침입 탐지(별도 스레드로 독립 동작): 모션 감지 시 "[침입탐지 : yyyy년 mm월 dd일 HH시 mm분 ss초]" 메시지를 보내고
 //    카메라 이미지만 전송 (모니터 화면은 제외. SAVE_ONLY, /pause 와 무관하게 무조건 전송). CAMERA=TRUE 필요,
@@ -100,6 +102,8 @@ using std::max;
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "version.h"   // APP_VERSION_STR 등 (exe 속성 리소스 screen_telegram.rc 와 공용)
 
 // 복사 금지 선언용 매크로
 #define NO_COPY(T)               \
@@ -244,6 +248,76 @@ public:
         }
         CloseHandle(h);
         return ok;
+    }
+
+    // INI 파일에서 key(대문자로 전달, 비교는 대소문자 무시)의 값을 newVal 로 바꾼다.
+    // 다른 줄, 줄바꿈(CRLF/LF), BOM, 값 뒤의 인라인 주석은 그대로 유지한다.
+    // 키가 없으면 파일 끝에 "KEY=값" 줄을 추가한다. 임시 파일에 먼저 쓴 뒤 교체하므로 쓰다 실패해도 원본은 보존된다.
+    static bool updateIniValue(const std::string& path, const std::string& key, const std::string& newVal)
+    {
+        std::string content;
+        if (!readFile(path, content)) return false;
+        const std::string eol = content.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+
+        std::string out;
+        out.reserve(content.size() + 64);
+        bool replaced = false;
+        size_t pos = 0;
+        while (pos < content.size()) {
+            size_t nl = content.find('\n', pos);
+            size_t lineEnd = nl == std::string::npos ? content.size() : nl + 1;
+            std::string line = content.substr(pos, lineEnd - pos);
+            pos = lineEnd;
+
+            if (!replaced) {
+                size_t bodyLen = line.size();
+                while (bodyLen > 0 && (line[bodyLen - 1] == '\n' || line[bodyLen - 1] == '\r')) --bodyLen;
+                const std::string body = line.substr(0, bodyLen);
+                const std::string term = line.substr(bodyLen);
+
+                size_t b = 0;
+                while (b < body.size() && (unsigned char)body[b] <= ' ') ++b;
+                if (b < body.size() && body[b] != ';' && body[b] != '#' && body[b] != '[') {
+                    size_t eq = body.find('=', b);
+                    if (eq != std::string::npos &&
+                        StrUtil::upper(StrUtil::trim(body.substr(b, eq - b))) == key) {
+                        // 값 뒤 인라인 주석("공백 + ; 또는 #")은 유지 (Config::load 와 같은 규칙)
+                        size_t cmt = std::string::npos;
+                        for (size_t i = eq + 2; i < body.size(); ++i) {
+                            if ((body[i] == ';' || body[i] == '#') && (unsigned char)body[i - 1] <= ' ') {
+                                cmt = i;
+                                break;
+                            }
+                        }
+                        std::string tail;
+                        if (cmt != std::string::npos) {
+                            size_t ws = cmt;
+                            while (ws > eq + 1 && (unsigned char)body[ws - 1] <= ' ') --ws;
+                            tail = body.substr(ws);
+                        }
+                        line = body.substr(0, eq + 1) + newVal + tail + term;
+                        replaced = true;
+                    }
+                }
+            }
+            out += line;
+        }
+        if (!replaced) {
+            if (!out.empty() && out.back() != '\n') out += eol;
+            out += key + "=" + newVal + eol;
+        }
+
+        const std::string tmp = path + ".tmp";
+        if (!writeFile(tmp, std::vector<BYTE>(out.begin(), out.end()))) {
+            DeleteFileW(StrUtil::toWide(tmp).c_str());
+            return false;
+        }
+        if (!MoveFileExW(StrUtil::toWide(tmp).c_str(), StrUtil::toWide(path).c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(StrUtil::toWide(tmp).c_str());
+            return false;
+        }
+        return true;
     }
 
     // 파일 전체를 읽는다 (경로는 UTF-8). 열 수 없으면 false.
@@ -429,7 +503,7 @@ class Config {
 public:
     std::string token;
     std::string chatId;
-    int interval = 60;
+    volatile int interval = 60; // 명령 스레드(/INTERVAL=nnn)가 런타임에 바꾸고 메인 스레드가 읽음
 
     // MONITOR1=TRUE / MONITOR2=TRUE / MONITOR3=FALSE ...
     // 명시되지 않은 모니터는 기본값(true, 즉 캡처함)으로 처리된다.
@@ -1870,7 +1944,9 @@ public:
         // 고DPI 환경에서도 실제 해상도로 캡처
         SetProcessDPIAware();
 
+        Logger::log("screen_telegram v%s (빌드 %s %s)", APP_VERSION_STR, __DATE__, __TIME__);
         const std::string ini = resolveIniPath();
+        iniPath_ = ini; // /INTERVAL=nnn 이 값을 저장할 때 사용
         if (!cfg_.load(ini)) {
             Logger::log("INI 파일을 열 수 없습니다: %s", ini.c_str());
             return 1;
@@ -1914,7 +1990,7 @@ public:
         if (cfg_.commands) {
             listener = std::make_unique<CommandListener>(telegram, cfg_.chatId, cfg_.allowedUsers);
             listener->skipPending();
-            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /stop /help");
+            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /stop /help");
             if (cfg_.allowedUsers.empty() && StrUtil::trim(cfg_.chatId)[0] == '-')
                 Logger::log("경고: TELEGRAM_CHAT_ID 가 그룹입니다. TELEGRAM_ALLOWED_USER_IDS 를 설정하지 않으면 명령이 거부됩니다.");
         }
@@ -1962,6 +2038,7 @@ public:
         // 실행 간격 유지 (처리 시간만큼 보정). 종료 요청이 오면 대기 중에도 즉시 탈출.
         while (!stop_.requested()) {
             ULONGLONG start = GetTickCount64();
+            periodStart_ = start; // /INTERVAL 변경 시 남은 대기 시간을 다시 계산하는 기준
 
             cycle(sources, encoder, telegram);
 
@@ -1979,7 +2056,7 @@ public:
             ULONGLONG elapsed = GetTickCount64() - start;
             ULONGLONG period = (ULONGLONG)cfg_.interval * 1000ULL;
             DWORD wait = elapsed < period ? (DWORD)(period - elapsed) : 0;
-            if (!idle(wait, sources, encoder, telegram)) break;
+            if (!idle(wait, sources, encoder, telegram, true)) break;
         }
 
         stop_.request(); // 명령/침입 탐지 스레드도 종료시킨다
@@ -2045,7 +2122,7 @@ private:
         if (!cfg_.greeting || cfg_.token.empty() || cfg_.chatId.empty()) return;
 
         const std::string host = SysUtil::hostName();
-        std::string text = "안녕하세요! [" + host + "] screen_telegram 준비가 완료되었습니다.\n" +
+        std::string text = "안녕하세요! [" + host + "] screen_telegram v" + APP_VERSION_STR + " 준비가 완료되었습니다.\n" +
                            "간격: " + std::to_string(cfg_.interval) + "초 / 카메라: " +
                            (cameraReady_ ? "사용" : "사용안함") + " / 침입 탐지: " +
                            (detectOn_ ? "켜짐" : "꺼짐") + "\n" +
@@ -2084,11 +2161,13 @@ private:
 
     // 메인 스레드에서 ms 동안 대기한다. 명령 스레드의 캡처 요청(/shot /screen /photo)이 오면 즉시 처리하고
     // 남은 시간만큼 계속 대기.
+    // followInterval=true 이면 대기 중 /INTERVAL 로 간격이 바뀌었을 때 (주기 시작 시각 + 새 간격)으로 끝나는 시각을 다시 계산한다.
     // 종료 요청이 오면 false.
     bool idle(DWORD ms, std::vector<std::unique_ptr<ICaptureSource>>& sources,
-              const ImageEncoder& encoder, const TelegramClient& telegram)
+              const ImageEncoder& encoder, const TelegramClient& telegram,
+              bool followInterval = false)
     {
-        const ULONGLONG end = GetTickCount64() + ms;
+        ULONGLONG end = GetTickCount64() + ms;
         HANDLE h[2] = { stop_.handle(), shotEvent_ };
         for (;;) {
             ULONGLONG now = GetTickCount64();
@@ -2104,6 +2183,10 @@ private:
                                 f == CaptureFilter::All ? "화면+카메라"
                                 : (f == CaptureFilter::ScreenOnly ? "화면만" : "카메라만"));
                     cycle(sources, encoder, telegram, true, f); // 중단 상태여도 전송, 반복 횟수에는 포함 안 함
+                }
+                if (followInterval && InterlockedExchange(&intervalChanged_, 0)) {
+                    end = periodStart_ + (ULONGLONG)cfg_.interval * 1000ULL; // 이미 지났으면 바로 다음 캡처
+                    Logger::log("캡처 간격 변경 반영: %d초", (int)cfg_.interval);
                 }
                 continue;
             }
@@ -2257,9 +2340,9 @@ private:
                 snprintf(keep, sizeof(keep), "%d일 / 최대 %d개 (0=제한 없음)", cfg_.keepDays, cfg_.keepMax);
             else
                 snprintf(keep, sizeof(keep), "자동 정리 안 함");
-            char buf[640];
+            char buf[800];
             snprintf(buf, sizeof(buf),
-                     "[%s] 실행 중\n가동 시간: %llu일 %02llu:%02llu:%02llu\n간격: %d초\n"
+                     "[%s] 실행 중 (v" APP_VERSION_STR ")\n가동 시간: %llu일 %02llu:%02llu:%02llu\n간격: %d초\n"
                      "반복: %d / %s\n이미지 전송: %s\n카메라: %s\n이미지 보관: %s\n침입 탐지: %s\n마지막 캡처: %s",
                      host.c_str(), sec / 86400, (sec / 3600) % 24, (sec / 60) % 60, sec % 60,
                      cfg_.interval, (int)loopCount_, maxLoopStr.c_str(),
@@ -2288,6 +2371,40 @@ private:
                     msg += "\n주의: 상태 파일(detect.state) 저장에 실패해 재시작하면 이전 상태로 돌아갑니다.";
                 telegram.sendMessage(msg, resp);
                 Logger::log("침입 탐지 %s (텔레그램 명령)", on ? "켬" : "끔");
+            }
+        } else if (cmd == "/interval" || cmd.rfind("/interval=", 0) == 0) {
+            // /INTERVAL=nnn : 캡처/전송 간격(초) 변경. 명령은 소문자로 정규화되어 들어온다 (/INTERVAL=300 -> /interval=300).
+            // 값을 바로 적용하고 INI 의 TELEGRAM_INTERVAL 도 갱신한다. "/INTERVAL" 만 보내면 현재 값과 사용법을 알려 준다.
+            const size_t eq = cmd.find('=');
+            if (eq == std::string::npos) {
+                telegram.sendMessage("[" + host + "] 현재 캡처 간격: " + std::to_string((int)cfg_.interval) +
+                                     "초\n사용법: /INTERVAL=nnn (" + std::to_string(kMinInterval) + "~" +
+                                     std::to_string(kMaxInterval) + "초)", resp);
+            } else {
+                const std::string num = cmd.substr(eq + 1);
+                const bool digits = !num.empty() && num.size() <= 6 &&
+                                    num.find_first_not_of("0123456789") == std::string::npos;
+                const long v = digits ? atol(num.c_str()) : 0;
+                if (!digits || v < kMinInterval || v > kMaxInterval) {
+                    telegram.sendMessage("[" + host + "] 잘못된 값입니다: " + num + "\n사용법: /INTERVAL=nnn (" +
+                                         std::to_string(kMinInterval) + "~" + std::to_string(kMaxInterval) +
+                                         "초, 숫자만)", resp);
+                } else if ((int)v == (int)cfg_.interval) {
+                    telegram.sendMessage("[" + host + "] 캡처 간격은 이미 " + std::to_string(v) + "초입니다.", resp);
+                } else {
+                    const int old = cfg_.interval;
+                    cfg_.interval = (int)v;
+                    InterlockedExchange(&intervalChanged_, 1);
+                    SetEvent(shotEvent_); // 대기 중인 메인 스레드를 깨워 새 간격으로 남은 시간을 다시 계산
+                    const bool saved = SysUtil::updateIniValue(iniPath_, "TELEGRAM_INTERVAL", std::to_string(v));
+                    std::string msg = "[" + host + "] 캡처 간격을 " + std::to_string(old) + "초 -> " +
+                                      std::to_string(v) + "초로 변경했습니다.";
+                    if (!saved)
+                        msg += "\n주의: INI 파일 저장에 실패해 재시작하면 이전 값으로 돌아갑니다.";
+                    telegram.sendMessage(msg, resp);
+                    Logger::log("캡처 간격 변경 %d -> %ld초 (텔레그램 명령, INI %s)", old, v,
+                                saved ? "저장됨" : "저장 실패");
+                }
             }
         } else if (cmd == "/pause") {
             InterlockedExchange(&paused_, 1); // 캡처/저장은 계속하고 텔레그램 이미지 전송만 중단
@@ -2318,6 +2435,7 @@ private:
                     "/photo - 지금 카메라만 캡처해서 전송\n/pause - 이미지 전송 중단\n"
                     "/resume - 이미지 전송 재개\n/status - 상태 확인\n"
                     "/detectOn - 침입 탐지 켜기\n/detectOff - 침입 탐지 끄기\n"
+                    "/INTERVAL=nnn - 캡처 간격(초) 변경 (/INTERVAL 만 보내면 현재 값)\n"
                     "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
         }
@@ -2494,6 +2612,11 @@ private:
     MotionDetector detector_;        // 탐지 스레드 전용 (켜질 때마다 새로 만듦)
     volatile LONG loopCount_ = 0;    // 완료한 반복 횟수 (/shot 은 제외)
     ULONGLONG startTick_ = 0;        // 시작 시각 (가동 시간 계산용)
+    static constexpr int kMinInterval = 5;      // /INTERVAL 허용 범위(초). 너무 짧으면 텔레그램 전송 제한(429)에 걸림
+    static constexpr int kMaxInterval = 86400;
+    std::string iniPath_;            // 로드한 INI 경로 (/INTERVAL 저장용)
+    volatile LONG intervalChanged_ = 0; // /INTERVAL 로 간격이 바뀜 (명령 스레드 -> 메인 스레드)
+    ULONGLONG periodStart_ = 0;      // 현재 주기의 시작 시각 (메인 스레드 전용)
     std::string lastCycle_;          // 마지막 캡처 시각 (cs_ 로 보호)
     CRITICAL_SECTION cs_;
     HANDLE shotEvent_ = nullptr;
