@@ -1,40 +1,5 @@
 PC=GSKIM-WIN11
 USERNAME=garpsu
 IP=192.168.0.36
-DATE=2026-11-02
-TIME=14:59:07.30
-[2026-11-02 14:59:07] 설정 로드: C:\tools\screen_telegram\screen_telegram.ini (간격 30초, 카메라 사용안함, 반복 99999)
-[2026-11-02 14:59:07] SAVE_ONLY=TRUE: 텔레그램 전송 없이 image 폴더에 저장만 합니다.
-[2026-11-02 14:59:07]   MONITOR1 = TRUE
-[2026-11-02 14:59:07]   MONITOR2 = FALSE
-[2026-11-02 14:59:07]   MONITOR3 = FALSE
-[2026-11-02 14:59:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 14:59:07] 저장: C:\tools\screen_telegram\image\20261102_145907_Monitor1.jpg (132 KB)
-[2026-11-02 14:59:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 14:59:37] 저장: C:\tools\screen_telegram\image\20261102_145937_Monitor1.jpg (346 KB)
-[2026-11-02 15:00:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:00:07] 저장: C:\tools\screen_telegram\image\20261102_150007_Monitor1.jpg (345 KB)
-[2026-11-02 15:00:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:00:37] 저장: C:\tools\screen_telegram\image\20261102_150037_Monitor1.jpg (344 KB)
-[2026-11-02 15:01:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:01:07] 저장: C:\tools\screen_telegram\image\20261102_150107_Monitor1.jpg (345 KB)
-[2026-11-02 15:01:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:01:37] 저장: C:\tools\screen_telegram\image\20261102_150137_Monitor1.jpg (344 KB)
-[2026-11-02 15:02:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:02:07] 저장: C:\tools\screen_telegram\image\20261102_150207_Monitor1.jpg (343 KB)
-[2026-11-02 15:02:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:02:37] 저장: C:\tools\screen_telegram\image\20261102_150237_Monitor1.jpg (344 KB)
-[2026-11-02 15:03:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:03:07] 저장: C:\tools\screen_telegram\image\20261102_150307_Monitor1.jpg (139 KB)
-[2026-11-02 15:03:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:03:37] 저장: C:\tools\screen_telegram\image\20261102_150337_Monitor1.jpg (188 KB)
-[2026-11-02 15:04:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:04:07] 저장: C:\tools\screen_telegram\image\20261102_150407_Monitor1.jpg (133 KB)
-[2026-11-02 15:04:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:04:37] 저장: C:\tools\screen_telegram\image\20261102_150437_Monitor1.jpg (260 KB)
-[2026-11-02 15:05:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:05:07] 저장: C:\tools\screen_telegram\image\20261102_150507_Monitor1.jpg (129 KB)
-[2026-11-02 15:05:37] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:05:37] 저장: C:\tools\screen_telegram\image\20261102_150537_Monitor1.jpg (52 KB)
-[2026-11-02 15:06:07] 모니터 2 는 INI 설정에 의해 건너뜀 (MONITOR2=FALSE)
-[2026-11-02 15:06:07] 저장: C:\tools\screen_telegram\image\20261102_150607_Monitor1.jpg (144 KB)
+DATE=2026-11-03
+TIME=16:17:44.63
