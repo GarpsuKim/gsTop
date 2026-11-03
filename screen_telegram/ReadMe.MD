@@ -44,3 +44,7 @@ screen_telegram.cpp.001 ... 수정전 소스
 - MAX_LOOP=N 이면 N회 캡처/전송 후 자동 종료 (0 또는 생략 시 무제한)
 - 버전: 1.0.0.0 (exe 속성 > 자세히 탭, 시작 인사말, /status, 로그에 표시)
 - 저작권: 김갑수. 이 프로그램은 개인에 한하여 비상업적 목적으로 자유롭게 사용 할 수 있습니다. 기업이나 단체 등 개인이 아닌 사용자는 개발자 김갑수와 개별 협의하여야 합니다.
+- 자동 업데이트 (screen_telegram_RUN.BAT): exe 를 시작하기 전에 GitHub 의 서버 exe(https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.exe)를 받아, 서버 exe 의 파일 버전이 PC 의 exe 보다 높을 때만 교체한 뒤 실행. 결과는 log.txt 의 UPDATE= 줄에 기록
+  * 교체 전 기존 exe 는 screen_telegram.exe.bak 로 보관. 네트워크 오류/버전 정보 없음/exe 실행 중이면 교체하지 않고 현재 exe 로 계속 실행
+  * 새 버전 배포: version.h 의 버전을 올리고 build.bat 으로 빌드한 exe 를 GitHub 저장소의 screen_telegram 폴더에 올림 (버전이 같거나 낮으면 PC 는 교체하지 않음)
+  * Windows 10/11 에 기본 포함된 curl.exe 와 powershell 사용. 다운로드 주소는 웹 페이지 주소(blob)가 아니라 raw 주소
