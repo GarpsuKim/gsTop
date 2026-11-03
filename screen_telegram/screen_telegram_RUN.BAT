@@ -22,6 +22,32 @@ for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /i "IPv4" ^| findstr /v 
 (echo DATE=%DATE%)>>log.txt
 (echo TIME=%TIME%)>>log.txt
 
+rem ===== If screen_telegram.ini does not exist in this folder, download it from the server (GitHub) =====
+if exist "screen_telegram.ini" goto INI_DONE
+set "INI_URL=https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.ini"
+(echo INI=missing - downloading from server)>>log.txt
+del "screen_telegram.ini.tmp" >nul 2>&1
+curl.exe -L -f -s -S --connect-timeout 10 --max-time 60 -o "screen_telegram.ini.tmp" "%INI_URL%" >>log.txt 2>&1
+if errorlevel 1 (
+    (echo INI=download failed - screen_telegram.exe cannot run without screen_telegram.ini)>>log.txt
+    goto INI_CLEAN
+)
+rem sanity check: a real ini contains TELEGRAM_ keys (an HTML error page does not)
+findstr /i /c:"TELEGRAM_" "screen_telegram.ini.tmp" >nul 2>&1
+if errorlevel 1 (
+    (echo INI=downloaded file is not a valid ini - discarded)>>log.txt
+    goto INI_CLEAN
+)
+move /y "screen_telegram.ini.tmp" "screen_telegram.ini" >nul 2>&1
+if errorlevel 1 (
+    (echo INI=could not save screen_telegram.ini)>>log.txt
+) else (
+    (echo INI=downloaded - edit TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID if needed)>>log.txt
+)
+:INI_CLEAN
+if exist "screen_telegram.ini.tmp" del "screen_telegram.ini.tmp" >nul 2>&1
+:INI_DONE
+
 rem ===== Auto update: compare with the server exe (GitHub) BEFORE starting =====
 rem Update only when the server exe has a HIGHER file version than the local exe (version.h / .rc).
 rem Needs curl.exe and powershell (both included in Windows 10/11). On any problem the current exe is kept.

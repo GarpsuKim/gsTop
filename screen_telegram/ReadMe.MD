@@ -53,3 +53,5 @@ screen_telegram.cpp.001 ... 수정전 소스
   * ;KEY=값 처럼 주석 처리된 줄은 없는 키로 봄. 키 이름은 영문/숫자/_ (64자 이내, 대문자로 저장), 값은 한 줄 400자 이내
   * 프로그램이 해석하지 않는 키이면 추가는 하되 오타 주의 메시지를 함께 보냄
   * INI 는 시작할 때만 읽으므로 추가한 값은 프로그램을 다시 시작해야 적용됨. 로그에는 키 이름만 남기고 값은 남기지 않음
+- INI 자동 다운로드 (screen_telegram_RUN.BAT): 현재 폴더에 screen_telegram.ini 가 없으면 GitHub(https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.ini)에서 받아 저장. 이미 있으면 절대 덮어쓰지 않음. 받은 파일에 TELEGRAM_ 키가 없으면(오류 페이지 등) 버린다. 결과는 log.txt 의 INI= 줄에 기록
+  * 서버의 INI 는 공개 저장소에 올라가므로 실제 봇 토큰/chat id 를 넣지 말고 견본 값으로 올릴 것. 내려받은 뒤 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 를 PC 에서 직접 수정
