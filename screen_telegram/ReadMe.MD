@@ -30,7 +30,7 @@ image\ ................. 캡처 이미지 저장 폴더 (프로그램이 생성)
 - 이미지가 10MB 를 넘으면 품질/해상도를 단계적으로 낮춰 전송. 가로+세로 10000px 초과 또는 비율 20:1 초과이면 원본을 문서(sendDocument)로 전송
 - CAMERA_KEEP_OPEN=TRUE 이면 카메라를 계속 열어 둠 (지연/LED 깜빡임 감소, 대신 다른 앱이 카메라를 쓸 수 없음. 기본 FALSE, 현재 INI 는 TRUE)
 - SAVE_ONLY=TRUE 이면 이미지를 텔레그램으로 보내지 않고 image 폴더에 저장만 함. 명령 수신(폴링)은 계속 동작하며 /shot 만 전송 (TOKEN/CHAT_ID 가 없으면 명령 수신 없이 저장만)
-- 텔레그램 명령 수신 (TELEGRAM_COMMANDS=TRUE): 봇에게 /shot(화면+카메라 즉시 캡처·전송) /screen(화면만 즉시 캡처·전송) /photo(카메라만 즉시 캡처·전송) /pause(이미지 전송 중단, 저장은 계속) /resume(전송 재개) /status(상태) /detectOn(침입 탐지 켜기) /detectOff(침입 탐지 끄기) /INTERVAL=nnn(캡처·전송 간격을 nnn초로 변경, 5~86400. 즉시 적용되고 INI 의 TELEGRAM_INTERVAL 도 갱신됨. /INTERVAL 만 보내면 현재 값 표시) /version(프로그램 버전과 빌드 시각 표시) /log(실행 로그 전송, 아래 설명) /CMD [명령](PC 에서 명령 실행 후 결과를 txt 로 전송, 아래 설명) /ini 키=값(INI 에 새 키 추가, 아래 설명) /stop(종료, Yes/No 버튼으로 확인) /help 또는 //(도움말) 전송 (명령은 대소문자를 구분하지 않음).
+- 텔레그램 명령 수신 (TELEGRAM_COMMANDS=TRUE): 봇에게 /shot(화면+카메라 즉시 캡처·전송) /screen(화면만 즉시 캡처·전송) /photo(카메라만 즉시 캡처·전송) /pause(이미지 전송 중단, 저장은 계속) /resume(전송 재개) /status(상태) /detectOn(침입 탐지 켜기) /detectOff(침입 탐지 끄기) /INTERVAL=nnn(캡처·전송 간격을 nnn초로 변경, 5~86400. 즉시 적용되고 INI 의 TELEGRAM_INTERVAL 도 갱신됨. /INTERVAL 만 보내면 현재 값 표시) /version(프로그램 버전과 빌드 시각 표시) /log(실행 로그 전송, 아래 설명) /CMD 명령(PC 에서 명령 실행 후 결과를 txt 로 전송, 아래 설명) /ini 키=값(INI 에 새 키 추가, 아래 설명) /stop(종료, Yes/No 버튼으로 확인) /help 또는 //(도움말) 전송 (명령은 대소문자를 구분하지 않음).
   * /stop 을 보내면 "종료하시겠습니까?(y/n)" 메시지에 Yes/No 버튼이 붙어 옴. Yes 를 눌러야 종료, No 는 취소. 버튼은 명령과 같은 chat/허용 사용자만 누를 수 있고, 5분이 지났거나 이미 처리한 메시지, 프로그램 재시작 전의 메시지 버튼은 무효(종료되지 않음) TELEGRAM_CHAT_ID 로 설정한 chat 의 명령만 처리. 명령은 별도 스레드가 받으므로 캡처/전송 중에도 /pause /resume /status /stop 은 수 초 내 반응 (/shot 은 진행 중인 캡처가 끝난 뒤 실행)
   * TELEGRAM_CHAT_ID 가 그룹(음수)이면 TELEGRAM_ALLOWED_USER_IDS=111,222 (명령 허용 사용자 ID) 를 반드시 설정해야 명령이 동작. 개인 chat 이면 생략 가능
   * 같은 봇 토큰을 다른 프로그램이 getUpdates/webhook 으로 쓰면 409 충돌이 나므로, 이 프로그램 전용 봇을 쓰는 것을 권장
@@ -63,8 +63,8 @@ image\ ................. 캡처 이미지 저장 폴더 (프로그램이 생성)
 - 실행 로그: exe 가 exe 폴더의 log.txt 에 직접 기록 (콘솔 없는 -mwindows 빌드에서도 남음). 형식 [날짜 시각.밀리초] [T스레드번호] 메시지. 시작 시 버전/PID/폴더, 종료 시 종료 코드, 처리되지 않은 예외/크래시는 원인 코드와 주소를 기록. 5MB 를 넘으면 log.old.txt 로 넘기고 새로 시작. 로그에는 봇 토큰과 /ini 로 넣은 값은 남기지 않음
 - /log [n|all] : 실행 로그(log.txt) 전송. 인자 없으면 최근 50줄, /log n 은 최근 n줄(1~2000), /log all 은 log.txt 전체
   * 내용이 텔레그램 메시지 길이(4096자)를 넘으면(또는 /log all) 자동으로 .txt 문서로 전송. log.old.txt(회전된 이전 로그)는 보지 않고 현재 log.txt 만 대상으로 함
-- /CMD [명령] : [ ] 안의 문자열을 이 PC 의 cmd.exe 에서 실행하고, 그 결과(표준 출력+오류)를 텍스트 파일(cmd_YYYYMMDD_HHMMSS.txt)로 텔레그램에 전송 (예: /CMD [dir /b], /CMD [ipconfig /all], /CMD [type log.txt | findstr UPDATE])
-  * 첫 '[' 부터 마지막 ']' 까지가 명령. 안에 [ ] 나 따옴표가 있어도 됨. 대괄호가 없거나 비어 있으면 사용법만 알려 줌
+- /CMD 명령 : /CMD 뒤의 문자열 전체를 이 PC 의 cmd.exe 에서 실행하고, 그 결과(표준 출력+오류)를 텍스트 파일(cmd_YYYYMMDD_HHMMSS.txt)로 텔레그램에 전송 (예: /CMD dir /b, /CMD ipconfig /all, /CMD type log.txt | findstr UPDATE)
+  * [ ] 같은 구분 기호는 없음. 명령 뒤 문자열(앞뒤 공백만 제거)이 그대로 cmd.exe /c 에 전달됨. 명령이 비어 있으면 사용법만 알려 줌
   * 캡션에 실행한 명령, 종료 코드, 소요 시간, 출력 크기를 표시. 출력이 없으면 파일 없이 "(출력 없음)" 메시지만 전송
   * 실행 창은 숨김, 표준 입력은 NUL (입력을 기다리는 명령은 바로 끝남). 시작 폴더는 프로그램의 현재 폴더
   * 제한 시간 60초: 넘으면 하위 프로세스까지 강제 종료하고 그때까지의 출력을 전송. 출력 20MB 초과분은 잘림

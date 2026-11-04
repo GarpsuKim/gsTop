@@ -29,7 +29,7 @@ if exist "screen_telegram.ini" goto INI_DONE
 set "INI_URL=https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.ini"
 (echo INI=missing - downloading from server)>>log.txt
 del "screen_telegram.ini.tmp" >nul 2>&1
-curl.exe -L -f -s -S --connect-timeout 10 --max-time 60 -o "screen_telegram.ini.tmp" "%INI_URL%" >>log.txt 2>&1
+"%SystemRoot%\System32\curl.exe" -L -f -s -S --connect-timeout 10 --max-time 60 -o "screen_telegram.ini.tmp" "%INI_URL%" >>log.txt 2>&1
 if errorlevel 1 (
     (echo INI=download failed - screen_telegram.exe cannot run without screen_telegram.ini)>>log.txt
     goto INI_CLEAN
@@ -56,7 +56,7 @@ rem Needs curl.exe and powershell (both included in Windows 10/11). On any probl
 set "UPD_URL=https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.exe"
 set "UPD_NEW=screen_telegram.exe.new"
 del "%UPD_NEW%" >nul 2>&1
-curl.exe -L -f -s -S --connect-timeout 10 --max-time 180 -o "%UPD_NEW%" "%UPD_URL%" >>log.txt 2>&1
+"%SystemRoot%\System32\curl.exe" -L -f -s -S --connect-timeout 10 --max-time 180 -o "%UPD_NEW%" "%UPD_URL%" >>log.txt 2>&1
 if errorlevel 1 (
     (echo UPDATE=skip - download failed or no network, keep current exe)>>log.txt
     goto UPD_DONE

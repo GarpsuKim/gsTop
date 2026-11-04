@@ -25,7 +25,7 @@
 //   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
 //   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
 //                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
-//   (텔레그램 /CMD [명령] 은 [ ] 안의 문자열을 PC 의 cmd.exe 에서 실행하고 출력(stdout+stderr)을 .txt 문서로 전송한다.
+//   (텔레그램 /CMD 명령 은 /CMD 뒤의 문자열 전체를 PC 의 cmd.exe 에서 실행하고 출력(stdout+stderr)을 .txt 문서로 전송한다.
 //    실행 시간 제한 60초(초과 시 하위 프로세스까지 종료), 출력 20MB 초과분은 잘림, 표준 입력은 NUL.)
 //   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
 //    추가한 값은 프로그램을 다시 시작해야 적용된다.)
@@ -2782,7 +2782,7 @@ private:
                     "/INTERVAL=nnn - 캡처 간격(초) 변경 (/INTERVAL 만 보내면 현재 값)\n"
                     "/ini 키=값 - INI 에 새 키 추가 (이미 있는 키는 경고만, 재시작 후 적용)\n"
                     "/log [n|all] - 실행 로그 전송 (기본 최근 50줄, 길면 문서로)\n"
-                    "/CMD [명령] - [ ] 안의 명령을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
+                    "/CMD 명령 - 뒤의 문자열을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
                     "/version - 버전 표시\n"
                     "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
@@ -2936,17 +2936,15 @@ private:
         return true;
     }
 
-    // /CMD [명령] : [ ] 안의 문자열(첫 '[' ~ 마지막 ']')을 cmd.exe 로 실행하고 출력을 .txt 문서로 보낸다. (명령 스레드에서 호출)
+    // /CMD 명령 : /CMD 뒤의 문자열 전체(앞뒤 공백 제거)를 cmd.exe 로 실행하고 출력을 .txt 문서로 보낸다. (명령 스레드에서 호출)
     // 실행하는 동안 이 명령 스레드가 막히므로 다른 텔레그램 명령은 끝난 뒤(최대 kCmdTimeoutMs) 처리된다.
     void handleCmdCmd(const std::string& arg, const std::string& host, const TelegramClient& telegram)
     {
         std::string resp;
         const std::string pre = "[" + host + "] ";
-        const std::string usage = "\n사용법: /CMD [실행할 명령]  (예: /CMD [dir /b])\n"
-                                  "[ ] 안의 문자열을 PC 의 cmd.exe 에서 실행하고 결과를 txt 파일로 보냅니다.";
-        const size_t lb = arg.find('['), rb = arg.rfind(']');
-        std::string cmdline = (lb != std::string::npos && rb != std::string::npos && rb > lb)
-                                  ? StrUtil::trim(arg.substr(lb + 1, rb - lb - 1)) : std::string();
+        const std::string usage = "\n사용법: /CMD 실행할 명령  (예: /CMD dir /b)\n"
+                                  "/CMD 뒤의 문자열 전체를 PC 의 cmd.exe 에서 실행하고 결과를 txt 파일로 보냅니다.";
+        const std::string cmdline = StrUtil::trim(arg);
         if (cmdline.empty()) {
             telegram.sendMessage(pre + "실행할 명령이 없습니다." + usage, resp);
             return;
@@ -2966,7 +2964,7 @@ private:
         Logger::log("/CMD 종료: 코드 %lu, 출력 %zu바이트, %.1f초%s%s", (unsigned long)code, out.size(), sec,
                     timedOut ? ", 시간 초과" : "", truncated ? ", 잘림" : "");
 
-        std::string head = pre + "/CMD [" + (cmdline.size() > 300 ? cmdline.substr(0, 300) + "..." : cmdline) + "]\n";
+        std::string head = pre + "/CMD " + (cmdline.size() > 300 ? cmdline.substr(0, 300) + "..." : cmdline) + "\n";
         char info[160];
         snprintf(info, sizeof(info), "종료 코드 %lu, %.1f초, 출력 %zu바이트", (unsigned long)code, sec, out.size());
         head += info;
