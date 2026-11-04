@@ -21,6 +21,7 @@
 //                           TELEGRAM_CHAT_ID 가 그룹(음수)이면 이 목록이 없을 때 명령을 모두 거부한다)
 //   KEEP_DAYS=7            (image 폴더에서 N일 지난 이미지 자동 삭제. 0 또는 미기재 시 삭제 안 함)
 //   KEEP_MAX_FILES=5000    (image 폴더 이미지 최대 개수. 초과분은 오래된 것부터 삭제. 0 또는 미기재 시 제한 없음)
+//   PREVIOUS_SESSION_CLEAR=TRUE  (TRUE 이면 프로그램 시작할 때 log.txt 와 image 폴더의 모든 파일을 삭제. 기본 FALSE)
 //   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
 //   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
 //                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
@@ -153,6 +154,21 @@ public:
         write(msg, true);
     }
 
+    // log.txt 를 지운다 (PREVIOUS_SESSION_CLEAR 용). 로그 잠금을 잡고 삭제하며, 삭제가 막히면(다른 프로그램이 열어 둠) 내용만 비운다.
+    // log.old.txt 는 건드리지 않는다. 지웠으면 true.
+    static bool clearFile()
+    {
+        CsLock lock(&guard().cs);
+        if (DeleteFileW(logPath(false).c_str())) return true;
+        if (GetLastError() == ERROR_FILE_NOT_FOUND) return true;
+        HANDLE h = CreateFileW(logPath(false).c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return false;
+        CloseHandle(h);
+        return true;
+    }
+
     // /log 명령용: log.txt 의 마지막 n 줄을 UTF-8 문자열로 돌려준다 (파일이 없으면 빈 문자열).
     // 로그를 쓰는 중에 호출해도 안전하게 읽는다(공유 읽기). log.old.txt 는 보지 않고 현재 log.txt 만 본다.
     static std::string tailLines(int n)
@@ -193,6 +209,12 @@ private:
         Guard() { InitializeCriticalSection(&cs); }
     };
 
+    static Guard& guard()
+    {
+        static Guard g;
+        return g;
+    }
+
     static const std::wstring& logPath(bool old)
     {
         static const std::wstring paths[2] = { makePath(L"log.txt"), makePath(L"log.old.txt") };
@@ -225,7 +247,7 @@ private:
 
         OutputDebugStringA(line.c_str()); // 디버거(DebugView 등)로도 볼 수 있음
 
-        static Guard g;
+        Guard& g = guard();
         bool locked = false;
         if (crash) locked = TryEnterCriticalSection(&g.cs) != 0;
         else { EnterCriticalSection(&g.cs); locked = true; }
@@ -520,6 +542,25 @@ public:
         return ext == L".jpg" || ext == L".png";
     }
 
+    // image 폴더 안의 모든 파일(하위 폴더는 제외)을 삭제하고 지운 개수를 돌려준다. failed 에 삭제 실패 개수. (PREVIOUS_SESSION_CLEAR 용)
+    static size_t clearFolderFiles(const std::string& dir, size_t& failed)
+    {
+        failed = 0;
+        const std::wstring wdir = StrUtil::toWide(dir);
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((wdir + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return 0; // 폴더가 없으면 지울 것도 없음
+        size_t deleted = 0;
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            const std::wstring path = wdir + L"\\" + fd.cFileName;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+            if (DeleteFileW(path.c_str())) ++deleted; else ++failed;
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+        return deleted;
+    }
+
     // image 폴더 정리: keepDays 일보다 오래된 파일, 그리고 keepMax 개를 넘는 오래된 파일을 삭제.
     // (파일명의 시각 순서로 오래됨을 판단한다. 둘 다 0 이면 아무것도 하지 않음)
     static void cleanupImages(const std::string& dir, int keepDays, int keepMax)
@@ -676,6 +717,7 @@ public:
     bool commands = true;       // TELEGRAM_COMMANDS=TRUE (봇 명령 수신)
     int keepDays = 0;           // KEEP_DAYS=7 (0 = 자동 삭제 안 함)
     int keepMax = 0;            // KEEP_MAX_FILES=5000 (0 = 제한 없음)
+    bool previousSessionClear = false; // PREVIOUS_SESSION_CLEAR=TRUE (시작 때 log.txt 와 image 폴더 파일 전부 삭제)
     bool cameraKeepOpen = false; // CAMERA_KEEP_OPEN=TRUE (카메라를 계속 열어 둠)
     std::vector<std::string> allowedUsers; // TELEGRAM_ALLOWED_USER_IDS=111,222
 
@@ -745,7 +787,7 @@ public:
         static const char* const names[] = {
             "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_INTERVAL", "TELEGRAM_COMMANDS",
             "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "SAVE_ONLY", "MAX_LOOP",
-            "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES",
+            "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES", "PREVIOUS_SESSION_CLEAR",
             "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
             "INTRUSION_CONFIRM_FRAMES", "INTRUSION_COOLDOWN", "INTRUSION_CHECK_MS"
         };
@@ -787,6 +829,9 @@ private:
         else if (key == "KEEP_DAYS") {
             int v = atoi(val.c_str());
             if (v >= 0) keepDays = v;
+        }
+        else if (key == "PREVIOUS_SESSION_CLEAR") {
+            previousSessionClear = StrUtil::parseBool(val, false);
         }
         else if (key == "KEEP_MAX_FILES") {
             int v = atoi(val.c_str());
@@ -2229,6 +2274,17 @@ public:
         if (!cfg_.load(ini)) {
             Logger::log("INI 파일을 열 수 없습니다: %s", ini.c_str());
             return 1;
+        }
+        if (cfg_.previousSessionClear) {
+            // 시작 직후(INI 를 읽은 뒤, 캡처/명령 수신 전)에 이전 세션의 흔적을 지운다.
+            const bool logOk = Logger::clearFile();
+            size_t failed = 0;
+            const size_t n = SysUtil::clearFolderFiles(imageDir_, failed);
+            Logger::log("==================== 프로그램 시작 (이전 세션 정리 후) ====================");
+            Logger::log("screen_telegram v%s, PID %lu", APP_VERSION_STR, (unsigned long)GetCurrentProcessId());
+            Logger::log("PREVIOUS_SESSION_CLEAR=TRUE: log.txt %s, image 폴더 파일 %zu개 삭제%s",
+                        logOk ? "삭제" : "삭제 실패", n,
+                        failed ? (", 삭제 실패 " + std::to_string(failed) + "개").c_str() : "");
         }
         if (cfg_.token.empty() || cfg_.chatId.empty()) {
             if (!cfg_.saveOnly) {

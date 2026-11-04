@@ -25,6 +25,7 @@ image\ ................. 캡처 이미지 저장 폴더 (프로그램이 생성)
 - Ctrl+C 또는 창 닫기 시 정상 종료
 - 전송 전에 모든 이미지를 exe 폴더의 image 폴더에 저장 (파일명: YYYYMMDD_HHMMSS_Monitor1.jpg, ..._Camera.jpg)
   * 기본은 자동 삭제 없음 (30초 간격, 모니터+카메라면 하루 약 3GB). KEEP_DAYS=N (N일 지난 이미지 삭제), KEEP_MAX_FILES=N (최대 N개, 오래된 것부터 삭제) 로 자동 정리 가능. 이 프로그램이 만든 파일명(YYYYMMDD_HHMMSS_*.jpg/png)만 삭제함
+  * PREVIOUS_SESSION_CLEAR=TRUE 이면 프로그램을 시작할 때 log.txt 와 image 폴더의 모든 파일(하위 폴더 제외)을 삭제 (아래 설명)
   * 현재 INI: TELEGRAM_INTERVAL=1800(30분 간격), KEEP_DAYS=7, KEEP_MAX_FILES=999 (7일 지난 이미지 삭제, 최대 999개 유지)
 - 이미지가 10MB 를 넘으면 품질/해상도를 단계적으로 낮춰 전송. 가로+세로 10000px 초과 또는 비율 20:1 초과이면 원본을 문서(sendDocument)로 전송
 - CAMERA_KEEP_OPEN=TRUE 이면 카메라를 계속 열어 둠 (지연/LED 깜빡임 감소, 대신 다른 앱이 카메라를 쓸 수 없음. 기본 FALSE, 현재 INI 는 TRUE)
@@ -71,6 +72,12 @@ image\ ................. 캡처 이미지 저장 폴더 (프로그램이 생성)
   * 한글 출력: 출력이 UTF-8 이 아니면 콘솔 코드 페이지(한국어 Windows 는 CP949)에서 UTF-8 로 변환해 전송
   * 보안 주의: 허용된 chat/사용자(TELEGRAM_CHAT_ID, TELEGRAM_ALLOWED_USER_IDS)가 PC 에서 임의의 명령을 실행할 수 있는 기능. 텔레그램 계정과 그룹 chat 의 허용 사용자 목록을 안전하게 관리할 것. 실행한 명령(200자까지)과 종료 코드는 log.txt 에 기록
   * 프로그램이 사용자 로그온 세션에서 실행 중인 권한으로 동작 (관리자 권한이 필요한 명령은 exe 를 관리자로 실행해야 함)
+- PREVIOUS_SESSION_CLEAR=TRUE : 프로그램 시작 직후(INI 를 읽은 뒤, 캡처/명령 수신 전)에 이전 세션의 흔적을 지움. 기본 FALSE
+  * 삭제 대상: exe 폴더의 log.txt 와 image 폴더 안의 모든 파일 (이 프로그램이 만든 이미지가 아니어도 삭제. 하위 폴더는 건드리지 않음). log.old.txt 는 삭제하지 않음
+  * 삭제는 복구할 수 없음. TRUE 이면 재시작할 때마다 이미지가 전부 사라지므로 보관이 필요하면 FALSE 로 둘 것
+  * screen_telegram_RUN.BAT 이 exe 시작 전에 log.txt 에 쓴 부팅 정보(PC/IP/UPDATE= 줄)도 함께 지워짐. 이전 log.txt 는 BAT 이 log.old.txt 로 보관하므로 직전 로그는 거기에 남음
+  * 삭제 뒤 log.txt 에 "프로그램 시작 (이전 세션 정리 후)" 와 삭제 결과(log.txt 삭제 여부, 지운 이미지 수, 실패 수)를 기록. log.txt 가 다른 프로그램에 열려 있어 지울 수 없으면 내용만 비움
+  * 시작 때 한 번만 수행. /ini 로 추가해도 다음 시작부터 적용
 
 screen_telegram.ini 설정 요약 (현재 INI 기준. 줄 맨 앞 ; 또는 # 은 주석, 값 뒤 "공백 + ; 또는 #" 도 주석):
   키                          현재 값    설명 (기본값)
@@ -86,6 +93,7 @@ screen_telegram.ini 설정 요약 (현재 INI 기준. 줄 맨 앞 ; 또는 # 은
   TELEGRAM_COMMANDS           TRUE       텔레그램 명령 수신 (TRUE)
   KEEP_DAYS                   7          N일 지난 이미지 삭제 (0=삭제 안 함)
   KEEP_MAX_FILES              999        이미지 최대 개수 (0=제한 없음)
+  PREVIOUS_SESSION_CLEAR      TRUE       시작할 때 log.txt 와 image 폴더 파일 전부 삭제 (FALSE)
   CAMERA_KEEP_OPEN            TRUE       카메라 계속 열어 둠 (FALSE)
   AUTO_DETECT                 TRUE       시작 때 침입 탐지 자동 켬 (FALSE, 그러면 detect.state 를 따름)
   INTRUSION_PIXEL_THRESHOLD   25         픽셀 밝기 변화 임계값 1~255 (25)
