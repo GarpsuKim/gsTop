@@ -24,6 +24,8 @@
 //   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
 //   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
 //                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
+//   (텔레그램 /CMD [명령] 은 [ ] 안의 문자열을 PC 의 cmd.exe 에서 실행하고 출력(stdout+stderr)을 .txt 문서로 전송한다.
+//    실행 시간 제한 60초(초과 시 하위 프로세스까지 종료), 출력 20MB 초과분은 잘림, 표준 입력은 NUL.)
 //   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
 //    추가한 값은 프로그램을 다시 시작해야 적용된다.)
 //   (캡처/전송 간격 TELEGRAM_INTERVAL 은 텔레그램 명령 /INTERVAL=nnn (5~86400초) 로 바꿀 수 있다.
@@ -92,6 +94,7 @@ using std::max;
 #include <cmath>
 #include <cwctype>
 #include <cstdarg>
+#include <exception>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -124,22 +127,135 @@ struct CsLock {
 // ================================================================ Logger
 class Logger {
 public:
+    // exe 폴더의 log.txt 에 한 줄씩 덧붙인다 (UTF-8, CRLF). 콘솔이 없는 -mwindows 빌드에서도 기록된다.
+    //   형식: [2026-11-04 10:40:12.345] [T1234] 메시지      (T 뒤는 스레드 ID: 메인/명령/침입 탐지 스레드 구분용)
+    // 여러 스레드가 동시에 호출해도 안전하다. 호출할 때마다 파일을 열고 닫으므로 BAT 이 같은 파일에 쓰거나
+    // 사용자가 메모장으로 열어 둔 상태에서도 동작하고, 비정상 종료 직전의 기록도 남는다.
+    // 파일이 5MB 를 넘으면 log.old.txt 로 넘기고 새로 시작한다. 파일에 쓰지 못하면 OutputDebugString 으로만 출력한다.
     static void log(const char* fmt, ...)
     {
-        char tbuf[32];
-        time_t t = time(nullptr);
-        struct tm tmv;
-        localtime_s(&tmv, &t);
-        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
-
-        char msg[1024];
+        char msg[2048];
         va_list ap;
         va_start(ap, fmt);
         vsnprintf(msg, sizeof(msg), fmt, ap);
         va_end(ap);
+        write(msg, false);
+    }
 
-        printf("[%s] %s\n", tbuf, msg);
-        fflush(stdout);
+    // 치명적 오류용: 다른 스레드가 로그 잠금을 쥔 채 죽었어도 멈추지 않도록 잠금을 기다리지 않고 기록한다.
+    static void logCrash(const char* fmt, ...)
+    {
+        char msg[2048];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(msg, sizeof(msg), fmt, ap);
+        va_end(ap);
+        write(msg, true);
+    }
+
+    // /log 명령용: log.txt 의 마지막 n 줄을 UTF-8 문자열로 돌려준다 (파일이 없으면 빈 문자열).
+    // 로그를 쓰는 중에 호출해도 안전하게 읽는다(공유 읽기). log.old.txt 는 보지 않고 현재 log.txt 만 본다.
+    static std::string tailLines(int n)
+    {
+        const std::string content = readWhole(logPath(false));
+        if (content.empty() || n <= 0) return content;
+        std::vector<size_t> starts;
+        starts.push_back(0);
+        for (size_t i = 0; i + 1 < content.size(); ++i)
+            if (content[i] == '\n') starts.push_back(i + 1);
+        const size_t from = starts.size() > (size_t)n ? starts[starts.size() - (size_t)n] : 0;
+        return content.substr(from);
+    }
+
+private:
+    static std::string readWhole(const std::wstring& path)
+    {
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return std::string();
+        LARGE_INTEGER sz;
+        if (!GetFileSizeEx(h, &sz) || sz.QuadPart <= 0) { CloseHandle(h); return std::string(); }
+        std::string out;
+        out.resize((size_t)sz.QuadPart);
+        DWORD rd = 0;
+        BOOL ok = ReadFile(h, &out[0], (DWORD)out.size(), &rd, nullptr);
+        CloseHandle(h);
+        if (!ok) return std::string();
+        out.resize(rd);
+        return out;
+    }
+
+    static constexpr ULONGLONG kMaxBytes = 5ULL * 1024 * 1024;
+
+    struct Guard { // 정적 CRITICAL_SECTION (첫 호출 시 한 번만 초기화됨, C++11 스레드 안전)
+        CRITICAL_SECTION cs;
+        Guard() { InitializeCriticalSection(&cs); }
+    };
+
+    static const std::wstring& logPath(bool old)
+    {
+        static const std::wstring paths[2] = { makePath(L"log.txt"), makePath(L"log.old.txt") };
+        return paths[old ? 1 : 0];
+    }
+
+    static std::wstring makePath(const wchar_t* name)
+    {
+        wchar_t buf[MAX_PATH * 4];
+        DWORD n = GetModuleFileNameW(nullptr, buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
+        std::wstring dir(buf, n);
+        size_t slash = dir.find_last_of(L"\\/");
+        dir = slash == std::wstring::npos ? L"." : dir.substr(0, slash);
+        return dir + L"\\" + name;
+    }
+
+    static void write(const char* msg, bool crash)
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char head[64];
+        snprintf(head, sizeof(head), "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [T%lu] ",
+                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+                 (unsigned long)GetCurrentThreadId());
+
+        std::string line = head;
+        for (const char* c = msg; *c; ++c) // 한 항목은 항상 한 줄 (응답 본문의 줄바꿈 제거)
+            line += (*c == '\r' || *c == '\n') ? ' ' : *c;
+        line += "\r\n";
+
+        OutputDebugStringA(line.c_str()); // 디버거(DebugView 등)로도 볼 수 있음
+
+        static Guard g;
+        bool locked = false;
+        if (crash) locked = TryEnterCriticalSection(&g.cs) != 0;
+        else { EnterCriticalSection(&g.cs); locked = true; }
+
+        appendToFile(line);
+
+        if (locked) LeaveCriticalSection(&g.cs);
+    }
+
+    static HANDLE openForAppend()
+    {
+        return CreateFileW(logPath(false).c_str(), FILE_APPEND_DATA,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+
+    static void appendToFile(const std::string& line)
+    {
+        HANDLE h = openForAppend();
+        if (h == INVALID_HANDLE_VALUE) return;
+        LARGE_INTEGER sz;
+        if (GetFileSizeEx(h, &sz) && (ULONGLONG)sz.QuadPart >= kMaxBytes) {
+            CloseHandle(h);
+            MoveFileExW(logPath(false).c_str(), logPath(true).c_str(), MOVEFILE_REPLACE_EXISTING);
+            h = openForAppend();
+            if (h == INVALID_HANDLE_VALUE) return;
+        }
+        DWORD wr = 0;
+        WriteFile(h, line.data(), (DWORD)line.size(), &wr, nullptr);
+        CloseHandle(h);
     }
 };
 
@@ -912,6 +1028,27 @@ public:
 
         return post(asDoc ? L"sendDocument" : L"sendPhoto",
                     "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 텍스트를 .txt 파일로 전송 (/log 등 내용이 길 때). text 는 UTF-8.
+    bool sendTextDocument(const std::string& caption, const std::string& filename,
+                          const std::string& text, std::string& resp) const
+    {
+        resp.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+
+        std::string body;
+        body.reserve(text.size() + 1024);
+        addField(body, boundary, "chat_id", chatId_);
+        if (!caption.empty()) addField(body, boundary, "caption", caption);
+
+        body += "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\n";
+        body += "Content-Type: text/plain; charset=utf-8\r\n\r\n";
+        body += text;
+        body += "\r\n--" + boundary + "--\r\n";
+
+        return post(L"sendDocument", "multipart/form-data; boundary=" + boundary, body, resp);
     }
 
     // 텍스트 메시지 전송 (설정된 chat 으로)
@@ -2083,7 +2220,10 @@ public:
         // 고DPI 환경에서도 실제 해상도로 캡처
         SetProcessDPIAware();
 
-        Logger::log("screen_telegram v%s (빌드 %s %s)", APP_VERSION_STR, __DATE__, __TIME__);
+        Logger::log("==================== 프로그램 시작 ====================");
+        Logger::log("screen_telegram v%s (빌드 %s %s), PID %lu", APP_VERSION_STR, __DATE__, __TIME__,
+                    (unsigned long)GetCurrentProcessId());
+        Logger::log("exe 폴더: %s", SysUtil::exeDir().c_str());
         const std::string ini = resolveIniPath();
         iniPath_ = ini; // /INTERVAL=nnn 이 값을 저장할 때 사용
         if (!cfg_.load(ini)) {
@@ -2129,7 +2269,7 @@ public:
         if (cfg_.commands) {
             listener = std::make_unique<CommandListener>(telegram, cfg_.chatId, cfg_.allowedUsers);
             listener->skipPending();
-            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /ini /version /stop /help");
+            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /ini /log /CMD /version /stop /help");
             if (cfg_.allowedUsers.empty() && StrUtil::trim(cfg_.chatId)[0] == '-')
                 Logger::log("경고: TELEGRAM_CHAT_ID 가 그룹입니다. TELEGRAM_ALLOWED_USER_IDS 를 설정하지 않으면 명령이 거부됩니다.");
         }
@@ -2514,6 +2654,10 @@ private:
         } else if (cmd == "/version") {
             telegram.sendMessage("[" + host + "] screen_telegram v" + APP_VERSION_STR +
                                  "\n빌드: " + __DATE__ + " " + __TIME__, resp);
+        } else if (cmd == "/log") {
+            handleLogCmd(arg, host, telegram);
+        } else if (cmd == "/cmd") {
+            handleCmdCmd(arg, host, telegram);
         } else if (cmd == "/ini") {
             handleIni(arg, host, telegram);
         } else if (cmd == "/interval" || cmd.rfind("/interval=", 0) == 0) {
@@ -2581,9 +2725,210 @@ private:
                     "/detectOn - 침입 탐지 켜기\n/detectOff - 침입 탐지 끄기\n"
                     "/INTERVAL=nnn - 캡처 간격(초) 변경 (/INTERVAL 만 보내면 현재 값)\n"
                     "/ini 키=값 - INI 에 새 키 추가 (이미 있는 키는 경고만, 재시작 후 적용)\n"
+                    "/log [n|all] - 실행 로그 전송 (기본 최근 50줄, 길면 문서로)\n"
+                    "/CMD [명령] - [ ] 안의 명령을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
                     "/version - 버전 표시\n"
                     "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
+        }
+    }
+
+    // /log [n] : log.txt 의 마지막 n 줄(기본 50, 1~2000)을 보낸다. 텔레그램 메시지 길이(4096자)를 넘으면
+    // 텍스트 문서(.txt)로 보낸다. "/log all" 은 log.txt 전체를 문서로 보낸다. (명령 스레드에서 호출)
+    void handleLogCmd(const std::string& arg, const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /log (최근 " + std::to_string(kDefaultLogLines) +
+                                  "줄) / /log n (최근 n줄, 1~" + std::to_string(kMaxLogLines) +
+                                  ") / /log all (log.txt 전체, 문서로)";
+        const bool all = StrUtil::upper(arg) == "ALL";
+
+        int n = kDefaultLogLines;
+        if (!all && !arg.empty()) {
+            const bool digits = arg.size() <= 6 && arg.find_first_not_of("0123456789") == std::string::npos;
+            const long v = digits ? atol(arg.c_str()) : 0;
+            if (!digits || v < 1 || v > kMaxLogLines) {
+                telegram.sendMessage(pre + "잘못된 값입니다: " + arg + usage, resp);
+                return;
+            }
+            n = (int)v;
+        }
+
+        const std::string text = all ? Logger::tailLines(kMaxLogLines) : Logger::tailLines(n);
+        if (text.empty()) {
+            telegram.sendMessage(pre + "log.txt 가 없거나 비어 있습니다." + usage, resp);
+            return;
+        }
+
+        // 메시지로 보내기엔 너무 길면(텔레그램 한도 4096자, 캡션/안내문 여유분 확보) 문서로 전환
+        if (!all && text.size() <= 3500) {
+            if (!telegram.sendMessage(pre + "log.txt 최근 " + std::to_string(n) + "줄\n\n" + text, resp))
+                Logger::log("/log 전송 실패: %s", resp.substr(0, 150).c_str());
+            return;
+        }
+
+        char fname[64];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(fname, sizeof(fname), "log_%Y%m%d_%H%M%S.txt", &tmv);
+        const std::string caption = pre + (all ? "log.txt 전체" : ("log.txt 최근 " + std::to_string(n) + "줄")) +
+                                    " (" + std::to_string(text.size() / 1024) + " KB)";
+        if (!telegram.sendTextDocument(caption, fname, text, resp)) {
+            telegram.sendMessage(pre + "로그 전송 실패: " + resp.substr(0, 200), resp);
+            Logger::log("/log 문서 전송 실패: %s", resp.substr(0, 150).c_str());
+        }
+    }
+
+    // cmd.exe /c 로 명령(UTF-8)을 실행하고 stdout+stderr 를 합쳐 UTF-8 로 out 에 담는다. 표준 입력은 NUL.
+    // kCmdTimeoutMs 를 넘으면 하위 프로세스까지 종료(timedOut). 출력이 kCmdMaxOut 을 넘으면 잘라 낸다(truncated).
+    // 프로세스를 시작하지 못하면 false (err 에 사유).
+    static bool runShell(const std::string& cmdUtf8, std::string& out, DWORD& exitCode,
+                         bool& timedOut, bool& truncated, std::string& err)
+    {
+        out.clear(); exitCode = 0; timedOut = false; truncated = false;
+
+        SECURITY_ATTRIBUTES sa = {};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        HANDLE rd = nullptr, wr = nullptr;
+        if (!CreatePipe(&rd, &wr, &sa, 0)) { err = "CreatePipe 실패"; return false; }
+        SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+        HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                                 OPEN_EXISTING, 0, nullptr);
+
+        wchar_t comspec[MAX_PATH] = L"";
+        if (!GetEnvironmentVariableW(L"COMSPEC", comspec, MAX_PATH) || !comspec[0]) {
+            GetSystemDirectoryW(comspec, MAX_PATH);
+            wcscat(comspec, L"\\cmd.exe");
+        }
+        // /s: 바깥쪽 따옴표 한 쌍만 벗기고 안쪽 따옴표는 그대로 둔다
+        std::wstring line = L"\"" + std::wstring(comspec) + L"\" /d /s /c \"" + StrUtil::toWide(cmdUtf8) + L"\"";
+
+        STARTUPINFOW si = {};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        si.hStdInput = nul;
+        si.hStdOutput = wr;
+        si.hStdError = wr;
+
+        HANDLE job = CreateJobObjectW(nullptr, nullptr); // 시간 초과 시 하위 프로세스까지 종료하기 위함
+        PROCESS_INFORMATION pi = {};
+        std::vector<wchar_t> buf(line.begin(), line.end());
+        buf.push_back(L'\0');
+        const BOOL ok = CreateProcessW(comspec, buf.data(), nullptr, nullptr, TRUE,
+                                       CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi);
+        CloseHandle(wr);
+        if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+        if (!ok) {
+            err = "프로세스 시작 실패 (오류 " + std::to_string(GetLastError()) + ")";
+            CloseHandle(rd);
+            if (job) CloseHandle(job);
+            return false;
+        }
+        if (job) AssignProcessToJobObject(job, pi.hProcess);
+        ResumeThread(pi.hThread);
+
+        std::string raw;
+        const ULONGLONG t0 = GetTickCount64();
+        for (;;) {
+            // 종료 여부를 먼저 보고 파이프를 비운다 (종료 후 남은 출력까지 읽기 위함)
+            const bool exited = WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0;
+            DWORD avail = 0;
+            if (!PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr)) break;
+            if (avail > 0) {
+                char b[8192];
+                DWORD n = 0;
+                if (!ReadFile(rd, b, avail < sizeof(b) ? avail : (DWORD)sizeof(b), &n, nullptr) || n == 0) break;
+                if (raw.size() < kCmdMaxOut) raw.append(b, n);
+                else truncated = true;
+                continue;
+            }
+            if (exited) break;
+            if (GetTickCount64() - t0 > kCmdTimeoutMs) {
+                timedOut = true;
+                if (job) TerminateJobObject(job, 1); else TerminateProcess(pi.hProcess, 1);
+                WaitForSingleObject(pi.hProcess, 3000);
+                break;
+            }
+            Sleep(50);
+        }
+        if (raw.size() > kCmdMaxOut) { raw.resize(kCmdMaxOut); truncated = true; }
+
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(rd);
+        if (job) CloseHandle(job);
+
+        // 출력 문자 집합: UTF-8 로 유효하면(chcp 65001 등) 그대로, 아니면 콘솔 OEM 코드 페이지(한국어 Windows 는 CP949)로 변환
+        if (raw.empty()) return true;
+        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, raw.data(), (int)raw.size(), nullptr, 0) > 0) {
+            out = raw;
+        } else {
+            const int wn = MultiByteToWideChar(CP_OEMCP, 0, raw.data(), (int)raw.size(), nullptr, 0);
+            if (wn > 0) {
+                std::wstring w((size_t)wn, L'\0');
+                MultiByteToWideChar(CP_OEMCP, 0, raw.data(), (int)raw.size(), &w[0], wn);
+                out = StrUtil::toUtf8(w.c_str(), wn);
+            } else {
+                out = raw;
+            }
+        }
+        return true;
+    }
+
+    // /CMD [명령] : [ ] 안의 문자열(첫 '[' ~ 마지막 ']')을 cmd.exe 로 실행하고 출력을 .txt 문서로 보낸다. (명령 스레드에서 호출)
+    // 실행하는 동안 이 명령 스레드가 막히므로 다른 텔레그램 명령은 끝난 뒤(최대 kCmdTimeoutMs) 처리된다.
+    void handleCmdCmd(const std::string& arg, const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /CMD [실행할 명령]  (예: /CMD [dir /b])\n"
+                                  "[ ] 안의 문자열을 PC 의 cmd.exe 에서 실행하고 결과를 txt 파일로 보냅니다.";
+        const size_t lb = arg.find('['), rb = arg.rfind(']');
+        std::string cmdline = (lb != std::string::npos && rb != std::string::npos && rb > lb)
+                                  ? StrUtil::trim(arg.substr(lb + 1, rb - lb - 1)) : std::string();
+        if (cmdline.empty()) {
+            telegram.sendMessage(pre + "실행할 명령이 없습니다." + usage, resp);
+            return;
+        }
+
+        Logger::log("/CMD 실행: %.200s%s", cmdline.c_str(), cmdline.size() > 200 ? "..." : "");
+        std::string out, err;
+        DWORD code = 0;
+        bool timedOut = false, truncated = false;
+        const ULONGLONG t0 = GetTickCount64();
+        if (!runShell(cmdline, out, code, timedOut, truncated, err)) {
+            telegram.sendMessage(pre + "/CMD 실행 실패: " + err, resp);
+            Logger::log("/CMD 실행 실패: %s", err.c_str());
+            return;
+        }
+        const double sec = (double)(GetTickCount64() - t0) / 1000.0;
+        Logger::log("/CMD 종료: 코드 %lu, 출력 %zu바이트, %.1f초%s%s", (unsigned long)code, out.size(), sec,
+                    timedOut ? ", 시간 초과" : "", truncated ? ", 잘림" : "");
+
+        std::string head = pre + "/CMD [" + (cmdline.size() > 300 ? cmdline.substr(0, 300) + "..." : cmdline) + "]\n";
+        char info[160];
+        snprintf(info, sizeof(info), "종료 코드 %lu, %.1f초, 출력 %zu바이트", (unsigned long)code, sec, out.size());
+        head += info;
+        if (timedOut) head += "\n시간 초과(" + std::to_string(kCmdTimeoutMs / 1000) + "초)로 강제 종료했습니다.";
+        if (truncated) head += "\n출력이 " + std::to_string(kCmdMaxOut / 1024 / 1024) + "MB 를 넘어 뒷부분은 잘렸습니다.";
+
+        if (out.empty()) {
+            telegram.sendMessage(head + "\n(출력 없음)", resp);
+            return;
+        }
+        char fname[64];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(fname, sizeof(fname), "cmd_%Y%m%d_%H%M%S.txt", &tmv);
+        if (!telegram.sendTextDocument(head, fname, out, resp)) {
+            telegram.sendMessage(pre + "/CMD 결과 전송 실패: " + resp.substr(0, 200), resp);
+            Logger::log("/CMD 결과 문서 전송 실패: %s", resp.substr(0, 150).c_str());
         }
     }
 
@@ -2815,6 +3160,10 @@ private:
     ULONGLONG startTick_ = 0;        // 시작 시각 (가동 시간 계산용)
     static constexpr int kMinInterval = 5;      // /INTERVAL 허용 범위(초). 너무 짧으면 텔레그램 전송 제한(429)에 걸림
     static constexpr int kMaxInterval = 86400;
+    static constexpr int kDefaultLogLines = 50; // /log 기본 줄 수
+    static constexpr int kMaxLogLines = 2000;   // /log n 허용 최대 줄 수
+    static constexpr DWORD kCmdTimeoutMs = 60000;                 // /CMD 최대 실행 시간
+    static constexpr size_t kCmdMaxOut = 20u * 1024u * 1024u;     // /CMD 출력 최대 크기 (sendDocument 50MB 한도에 여유)
     std::string iniPath_;            // 로드한 INI 경로 (/INTERVAL 저장용)
     volatile LONG intervalChanged_ = 0; // /INTERVAL 로 간격이 바뀜 (명령 스레드 -> 메인 스레드)
     ULONGLONG periodStart_ = 0;      // 현재 주기의 시작 시각 (메인 스레드 전용)
@@ -2833,8 +3182,39 @@ private:
 
 // ================================================================ main
 // 시작 함수: WinMain (명령줄 인자는 resolveIniPath() 가 GetCommandLineW 로 직접 읽으므로 매개변수는 사용하지 않음)
+// 처리되지 않은 SEH 예외(접근 위반 등)가 나면 원인을 log.txt 에 남기고 종료한다.
+static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep)
+{
+    const EXCEPTION_RECORD* r = ep ? ep->ExceptionRecord : nullptr;
+    Logger::logCrash("치명적 오류: 처리되지 않은 예외 0x%08lX, 주소 %p (스레드 T%lu) - 프로그램이 비정상 종료됩니다.",
+                     r ? (unsigned long)r->ExceptionCode : 0UL, r ? r->ExceptionAddress : nullptr,
+                     (unsigned long)GetCurrentThreadId());
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// 잡히지 않은 C++ 예외 / std::terminate
+static void terminateHandler()
+{
+    Logger::logCrash("치명적 오류: 처리되지 않은 C++ 예외 (std::terminate) - 프로그램이 비정상 종료됩니다.");
+    ExitProcess(3);
+}
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
-    ScreenTelegramApp app;
-    return app.run();
+    SetUnhandledExceptionFilter(crashFilter);
+    std::set_terminate(terminateHandler);
+
+    int rc = 0;
+    try {
+        ScreenTelegramApp app;
+        rc = app.run();
+    } catch (const std::exception& e) {
+        Logger::logCrash("치명적 오류: 예외 발생 - %s", e.what());
+        rc = 2;
+    } catch (...) {
+        Logger::logCrash("치명적 오류: 알 수 없는 예외 발생");
+        rc = 2;
+    }
+    Logger::log("프로그램 종료 (종료 코드 %d)", rc);
+    return rc;
 }

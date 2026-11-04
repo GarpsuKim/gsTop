@@ -14,6 +14,8 @@ ping -n 6 127.0.0.1 >nul
 goto WAITIP
 :GOTIP
 
+rem Keep the previous run log (useful if the last run crashed). screen_telegram.exe appends to log.txt itself.
+if exist log.txt move /y log.txt log.old.txt >nul 2>&1
 (echo PC=%COMPUTERNAME%)>log.txt
 (echo USERNAME=%USERNAME%)>>log.txt
 for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /i "IPv4" ^| findstr /v "169.254"') do (
@@ -88,5 +90,5 @@ if exist "%UPD_NEW%" del "%UPD_NEW%" >nul 2>&1
 
 rem All keys and recipients are read from screen_telegram.ini
 echo screen_telegram.exe ...........
-start "" screen_telegram.exe >> log.txt 2>&1
+start "" screen_telegram.exe
 if /i "%~1"=="pause" pause
