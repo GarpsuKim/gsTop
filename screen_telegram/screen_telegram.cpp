@@ -29,6 +29,7 @@
 //    실행 시간 제한 60초(초과 시 하위 프로세스까지 종료), 출력 20MB 초과분은 잘림, 표준 입력은 NUL.)
 //   UPLOAD_DIR=upload              (폰 -> PC 파일 수신 저장 폴더. 상대 경로는 exe 폴더 기준, 기본 upload. 폴더는 한 단계만 자동 생성)
 //   UPLOAD_SHOW_IMAGE=TRUE         (폰에서 받은 이미지를 PC 화면에 장당 별개의 창으로 띄움. 기본 TRUE. jpg/png/bmp/gif/tif)
+//   UPLOAD_PLAY_MEDIA=TRUE         (폰에서 받은 .mp4 / .mp3 파일을 저장 직후 PC 의 기본 플레이어로 실행. 기본 TRUE. 예전 이름 UPLOAD_PLAY_VIDEO 도 인정)
 //   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
 //    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
 //   (텔레그램 /download 는 PC 에 파일 탐색기(열기 창)를 띄워 사용자가 고른 여러 파일을 텔레그램으로 보낸다.
@@ -727,6 +728,7 @@ public:
     int keepMax = 0;            // KEEP_MAX_FILES=5000 (0 = 제한 없음)
     bool previousSessionClear = false; // PREVIOUS_SESSION_CLEAR=TRUE (시작 때 log.txt 와 image 폴더 파일 전부 삭제)
     bool cameraKeepOpen = false; // CAMERA_KEEP_OPEN=TRUE (카메라를 계속 열어 둠)
+    bool uploadPlayMedia = true; // UPLOAD_PLAY_MEDIA=TRUE (받은 .mp4/.mp3 를 PC 기본 플레이어로 실행)
     bool uploadShowImage = true; // UPLOAD_SHOW_IMAGE=TRUE (받은 이미지를 장당 별개의 창으로 표시)
     std::string uploadDir;       // UPLOAD_DIR=upload (폰 -> PC 파일 수신 폴더, 비어 있으면 exe 폴더\\upload)
     std::vector<std::string> allowedUsers; // TELEGRAM_ALLOWED_USER_IDS=111,222
@@ -798,7 +800,7 @@ public:
             "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_INTERVAL", "TELEGRAM_COMMANDS",
             "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "SAVE_ONLY", "MAX_LOOP",
             "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES", "PREVIOUS_SESSION_CLEAR",
-            "UPLOAD_DIR", "UPLOAD_SHOW_IMAGE", "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
+            "UPLOAD_DIR", "UPLOAD_SHOW_IMAGE", "UPLOAD_PLAY_MEDIA", "UPLOAD_PLAY_VIDEO", "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
             "INTRUSION_CONFIRM_FRAMES", "INTRUSION_COOLDOWN", "INTRUSION_CHECK_MS"
         };
         for (const char* n : names)
@@ -849,6 +851,9 @@ private:
         }
         else if (key == "CAMERA_KEEP_OPEN") {
             cameraKeepOpen = StrUtil::parseBool(val, false);
+        }
+        else if (key == "UPLOAD_PLAY_MEDIA" || key == "UPLOAD_PLAY_VIDEO") {
+            uploadPlayMedia = StrUtil::parseBool(val, true);
         }
         else if (key == "UPLOAD_SHOW_IMAGE") {
             uploadShowImage = StrUtil::parseBool(val, true);
@@ -3200,7 +3205,7 @@ private:
                     "/log [n|all] - 실행 로그 전송 (기본 최근 50줄, 길면 문서로)\n"
                     "/CMD 명령 - 뒤의 문자열을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
                     "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
-                    "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 PC 화면에 창으로 표시\n"
+                    "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 창으로 표시, mp4/mp3 는 기본 플레이어로 실행\n"
                     "/version - 버전 표시\n"
                     "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
@@ -3400,6 +3405,16 @@ private:
         return false;
     }
 
+    // 경로의 확장자가 ext(소문자)와 같은지 (대소문자 무시)
+    static bool hasExt(const std::wstring& path, const wchar_t* ext)
+    {
+        const size_t dot = path.rfind(L'.');
+        if (dot == std::wstring::npos) return false;
+        std::wstring e = path.substr(dot + 1);
+        for (auto& c : e) c = (wchar_t)towlower(c);
+        return e == ext;
+    }
+
     // 사진(photo)이거나 GDI+ 가 읽는 확장자(jpg/png/bmp/gif/tif)의 파일이면 이미지로 본다.
     static bool isImage(const BotEvent& ev, const std::wstring& path)
     {
@@ -3498,6 +3513,12 @@ private:
             const size_t sl = outPath.find_last_of(L"\\/");
             const std::string title = StrUtil::toUtf8((sl == std::wstring::npos ? outPath : outPath.substr(sl + 1)).c_str());
             if (!ImageWindow::show(data, title)) Logger::log("이미지 창 표시 실패(지원하지 않는 형식): %s", saved.c_str());
+        }
+        if (cfg_.uploadPlayMedia && (hasExt(outPath, L"mp4") || hasExt(outPath, L"mp3"))) { // .mp4/.mp3 만 PC 기본 플레이어로 실행 (다른 확장자는 실행하지 않음)
+            ComScope com; // ShellExecute 는 COM 초기화된 스레드에서 호출하도록 권장
+            const HINSTANCE r = ShellExecuteW(nullptr, L"open", outPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            if ((INT_PTR)r > 32) Logger::log("미디어 재생 실행: %s", saved.c_str());
+            else Logger::log("미디어 재생 실행 실패(코드 %lld): %s", (long long)(INT_PTR)r, saved.c_str());
         }
         telegram.sendMessage(pre + "저장 완료: " + saved + " (" + fmtSize(data.size()) + ")", resp);
     }

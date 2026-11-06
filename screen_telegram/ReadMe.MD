@@ -50,7 +50,7 @@ upload\ ................ 폰에서 봇 채팅으로 보낸 파일 저장 폴더 
   * 오탐이 많으면 AREA_PERCENT/PIXEL_THRESHOLD 를 올리고, 놓치면 낮춤
 - 시작 인사말: 준비가 끝나면 텔레그램으로 인사말(간격/카메라/침입 탐지 상태 포함)을 한 번 전송. TELEGRAM_GREETING=FALSE 로 끌 수 있음
 - MAX_LOOP=N 이면 N회 캡처/전송 후 자동 종료 (0 또는 생략 시 무제한)
-- 버전: 1.0.0.6 (exe 속성 > 자세히 탭, 시작 인사말, /status, 로그에 표시)
+- 버전: 1.0.0.8 (exe 속성 > 자세히 탭, 시작 인사말, /status, 로그에 표시)
 - 저작권: 김갑수. 이 프로그램은 개인에 한하여 비상업적 목적으로 자유롭게 사용 할 수 있습니다. 기업이나 단체 등 개인이 아닌 사용자는 개발자 김갑수와 개별 협의하여야 합니다.
 - 자동 업데이트 (screen_telegram_RUN.BAT): exe 를 시작하기 전에 GitHub 의 서버 exe(https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.exe)를 받아, 서버 exe 의 파일 버전이 PC 의 exe 보다 높을 때만 교체한 뒤 실행. 결과는 log.txt 의 UPDATE= 줄에 기록
   * 교체 전 기존 exe 는 screen_telegram.exe.bak 로 보관. 네트워크 오류/버전 정보 없음/exe 실행 중이면 교체하지 않고 현재 exe 로 계속 실행
@@ -85,9 +85,10 @@ upload\ ................ 폰에서 봇 채팅으로 보낸 파일 저장 폴더 
   * 명령과 같은 chat/허용 사용자(TELEGRAM_CHAT_ID, TELEGRAM_ALLOWED_USER_IDS)가 보낸 파일만 받음. TELEGRAM_COMMANDS=FALSE 이면 받지 않음
   * 파일 1개당 20MB 까지 (텔레그램 봇 API 한도). 넘으면 "너무 커서 받을 수 없음" 메시지. 사진은 텔레그램이 압축한 것이 오므로 원본이 필요하면 폰에서 "파일로 보내기"로 첨부
   * 파일명은 정리해서 저장: 경로 제거, 금지 문자(<>:"/\|?*) -> _, CON/NUL 같은 예약어 회피, 150자 제한. 같은 이름이 있으면 이름_1.확장자, 이름_2.확장자 ... 로 저장하고 덮어쓰지 않음. 이름이 없는 사진 등은 YYYYMMDD_HHMMSS_file_N.jpg 형태
-  * 저장만 하고 실행하지 않음. 프로그램이 꺼져 있는 동안 보낸 파일은 시작할 때 건너뜀(받지 않음). 저장 폴더는 한 단계만 자동 생성하므로 UPLOAD_DIR 의 상위 폴더는 미리 있어야 함
+  * 저장만 하고 실행하지 않음(단 .mp4/.mp3 는 아래 설명대로 재생). 프로그램이 꺼져 있는 동안 보낸 파일은 시작할 때 건너뜀(받지 않음). 저장 폴더는 한 단계만 자동 생성하므로 UPLOAD_DIR 의 상위 폴더는 미리 있어야 함
   * 받은 파일이 이미지(사진, jpg/png/bmp/gif/tif)이면 저장 직후 PC 화면에 이미지 1장당 별개의 창을 띄움 (UPLOAD_SHOW_IMAGE=FALSE 로 끌 수 있음). 여러 장을 한꺼번에 받으면 창이 장수만큼 열리고 조금씩 어긋나 겹침. 화면의 80% 안에 맞춰 열리며 크기 조절 가능(비율 유지), Esc 또는 닫기 버튼으로 닫음
   * 창은 이 프로그램이 직접 그림(GDI+). 사진의 EXIF 회전은 반영, 움직이는 GIF 는 첫 장면만, webp/heic 등 GDI+ 가 읽지 못하는 형식은 저장만 하고 창은 띄우지 않음(log.txt 에 기록). 창이 열려 있어도 프로그램은 정상 동작하고, 프로그램을 종료하면 창도 함께 닫힘
+  * 받은 파일이 .mp4 또는 .mp3 이면 저장 직후 PC 의 기본 플레이어로 실행 (UPLOAD_PLAY_MEDIA=FALSE 로 끌 수 있음. 예전 이름 UPLOAD_PLAY_VIDEO 도 같은 뜻). 여러 개를 받으면 각각 실행. 확장자가 mp4/mp3 인 파일만 실행하며 그 밖의 파일(exe, bat 등)은 저장만 함. 텔레그램에서 "동영상"/"오디오"로 보낸 파일도 .mp4/.mp3 로 저장되면 실행됨(음성 메시지는 .ogg 라 실행 안 함). 실행 결과는 log.txt 에 기록
   * 전송한 파일명과 결과는 log.txt 에 기록
 - PREVIOUS_SESSION_CLEAR=TRUE : 프로그램 시작 직후(INI 를 읽은 뒤, 캡처/명령 수신 전)에 이전 세션의 흔적을 지움. 기본 FALSE
   * 삭제 대상: exe 폴더의 log.txt 와 image 폴더 안의 모든 파일 (이 프로그램이 만든 이미지가 아니어도 삭제. 하위 폴더는 건드리지 않음). log.old.txt 는 삭제하지 않음
@@ -112,6 +113,7 @@ screen_telegram.ini 설정 요약 (현재 INI 기준. 줄 맨 앞 ; 또는 # 은
   KEEP_MAX_FILES              999        이미지 최대 개수 (0=제한 없음)
   PREVIOUS_SESSION_CLEAR      TRUE       시작할 때 log.txt 와 image 폴더 파일 전부 삭제 (FALSE)
   CAMERA_KEEP_OPEN            TRUE       카메라 계속 열어 둠 (FALSE)
+  UPLOAD_PLAY_MEDIA           (없음)     받은 .mp4/.mp3 를 기본 플레이어로 실행 (TRUE)
   UPLOAD_SHOW_IMAGE           (없음)     받은 이미지를 장당 별개의 창으로 표시 (TRUE)
   UPLOAD_DIR                  (없음)     폰 -> PC 수신 파일 저장 폴더. 상대 경로는 exe 폴더 기준 (upload)
   AUTO_DETECT                 TRUE       시작 때 침입 탐지 자동 켬 (FALSE, 그러면 detect.state 를 따름)
