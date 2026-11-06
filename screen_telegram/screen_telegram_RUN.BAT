@@ -55,6 +55,29 @@ rem Update only when the server exe has a HIGHER file version than the local exe
 rem Needs curl.exe and powershell (both included in Windows 10/11). On any problem the current exe is kept.
 set "UPD_URL=https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.exe"
 set "UPD_NEW=screen_telegram.exe.new"
+
+rem Step 1 (cheap): download only version.txt (a few bytes) and compare with the local exe version.
+rem   Same or older: skip the exe download. Newer, or version.txt missing/unreadable: fall through to the full check below.
+set "VER_URL=https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/version.txt"
+set "VER_NEW=version.txt.tmp"
+del "%VER_NEW%" >nul 2>&1
+"%SystemRoot%\System32\curl.exe" -L -f -s -S --connect-timeout 10 --max-time 30 -o "%VER_NEW%" "%VER_URL%" >>log.txt 2>&1
+if errorlevel 1 (
+    (echo UPDATE=version.txt not available - falling back to full exe check)>>log.txt
+    goto UPD_FULL
+)
+rem exit code: 10 = server is newer, 0 = same or older, 1 = error (unreadable version.txt)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try{ $n=[version]((Get-Content '%VER_NEW%' -TotalCount 1).Trim()); $o=[version]'0.0.0.0'; if(Test-Path 'screen_telegram.exe'){ $v=(Get-Item 'screen_telegram.exe').VersionInfo.FileVersion; if($v){$o=[version]$v} }; if($n -gt $o){exit 10}else{exit 0} }catch{exit 1}"
+set "VERRC=%errorlevel%"
+del "%VER_NEW%" >nul 2>&1
+if "%VERRC%"=="0" (
+    (echo UPDATE=none - version.txt says current exe is up to date, exe not downloaded)>>log.txt
+    goto UPD_DONE
+)
+if "%VERRC%"=="10" (
+    (echo UPDATE=version.txt says a newer exe exists - downloading)>>log.txt
+)
+:UPD_FULL
 del "%UPD_NEW%" >nul 2>&1
 "%SystemRoot%\System32\curl.exe" -L -f -s -S --connect-timeout 10 --max-time 180 -o "%UPD_NEW%" "%UPD_URL%" >>log.txt 2>&1
 if errorlevel 1 (

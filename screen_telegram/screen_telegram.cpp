@@ -27,6 +27,12 @@
 //                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
 //   (텔레그램 /CMD 명령 은 /CMD 뒤의 문자열 전체를 PC 의 cmd.exe 에서 실행하고 출력(stdout+stderr)을 .txt 문서로 전송한다.
 //    실행 시간 제한 60초(초과 시 하위 프로세스까지 종료), 출력 20MB 초과분은 잘림, 표준 입력은 NUL.)
+//   UPLOAD_DIR=upload              (폰 -> PC 파일 수신 저장 폴더. 상대 경로는 exe 폴더 기준, 기본 upload. 폴더는 한 단계만 자동 생성)
+//   UPLOAD_SHOW_IMAGE=TRUE         (폰에서 받은 이미지를 PC 화면에 장당 별개의 창으로 띄움. 기본 TRUE. jpg/png/bmp/gif/tif)
+//   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
+//    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
+//   (텔레그램 /download 는 PC 에 파일 탐색기(열기 창)를 띄워 사용자가 고른 여러 파일을 텔레그램으로 보낸다.
+//    창은 5분 안에 고르지 않으면 취소되고, 파일 1개당 49MB 까지, 빈 파일은 제외한다.)
 //   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
 //    추가한 값은 프로그램을 다시 시작해야 적용된다.)
 //   (캡처/전송 간격 TELEGRAM_INTERVAL 은 텔레그램 명령 /INTERVAL=nnn (5~86400초) 로 바꿀 수 있다.
@@ -54,8 +60,9 @@
 //   ScopedBitmap    HBITMAP 소유권 관리 (RAII)
 //   Config          screen_telegram.ini 설정
 //   ImageEncoder    GDI+ 세션 + PNG/JPEG 인코딩
-//   TelegramClient  텔레그램 sendPhoto / sendMessage / getUpdates (WinHTTP) + 재시도
+//   TelegramClient  텔레그램 sendPhoto / sendMessage / getUpdates (WinHTTP, 연결 재사용) + 재시도
 //   CommandListener 텔레그램 봇 명령 수신 (getUpdates, 허용된 chat 만)
+//   ImageWindow     폰에서 받은 이미지를 보여 주는 창 (이미지 1장 = 창 1개 = 스레드 1개)
 //   Shot            캡처 결과 1장 (라벨 + 비트맵)
 //   ICaptureSource  캡처 소스 인터페이스
 //   MonitorCapture  모니터 화면 캡처 (ICaptureSource)
@@ -85,6 +92,7 @@ using std::max;
 #include <gdiplus.h>
 #include <winhttp.h>
 #include <shellapi.h>
+#include <commdlg.h>   // GetOpenFileNameW (/download 파일 선택 창, -lcomdlg32)
 
 #include <mfapi.h>
 #include <mfidl.h>
@@ -719,6 +727,8 @@ public:
     int keepMax = 0;            // KEEP_MAX_FILES=5000 (0 = 제한 없음)
     bool previousSessionClear = false; // PREVIOUS_SESSION_CLEAR=TRUE (시작 때 log.txt 와 image 폴더 파일 전부 삭제)
     bool cameraKeepOpen = false; // CAMERA_KEEP_OPEN=TRUE (카메라를 계속 열어 둠)
+    bool uploadShowImage = true; // UPLOAD_SHOW_IMAGE=TRUE (받은 이미지를 장당 별개의 창으로 표시)
+    std::string uploadDir;       // UPLOAD_DIR=upload (폰 -> PC 파일 수신 폴더, 비어 있으면 exe 폴더\\upload)
     std::vector<std::string> allowedUsers; // TELEGRAM_ALLOWED_USER_IDS=111,222
 
     bool greeting = true;             // TELEGRAM_GREETING=TRUE (시작 인사말)
@@ -788,7 +798,7 @@ public:
             "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_INTERVAL", "TELEGRAM_COMMANDS",
             "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "SAVE_ONLY", "MAX_LOOP",
             "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES", "PREVIOUS_SESSION_CLEAR",
-            "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
+            "UPLOAD_DIR", "UPLOAD_SHOW_IMAGE", "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
             "INTRUSION_CONFIRM_FRAMES", "INTRUSION_COOLDOWN", "INTRUSION_CHECK_MS"
         };
         for (const char* n : names)
@@ -839,6 +849,12 @@ private:
         }
         else if (key == "CAMERA_KEEP_OPEN") {
             cameraKeepOpen = StrUtil::parseBool(val, false);
+        }
+        else if (key == "UPLOAD_SHOW_IMAGE") {
+            uploadShowImage = StrUtil::parseBool(val, true);
+        }
+        else if (key == "UPLOAD_DIR") {
+            uploadDir = val;
         }
         else if (key == "TELEGRAM_ALLOWED_USER_IDS") {
             allowedUsers.clear();
@@ -950,6 +966,29 @@ public:
         return ok;
     }
 
+    // 전송용 축소본: 긴 변이 maxDim 을 넘을 때만 축소해 JPEG 로 인코딩한다 (업로드 용량 절감).
+    // 축소할 필요가 없거나 실패하면 false 이며, 호출자는 encodeForTelegram() 결과를 그대로 쓴다.
+    bool encodeScaledJpeg(HBITMAP hBmp, UINT maxDim, ULONG quality,
+                          std::vector<BYTE>& out, UINT& nw, UINT& nh) const
+    {
+        out.clear();
+        Gdiplus::Bitmap src(hBmp, nullptr);
+        const UINT w = src.GetWidth(), h = src.GetHeight();
+        const UINT longSide = std::max(w, h);
+        if (w == 0 || h == 0 || longSide <= maxDim) return false;
+
+        const double s = (double)maxDim / (double)longSide;
+        nw = std::max<UINT>(1, (UINT)(w * s + 0.5));
+        nh = std::max<UINT>(1, (UINT)(h * s + 0.5));
+        Gdiplus::Bitmap dst(nw, nh, PixelFormat24bppRGB);
+        {
+            Gdiplus::Graphics g(&dst);
+            g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+            g.DrawImage(&src, 0, 0, (INT)nw, (INT)nh);
+        }
+        return encode(dst, true, quality, out);
+    }
+
     // 텔레그램 전송용 인코딩.
     //  - 기본은 JPEG(품질 85). 사진 한도(10MB)를 넘으면 품질/해상도를 단계적으로 낮춰 다시 인코딩.
     //  - 가로+세로 > 10000px 이거나 가로세로 비율 > 20 이면 sendPhoto 가 거부하므로
@@ -1048,7 +1087,17 @@ private:
 class TelegramClient {
 public:
     TelegramClient(std::string token, std::string chatId, const StopSignal& stop)
-        : token_(std::move(token)), chatId_(std::move(chatId)), stop_(stop) {}
+        : token_(std::move(token)), chatId_(std::move(chatId)), stop_(stop)
+    {
+        InitializeCriticalSection(&connCs_);
+    }
+    ~TelegramClient()
+    {
+        if (hConn_) WinHttpCloseHandle(hConn_);
+        if (hSession_) WinHttpCloseHandle(hSession_);
+        DeleteCriticalSection(&connCs_);
+    }
+    NO_COPY(TelegramClient);
 
     // 전송 1회 시도. 성공 시 true, 실패 시 resp 에 오류 내용.
     // asDoc=true 이면 sendDocument(원본 유지, 50MB), 아니면 sendPhoto(10MB).
@@ -1094,6 +1143,95 @@ public:
         body += "\r\n--" + boundary + "--\r\n";
 
         return post(L"sendDocument", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 파일 원본 바이트를 문서로 전송 (/download). filename 은 UTF-8.
+    bool sendFileDocument(const std::string& caption, const std::string& filename,
+                          const std::vector<BYTE>& data, std::string& resp) const
+    {
+        resp.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+
+        std::string body;
+        body.reserve(data.size() + 1024);
+        addField(body, boundary, "chat_id", chatId_);
+        if (!caption.empty()) addField(body, boundary, "caption", caption);
+
+        body += "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\n";
+        body += "Content-Type: application/octet-stream\r\n\r\n";
+        body.append((const char*)data.data(), data.size());
+        body += "\r\n--" + boundary + "--\r\n";
+
+        return post(L"sendDocument", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // getFile: file_id -> file_path (폰에서 받은 파일 내려받기용). 실패 시 resp 에 오류 내용.
+    bool getFilePath(const std::string& fileId, std::string& filePath, std::string& resp) const
+    {
+        filePath.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "file_id", fileId);
+        body += "--" + boundary + "--\r\n";
+        if (!post(L"getFile", "multipart/form-data; boundary=" + boundary, body, resp)) return false;
+        const std::string k = "\"file_path\":\"";
+        size_t p = resp.find(k);
+        if (p == std::string::npos) return false;
+        p += k.size();
+        const size_t e = resp.find('"', p);
+        if (e == std::string::npos) return false;
+        std::string fp = resp.substr(p, e - p);
+        for (size_t i; (i = fp.find("\\/")) != std::string::npos; ) fp.replace(i, 2, "/");
+        filePath = fp;
+        return !filePath.empty();
+    }
+
+    // getFile 로 얻은 file_path 의 파일을 내려받는다 (한도 kMaxDownload). 네트워크 오류면 1회 재시도.
+    bool downloadFile(const std::string& filePath, std::vector<BYTE>& data, std::string& err) const
+    {
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            data.clear();
+            err.clear();
+            HINTERNET hConn = connection();
+            if (!hConn) { err = "WinHTTP error (open)"; return false; }
+            const std::wstring path = L"/file/bot" + StrUtil::toWide(token_) + L"/" + StrUtil::toWide(filePath);
+            HINTERNET hReq = WinHttpOpenRequest(hConn, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                                WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+            if (!hReq) { err = "WinHTTP error (request)"; return false; }
+            bool ok = false, net = false;
+            if (WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                WinHttpReceiveResponse(hReq, nullptr)) {
+                DWORD status = 0, sz = sizeof(status);
+                WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                    WINHTTP_HEADER_NAME_BY_INDEX, &status, &sz, WINHTTP_NO_HEADER_INDEX);
+                if (status == 200) {
+                    ok = true;
+                    for (;;) {
+                        DWORD avail = 0;
+                        if (!WinHttpQueryDataAvailable(hReq, &avail)) { ok = false; net = true; err = "다운로드 중단"; break; }
+                        if (avail == 0) break;
+                        if (data.size() + avail > kMaxDownload) { ok = false; err = "파일이 너무 큽니다"; break; }
+                        const size_t old = data.size();
+                        data.resize(old + avail);
+                        DWORD rd = 0;
+                        if (!WinHttpReadData(hReq, &data[old], avail, &rd)) { ok = false; net = true; err = "다운로드 중단"; break; }
+                        data.resize(old + rd);
+                        if (rd == 0) break;
+                    }
+                } else {
+                    err = "HTTP " + std::to_string(status);
+                }
+            } else {
+                net = true;
+                err = "WinHTTP error " + std::to_string(GetLastError());
+            }
+            WinHttpCloseHandle(hReq);
+            if (ok) return true;
+            if (!net || stop_.requested()) break;
+        }
+        data.clear();
+        return false;
     }
 
     // 텍스트 메시지 전송 (설정된 chat 으로)
@@ -1192,23 +1330,50 @@ public:
     }
 
 private:
-    // POST 1회. 응답 본문을 resp 에 담고, "ok":true 이면 true.
+    static constexpr size_t kMaxDownload = 21u * 1024 * 1024; // getFile 한도(20MB)에 여유
+
+    // WinHTTP 세션/연결 핸들은 한 번만 만들어 모든 스레드(메인/명령/침입 탐지)가 공유한다.
+    // 요청마다 세션을 새로 열면 자동 프록시 탐색과 TLS 핸드셰이크를 매번 반복하게 된다.
+    // (WinHttpConnect 는 소켓을 열지 않는다. 실제 소켓은 세션이 keep-alive 로 풀링하고 끊기면 알아서 다시 연다.
+    //  WinHTTP 핸들은 스레드 안전하므로 요청 핸들만 호출마다 만들면 된다.)
+    HINTERNET connection() const
+    {
+        CsLock lk(&connCs_);
+        if (hConn_) return hConn_;
+        if (!hSession_) {
+            hSession_ = WinHttpOpen(L"ScreenTelegram/1.0",
+                                    WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                                    WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+            if (!hSession_) return nullptr;
+            WinHttpSetTimeouts(hSession_, 10000, 10000, 60000, 120000);
+        }
+        hConn_ = WinHttpConnect(hSession_, L"api.telegram.org", INTERNET_DEFAULT_HTTPS_PORT, 0);
+        return hConn_;
+    }
+
+    // POST. 응답 본문을 resp 에 담고, "ok":true 이면 true.
+    // 오래 놀던 keep-alive 소켓이 끊겨 있던 경우(12030/12032)에는 즉시 한 번 더 시도한다 (새 소켓으로 연결됨).
     bool post(const wchar_t* method, const std::string& contentType,
               const std::string& body, std::string& resp) const
     {
+        if (postOnce(method, contentType, body, resp)) return true;
+        if (resp == "WinHTTP error 12030" || resp == "WinHTTP error 12032")
+            return postOnce(method, contentType, body, resp);
+        return false;
+    }
+
+    // POST 1회.
+    bool postOnce(const wchar_t* method, const std::string& contentType,
+                  const std::string& body, std::string& resp) const
+    {
         resp.clear();
-        HINTERNET hSession = WinHttpOpen(L"ScreenTelegram/1.0",
-                                         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                                         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (!hSession) {
+        HINTERNET hConn = connection();
+        if (!hConn) {
             resp = "WinHTTP error (open)";
             return false;
         }
-        WinHttpSetTimeouts(hSession, 10000, 10000, 60000, 120000);
 
         bool ok = false;
-        HINTERNET hConn = WinHttpConnect(hSession, L"api.telegram.org",
-                                         INTERNET_DEFAULT_HTTPS_PORT, 0);
         HINTERNET hReq = nullptr;
         if (hConn) {
             std::wstring path = L"/bot" + StrUtil::toWide(token_) + L"/" + method;
@@ -1238,9 +1403,7 @@ private:
         } else {
             resp = "WinHTTP error (request)";
         }
-        if (hReq) WinHttpCloseHandle(hReq);
-        if (hConn) WinHttpCloseHandle(hConn);
-        WinHttpCloseHandle(hSession);
+        if (hReq) WinHttpCloseHandle(hReq); // 세션/연결 핸들은 재사용하므로 닫지 않는다
         return ok;
     }
 
@@ -1255,6 +1418,9 @@ private:
     std::string token_;
     std::string chatId_;
     const StopSignal& stop_;
+    mutable HINTERNET hSession_ = nullptr; // connection() 이 늦게 만들고 소멸자에서 닫는다
+    mutable HINTERNET hConn_ = nullptr;
+    mutable CRITICAL_SECTION connCs_;      // 위 두 핸들의 생성 보호
 };
 
 // ================================================================ CommandListener
@@ -1267,7 +1433,12 @@ struct BotEvent {
     std::string cbData;     // 버튼 클릭: callback_data (예: "stop_yes"). 일반 명령이면 비어 있음
     std::string cbId;       // 버튼 클릭: callback_query id (answerCallbackQuery 용)
     std::string messageId;  // 버튼 클릭: 버튼이 붙어 있던 메시지의 id
+    std::string fileId;     // 파일 수신: 첨부된 파일의 file_id (document/photo/video/audio/voice/animation/video_note)
+    std::string fileName;   // 파일 수신: 원본 파일명(UTF-8). 사진처럼 이름이 없으면 비어 있음
+    std::string fileKind;   // 파일 수신: "document", "photo" 등
+    long long fileSize = 0; // 파일 수신: 크기(바이트). 모르면 0
     bool isCallback() const { return !cbData.empty(); }
+    bool isFile() const { return !fileId.empty(); }
 };
 
 class CommandListener {
@@ -1352,9 +1523,14 @@ private:
             } else {
                 const std::string rawText = extractText(seg);
                 ev.cmd = extractCommand(rawText);
-                if (ev.cmd.empty()) continue;
-                ev.arg = extractArg(rawText);
-                what = ev.cmd;
+                if (!ev.cmd.empty()) {
+                    ev.arg = extractArg(rawText);
+                    what = ev.cmd;
+                } else if (extractFile(seg, ev)) {   // 명령이 아니고 파일이 첨부된 메시지 (폰 -> PC)
+                    what = "파일 " + (ev.fileName.empty() ? ev.fileKind : ev.fileName);
+                } else {
+                    continue;
+                }
             }
 
             std::string chat = extractChatId(seg);
@@ -1381,6 +1557,87 @@ private:
             }
             events->push_back(ev);
         }
+        return true;
+    }
+
+    // s[p] 가 '{' 또는 '[' 일 때 짝이 맞는 끝까지의 부분 문자열 (문자열 안의 괄호는 무시). 실패 시 "".
+    static std::string balanced(const std::string& s, size_t p)
+    {
+        int depth = 0;
+        bool inStr = false;
+        for (size_t i = p; i < s.size(); ++i) {
+            const char c = s[i];
+            if (inStr) {
+                if (c == '\\') ++i;
+                else if (c == '"') inStr = false;
+                continue;
+            }
+            if (c == '"') inStr = true;
+            else if (c == '{' || c == '[') ++depth;
+            else if (c == '}' || c == ']') { if (--depth == 0) return s.substr(p, i - p + 1); }
+        }
+        return std::string();
+    }
+
+    // 객체 obj 의 바로 아래(깊이 1) key 의 값. 문자열이면 따옴표 안쪽(이스케이프 그대로), 아니면 원문. 없으면 "".
+    // (document 안의 thumbnail 에도 file_id 가 있으므로 깊이를 구분해야 한다)
+    static std::string topValue(const std::string& obj, const std::string& key)
+    {
+        int depth = 0;
+        for (size_t i = 0; i < obj.size(); ++i) {
+            const char c = obj[i];
+            if (c == '"') {
+                size_t e = i + 1;
+                while (e < obj.size() && obj[e] != '"') { if (obj[e] == '\\') ++e; ++e; }
+                if (depth == 1 && e < obj.size() && e + 1 < obj.size() && obj[e + 1] == ':' &&
+                    obj.compare(i + 1, e - i - 1, key) == 0) {
+                    const size_t v = e + 2;
+                    if (v < obj.size() && obj[v] == '"') {
+                        size_t ve = v + 1;
+                        while (ve < obj.size() && obj[ve] != '"') { if (obj[ve] == '\\') ++ve; ++ve; }
+                        return obj.substr(v + 1, ve - v - 1);
+                    }
+                    size_t ve = v;
+                    while (ve < obj.size() && obj[ve] != ',' && obj[ve] != '}') ++ve;
+                    return obj.substr(v, ve - v);
+                }
+                i = e;
+            } else if (c == '{' || c == '[') {
+                ++depth;
+            } else if (c == '}' || c == ']') {
+                --depth;
+            }
+        }
+        return std::string();
+    }
+
+    // 파일이 첨부된 메시지면 ev 의 file* 를 채우고 true. photo 는 크기별 배열의 마지막(가장 큰 것)을 쓴다.
+    static bool extractFile(const std::string& seg, BotEvent& ev)
+    {
+        static const char* const kinds[] = {"document", "video", "audio", "voice", "animation", "video_note"};
+        std::string obj;
+        for (const char* k : kinds) {
+            const std::string key = std::string("\"") + k + "\":{";
+            const size_t p = seg.find(key);
+            if (p == std::string::npos) continue;
+            obj = balanced(seg, p + key.size() - 1);
+            ev.fileKind = k;
+            break;
+        }
+        if (obj.empty()) {
+            const std::string key = "\"photo\":[";
+            const size_t p = seg.find(key);
+            if (p == std::string::npos) return false;
+            const std::string arr = balanced(seg, p + key.size() - 1);
+            const size_t last = arr.rfind('{');
+            if (last == std::string::npos) return false;
+            obj = balanced(arr, last);
+            ev.fileKind = "photo";
+        }
+        ev.fileId = topValue(obj, "file_id");
+        if (ev.fileId.empty()) return false;
+        ev.fileName = ev.fileKind == "photo" ? std::string() : unescapeJson(topValue(obj, "file_name"));
+        ev.fileSize = atoll(topValue(obj, "file_size").c_str());
         return true;
     }
 
@@ -2236,6 +2493,162 @@ private:
     ULONGLONG nextAllowedMs_ = 0;
 };
 
+// ================================================================ ImageWindow
+// 폰에서 받은 이미지를 PC 화면에 보여 주는 창. 이미지 1장마다 창 1개(전용 스레드 + 메시지 루프)를 만든다.
+// 창은 화면의 80% 안에 맞춰 열리고 크기 조절 가능(비율 유지). Esc 또는 닫기 버튼으로 닫는다.
+class ImageWindow {
+public:
+    // 이미지 바이트(jpg/png/bmp/gif/tif)를 디코딩해 새 창으로 띄운다. 디코딩에 실패하면 false.
+    static bool show(const std::vector<BYTE>& data, const std::string& title)
+    {
+        int w = 0, h = 0;
+        HBITMAP hb = decode(data, w, h);
+        if (!hb) return false;
+        Ctx* c = new Ctx{hb, w, h, StrUtil::toWide(title), (int)InterlockedIncrement(&counter_)};
+        HANDLE t = CreateThread(nullptr, 0, threadProc, c, 0, nullptr);
+        if (!t) {
+            DeleteObject(hb);
+            delete c;
+            return false;
+        }
+        CloseHandle(t);
+        return true;
+    }
+
+private:
+    struct Ctx {
+        HBITMAP bmp;
+        int w, h;
+        std::wstring title;
+        int slot; // 창이 정확히 겹치지 않도록 위치를 조금씩 어긋나게 하는 번호
+    };
+    static inline LONG counter_ = 0;
+    static constexpr const wchar_t* kClass = L"ScreenTelegramImageView";
+
+    // GDI+ 로 디코딩해 HBITMAP 으로 돌려준다 (EXIF 방향 반영, 투명은 흰색).
+    static HBITMAP decode(const std::vector<BYTE>& data, int& w, int& h)
+    {
+        ImageEncoder gdi; // GDI+ 세션 (다른 곳의 세션과 독립적으로 시작/종료해도 안전)
+        if (!gdi.ok() || data.empty()) return nullptr;
+        HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, data.size());
+        if (!hg) return nullptr;
+        void* p = GlobalLock(hg);
+        if (!p) { GlobalFree(hg); return nullptr; }
+        memcpy(p, data.data(), data.size());
+        GlobalUnlock(hg);
+        IStream* st = nullptr;
+        if (CreateStreamOnHGlobal(hg, TRUE, &st) != S_OK) { GlobalFree(hg); return nullptr; }
+        HBITMAP hb = nullptr;
+        {
+            Gdiplus::Bitmap bmp(st);
+            if (bmp.GetLastStatus() == Gdiplus::Ok && bmp.GetWidth() > 0 && bmp.GetHeight() > 0) {
+                const UINT sz = bmp.GetPropertyItemSize(PropertyTagOrientation);
+                if (sz >= sizeof(Gdiplus::PropertyItem)) {
+                    std::vector<BYTE> buf(sz);
+                    auto* pi = reinterpret_cast<Gdiplus::PropertyItem*>(buf.data());
+                    if (bmp.GetPropertyItem(PropertyTagOrientation, sz, pi) == Gdiplus::Ok &&
+                        pi->type == PropertyTagTypeShort && pi->length >= 2) {
+                        switch (*(const WORD*)pi->value) {
+                        case 2: bmp.RotateFlip(Gdiplus::RotateNoneFlipX); break;
+                        case 3: bmp.RotateFlip(Gdiplus::Rotate180FlipNone); break;
+                        case 4: bmp.RotateFlip(Gdiplus::RotateNoneFlipY); break;
+                        case 5: bmp.RotateFlip(Gdiplus::Rotate90FlipX); break;
+                        case 6: bmp.RotateFlip(Gdiplus::Rotate90FlipNone); break;
+                        case 7: bmp.RotateFlip(Gdiplus::Rotate270FlipX); break;
+                        case 8: bmp.RotateFlip(Gdiplus::Rotate270FlipNone); break;
+                        default: break;
+                        }
+                    }
+                }
+                w = (int)bmp.GetWidth();
+                h = (int)bmp.GetHeight();
+                if (bmp.GetHBITMAP(Gdiplus::Color(255, 255, 255), &hb) != Gdiplus::Ok) hb = nullptr;
+            }
+        } // bmp 를 스트림보다 먼저 해제
+        st->Release();
+        return hb;
+    }
+
+    static LRESULT CALLBACK wndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
+    {
+        Ctx* c = reinterpret_cast<Ctx*>(GetWindowLongPtrW(hw, GWLP_USERDATA));
+        switch (msg) {
+        case WM_NCCREATE:
+            SetWindowLongPtrW(hw, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+            break;
+        case WM_ERASEBKGND:
+            return 1; // WM_PAINT 에서 전체를 칠한다 (깜빡임 방지)
+        case WM_SIZE:
+            InvalidateRect(hw, nullptr, FALSE);
+            return 0;
+        case WM_KEYDOWN:
+            if (wp == VK_ESCAPE) DestroyWindow(hw);
+            return 0;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(hw, &ps);
+            RECT rc;
+            GetClientRect(hw, &rc);
+            FillRect(dc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+            if (c && c->bmp && c->w > 0 && c->h > 0 && rc.right > 0 && rc.bottom > 0) {
+                const double sc = std::min((double)rc.right / c->w, (double)rc.bottom / c->h);
+                const int dw = std::max(1, (int)(c->w * sc)), dh = std::max(1, (int)(c->h * sc));
+                HDC mem = CreateCompatibleDC(dc);
+                HGDIOBJ old = SelectObject(mem, c->bmp);
+                SetStretchBltMode(dc, HALFTONE);
+                SetBrushOrgEx(dc, 0, 0, nullptr);
+                StretchBlt(dc, (rc.right - dw) / 2, (rc.bottom - dh) / 2, dw, dh, mem, 0, 0, c->w, c->h, SRCCOPY);
+                SelectObject(mem, old);
+                DeleteDC(mem);
+            }
+            EndPaint(hw, &ps);
+            return 0;
+        }
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        }
+        return DefWindowProcW(hw, msg, wp, lp);
+    }
+
+    static DWORD WINAPI threadProc(LPVOID param)
+    {
+        std::unique_ptr<Ctx> c(static_cast<Ctx*>(param));
+        const HINSTANCE inst = GetModuleHandleW(nullptr);
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = wndProc;
+        wc.hInstance = inst;
+        wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)); // 32512 = IDC_ARROW
+        wc.lpszClassName = kClass;
+        RegisterClassExW(&wc); // 이미 등록돼 있으면 실패하지만 그대로 쓰면 된다
+
+        RECT wa;
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+        const double sc = std::min(1.0, std::min((wa.right - wa.left) * 0.8 / c->w, (wa.bottom - wa.top) * 0.8 / c->h));
+        RECT r = {0, 0, std::max(200, (int)(c->w * sc)), std::max(150, (int)(c->h * sc))};
+        AdjustWindowRectEx(&r, WS_OVERLAPPEDWINDOW, FALSE, 0);
+        const int off = (c->slot % 10) * 32;
+        HWND hw = CreateWindowExW(0, kClass, c->title.c_str(), WS_OVERLAPPEDWINDOW,
+                                  wa.left + 40 + off, wa.top + 40 + off, r.right - r.left, r.bottom - r.top,
+                                  nullptr, nullptr, inst, c.get());
+        if (hw) {
+            ShowWindow(hw, SW_SHOW);
+            // 다른 창 뒤에 숨지 않도록 잠깐 최상위로 올렸다가 되돌린다 (계속 최상위로 남기지는 않음)
+            SetWindowPos(hw, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetWindowPos(hw, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetForegroundWindow(hw);
+            MSG m;
+            while (GetMessageW(&m, nullptr, 0, 0) > 0) {
+                TranslateMessage(&m);
+                DispatchMessageW(&m);
+            }
+        }
+        DeleteObject(c->bmp);
+        return 0;
+    }
+};
+
 // ================================================================ ScreenTelegramApp
 // 스레드 구성:
 //   침입 탐지 스레드: 카메라 프레임 분석 -> 침입 확정 시 알림 메시지 + 카메라 이미지 저장·전송을 스스로 수행.
@@ -2427,7 +2840,7 @@ private:
     void stopWorker()
     {
         if (!worker_) return;
-        // 롱폴링(최대 약 3초) 중이면 끝날 때까지 잠시 기다린다. 너무 길면 강제 종료 (어차피 프로세스 종료 중)
+        // 롱폴링(최대 kPollSec 초) 중이면 끝날 때까지 잠시 기다린다. 너무 길면 강제 종료 (어차피 프로세스 종료 중)
         if (WaitForSingleObject(worker_, 20000) == WAIT_TIMEOUT) {
             Logger::log("명령 수신 스레드 종료 지연 - 강제 종료");
             TerminateThread(worker_, 0);
@@ -2481,7 +2894,7 @@ private:
     {
         while (!stop_.requested()) {
             std::vector<BotEvent> events;
-            if (!listener.poll(3, events)) {
+            if (!listener.poll(kPollSec, events)) {
                 // 통신 실패: 바로 재시도하면 CPU/네트워크를 낭비하므로 잠시 대기
                 if (stop_.wait(5000)) break;
                 continue;
@@ -2489,6 +2902,7 @@ private:
             for (const auto& ev : events) {
                 if (stop_.requested()) break;
                 if (ev.isCallback()) handleCallback(ev, telegram);
+                else if (ev.isFile()) handleUpload(ev, telegram);
                 else handleCommand(ev.cmd, ev.arg, telegram);
             }
         }
@@ -2712,6 +3126,8 @@ private:
                                  "\n빌드: " + __DATE__ + " " + __TIME__, resp);
         } else if (cmd == "/log") {
             handleLogCmd(arg, host, telegram);
+        } else if (cmd == "/download") {
+            handleDownload(host, telegram);
         } else if (cmd == "/cmd") {
             handleCmdCmd(arg, host, telegram);
         } else if (cmd == "/ini") {
@@ -2783,6 +3199,8 @@ private:
                     "/ini 키=값 - INI 에 새 키 추가 (이미 있는 키는 경고만, 재시작 후 적용)\n"
                     "/log [n|all] - 실행 로그 전송 (기본 최근 50줄, 길면 문서로)\n"
                     "/CMD 명령 - 뒤의 문자열을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
+                    "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
+                    "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 PC 화면에 창으로 표시\n"
                     "/version - 버전 표시\n"
                     "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
@@ -2934,6 +3352,295 @@ private:
             }
         }
         return true;
+    }
+
+    // 폰 -> PC : 허용된 chat/사용자가 봇 채팅에 보낸 파일(document/photo/video/audio/voice 등)을 받아 UPLOAD_DIR 에 저장한다.
+    // 파일명은 경로/금지 문자/예약어를 정리하고, 같은 이름이 있으면 _1, _2 를 붙이며 덮어쓰지 않는다. (명령 스레드에서 호출)
+    static std::wstring safeFileName(const std::string& utf8)
+    {
+        std::wstring w = StrUtil::toWide(utf8);
+        const size_t pos = w.find_last_of(L"\\/");
+        if (pos != std::wstring::npos) w = w.substr(pos + 1);
+        for (auto& c : w)
+            if (c < 32 || wcschr(L"<>:\"/\\|?*", c)) c = L'_';
+        if (w.size() > 150) {
+            const size_t dot = w.rfind(L'.');
+            const std::wstring ext = (dot != std::wstring::npos && w.size() - dot <= 16) ? w.substr(dot) : L"";
+            w = w.substr(0, 150 - ext.size()) + ext;
+        }
+        while (!w.empty() && (w.back() == L' ' || w.back() == L'.')) w.pop_back();
+        size_t b = 0;
+        while (b < w.size() && w[b] == L' ') ++b;
+        w = w.substr(b);
+        if (w.empty()) return L"";
+        std::wstring stem = w.substr(0, w.find(L'.'));
+        for (auto& c : stem) c = (wchar_t)towupper(c);
+        bool reserved = stem == L"CON" || stem == L"PRN" || stem == L"AUX" || stem == L"NUL";
+        if (stem.size() == 4 && (stem.compare(0, 3, L"COM") == 0 || stem.compare(0, 3, L"LPT") == 0) &&
+            stem[3] >= L'1' && stem[3] <= L'9')
+            reserved = true;
+        if (reserved) w = L"_" + w;
+        return w;
+    }
+
+    // dir\name 으로 새 파일을 만든다 (이미 있으면 name_1.ext, name_2.ext ...). CREATE_NEW 라 덮어쓰지 않는다.
+    static bool createUniqueFile(const std::wstring& dir, const std::wstring& name, std::wstring& outPath, HANDLE& h)
+    {
+        const size_t dot = name.rfind(L'.');
+        const bool hasExt = dot != std::wstring::npos && dot > 0;
+        const std::wstring stem = hasExt ? name.substr(0, dot) : name;
+        const std::wstring ext = hasExt ? name.substr(dot) : L"";
+        for (int i = 0; i < 1000; ++i) {
+            const std::wstring cand = dir + L"\\" + stem + (i ? L"_" + std::to_wstring(i) : L"") + ext;
+            h = CreateFileW(cand.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h != INVALID_HANDLE_VALUE) { outPath = cand; return true; }
+            const DWORD e = GetLastError();
+            if (e != ERROR_FILE_EXISTS && e != ERROR_ALREADY_EXISTS) return false;
+        }
+        return false;
+    }
+
+    // 사진(photo)이거나 GDI+ 가 읽는 확장자(jpg/png/bmp/gif/tif)의 파일이면 이미지로 본다.
+    static bool isImage(const BotEvent& ev, const std::wstring& path)
+    {
+        if (ev.fileKind == "photo") return true;
+        const size_t dot = path.rfind(L'.');
+        if (dot == std::wstring::npos) return false;
+        std::wstring ext = path.substr(dot + 1);
+        for (auto& c : ext) c = (wchar_t)towlower(c);
+        return ext == L"jpg" || ext == L"jpeg" || ext == L"png" || ext == L"bmp" || ext == L"gif" ||
+               ext == L"tif" || ext == L"tiff";
+    }
+
+    static std::string fmtSize(unsigned long long b)
+    {
+        char t[32];
+        if (b >= 1048576ULL) snprintf(t, sizeof(t), "%.1fMB", (double)b / 1048576.0);
+        else snprintf(t, sizeof(t), "%lluKB", (b + 1023) / 1024);
+        return t;
+    }
+
+    std::string uploadDir() const
+    {
+        std::string d = StrUtil::trim(cfg_.uploadDir);
+        while (!d.empty() && (d.back() == '\\' || d.back() == '/')) d.pop_back();
+        if (d.empty()) return SysUtil::exeDir() + "\\upload";
+        if (d.size() >= 2 && (d[1] == ':' || (d[0] == '\\' && d[1] == '\\'))) return d; // 절대 경로
+        return SysUtil::exeDir() + "\\" + d;
+    }
+
+    void handleUpload(const BotEvent& ev, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + SysUtil::hostName() + "] ";
+        const std::string label = ev.fileName.empty() ? ev.fileKind : ev.fileName;
+        Logger::log("파일 수신: %s (%lld바이트)", label.c_str(), ev.fileSize);
+
+        if (ev.fileSize > (long long)kUploadMaxBytes) {
+            telegram.sendMessage(pre + "파일이 너무 커서 받을 수 없습니다: " + label + " (" +
+                                 fmtSize((unsigned long long)ev.fileSize) + ", 봇 API 한도 20MB)", resp);
+            return;
+        }
+        std::string filePath;
+        if (!telegram.getFilePath(ev.fileId, filePath, resp)) {
+            const bool big = resp.find("too big") != std::string::npos;
+            telegram.sendMessage(pre + (big ? "파일이 너무 커서 받을 수 없습니다 (봇 API 한도 20MB): "
+                                            : "파일 정보를 가져오지 못했습니다: ") +
+                                 (big ? label : resp.substr(0, 150)), resp);
+            Logger::log("파일 수신 실패(getFile): %s", resp.substr(0, 150).c_str());
+            return;
+        }
+        std::wstring name = safeFileName(ev.fileName);
+        if (name.empty()) { // 사진 등 이름이 없으면 시각 + 텔레그램이 정한 이름(예: file_12.jpg)
+            const size_t sl = filePath.find_last_of('/');
+            name = safeFileName(SysUtil::fileStamp() + "_" + (sl == std::string::npos ? filePath : filePath.substr(sl + 1)));
+            if (name.empty()) name = StrUtil::toWide(SysUtil::fileStamp() + ".bin");
+        }
+
+        std::vector<BYTE> data;
+        std::string err;
+        if (!telegram.downloadFile(filePath, data, err)) {
+            telegram.sendMessage(pre + "파일을 내려받지 못했습니다: " + label + " (" + err + ")", resp);
+            Logger::log("파일 수신 실패(download): %s : %s", label.c_str(), err.c_str());
+            return;
+        }
+
+        const std::string dir = uploadDir();
+        if (!SysUtil::ensureDir(dir)) {
+            telegram.sendMessage(pre + "저장 폴더를 만들 수 없습니다: " + dir, resp);
+            Logger::log("upload 폴더 생성 실패: %s", dir.c_str());
+            return;
+        }
+        std::wstring outPath;
+        HANDLE h = INVALID_HANDLE_VALUE;
+        if (!createUniqueFile(StrUtil::toWide(dir), name, outPath, h)) {
+            telegram.sendMessage(pre + "파일을 만들 수 없습니다: " + label + " (오류 " + std::to_string(GetLastError()) + ")", resp);
+            return;
+        }
+        bool ok = true;
+        size_t put = 0;
+        while (put < data.size()) {
+            DWORD wr = 0;
+            const DWORD want = (DWORD)std::min<size_t>(data.size() - put, 16u * 1024 * 1024);
+            if (!WriteFile(h, data.data() + put, want, &wr, nullptr) || wr == 0) { ok = false; break; }
+            put += wr;
+        }
+        CloseHandle(h);
+        const std::string saved = StrUtil::toUtf8(outPath.c_str());
+        if (!ok) {
+            DeleteFileW(outPath.c_str()); // 쓰다 만 파일은 남기지 않는다
+            telegram.sendMessage(pre + "파일 저장 실패 (디스크 공간/권한 확인): " + saved, resp);
+            Logger::log("파일 저장 실패: %s", saved.c_str());
+            return;
+        }
+        Logger::log("파일 저장: %s (%zu바이트)", saved.c_str(), data.size());
+        if (cfg_.uploadShowImage && isImage(ev, outPath)) { // 이미지면 PC 화면에 장당 별개의 창으로 표시
+            const size_t sl = outPath.find_last_of(L"\\/");
+            const std::string title = StrUtil::toUtf8((sl == std::wstring::npos ? outPath : outPath.substr(sl + 1)).c_str());
+            if (!ImageWindow::show(data, title)) Logger::log("이미지 창 표시 실패(지원하지 않는 형식): %s", saved.c_str());
+        }
+        telegram.sendMessage(pre + "저장 완료: " + saved + " (" + fmtSize(data.size()) + ")", resp);
+    }
+
+    // /download : PC 화면에 파일 탐색기(열기 창)를 띄워 사용자가 여러 파일을 고르면 하나씩 문서로 전송한다.
+    // 창이 떠 있는 동안 명령 스레드가 대기한다 (kDownloadTimeoutMs 안에 고르지 않으면 자동 취소). (명령 스레드에서 호출)
+    static UINT_PTR CALLBACK downloadDlgHook(HWND h, UINT msg, WPARAM, LPARAM)
+    {
+        if (msg == WM_INITDIALOG) {
+            HWND dlg = GetParent(h);
+            SetWindowPos(dlg, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // 다른 창 뒤로 숨지 않게
+            SetForegroundWindow(dlg);
+            SetTimer(h, 1, kDownloadTimeoutMs, nullptr);
+        } else if (msg == WM_TIMER) {
+            KillTimer(h, 1);
+            PostMessageW(GetParent(h), WM_COMMAND, IDCANCEL, 0);
+        }
+        return 0;
+    }
+
+    // 취소/시간 초과면 false + err 비움, 대화상자 오류면 false + err 설정.
+    static bool pickFiles(std::vector<std::wstring>& files, std::string& err)
+    {
+        files.clear();
+        err.clear();
+        std::vector<wchar_t> buf(kPickBufChars, L'\0');
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.lpstrFile = buf.data();
+        ofn.nMaxFile = (DWORD)buf.size();
+        ofn.lpstrFilter = L"모든 파일 (*.*)\0*.*\0";
+        ofn.lpstrTitle = L"텔레그램으로 보낼 파일 선택 (여러 개 선택 가능)";
+        ofn.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+                    OFN_HIDEREADONLY | OFN_NOCHANGEDIR | OFN_ENABLEHOOK;
+        ofn.lpfnHook = downloadDlgHook;
+        if (!GetOpenFileNameW(&ofn)) {
+            const DWORD e = CommDlgExtendedError();
+            if (e) {
+                char b[32];
+                snprintf(b, sizeof(b), "코드 0x%lX", (unsigned long)e);
+                err = b;
+            }
+            return false;
+        }
+        // 1개 선택: "전체경로\0\0". 여러 개: "폴더\0파일1\0파일2\0\0"
+        const wchar_t* p = buf.data();
+        const std::wstring first = p;
+        p += first.size() + 1;
+        if (*p == L'\0') {
+            files.push_back(first);
+        } else {
+            const std::wstring dir = (!first.empty() && first.back() == L'\\') ? first : first + L"\\";
+            while (*p) {
+                std::wstring name = p;
+                files.push_back(dir + name);
+                p += name.size() + 1;
+            }
+        }
+        return !files.empty();
+    }
+
+    static bool readWholeFile(const std::wstring& path, std::vector<BYTE>& out, std::string& err)
+    {
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) {
+            err = "파일을 열 수 없음 (오류 " + std::to_string(GetLastError()) + ")";
+            return false;
+        }
+        LARGE_INTEGER sz = {};
+        bool ok = false;
+        if (!GetFileSizeEx(h, &sz)) {
+            err = "파일 크기를 알 수 없음";
+        } else if (sz.QuadPart == 0) {
+            err = "빈 파일 (텔레그램은 0바이트 파일을 받지 않음)";
+        } else if (sz.QuadPart > (LONGLONG)kDownloadMaxBytes) {
+            err = "너무 큼 (" + std::to_string(sz.QuadPart / 1024 / 1024) + "MB, 한도 49MB)";
+        } else {
+            out.assign((size_t)sz.QuadPart, 0);
+            size_t got = 0;
+            ok = true;
+            while (got < out.size()) {
+                DWORD rd = 0;
+                const DWORD want = (DWORD)std::min<size_t>(out.size() - got, 16u * 1024 * 1024);
+                if (!ReadFile(h, out.data() + got, want, &rd, nullptr) || rd == 0) {
+                    err = "파일 읽기 실패 (오류 " + std::to_string(GetLastError()) + ")";
+                    ok = false;
+                    break;
+                }
+                got += rd;
+            }
+        }
+        CloseHandle(h);
+        return ok;
+    }
+
+    void handleDownload(const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        ComScope com; // 공용 대화상자(셸 확장)용
+        telegram.sendMessage(pre + "PC 에 파일 선택 창을 띄웠습니다. 보낼 파일을 고르세요. "
+                             "(여러 개 선택 가능, " + std::to_string(kDownloadTimeoutMs / 60000) +
+                             "분 안에 고르지 않으면 취소)", resp);
+        Logger::log("/download: 파일 선택 창 표시");
+
+        std::vector<std::wstring> files;
+        std::string err;
+        if (!pickFiles(files, err)) {
+            if (err.empty()) {
+                telegram.sendMessage(pre + "파일 선택이 취소되었거나 시간이 초과되었습니다.", resp);
+                Logger::log("/download: 선택 취소 또는 시간 초과");
+            } else {
+                telegram.sendMessage(pre + "파일 선택 창을 열 수 없습니다: " + err, resp);
+                Logger::log("/download: 선택 창 오류 %s", err.c_str());
+            }
+            return;
+        }
+
+        int okCnt = 0, failCnt = 0;
+        std::string failList;
+        for (const auto& w : files) {
+            if (stop_.requested()) break;
+            const size_t pos = w.find_last_of(L"\\/");
+            const std::string name = StrUtil::toUtf8((pos == std::wstring::npos ? w : w.substr(pos + 1)).c_str());
+            std::vector<BYTE> data;
+            std::string e;
+            if (readWholeFile(w, data, e)) {
+                if (telegram.sendFileDocument(pre + name, name, data, resp)) {
+                    ++okCnt;
+                    Logger::log("/download 전송: %s (%zu바이트)", name.c_str(), data.size());
+                    continue;
+                }
+                e = "전송 실패: " + resp.substr(0, 100);
+            }
+            ++failCnt;
+            failList += "\n- " + name + " : " + e;
+            Logger::log("/download 실패: %s : %s", name.c_str(), e.c_str());
+        }
+        std::string msg = pre + "/download 완료: 성공 " + std::to_string(okCnt) + "개, 실패 " +
+                          std::to_string(failCnt) + "개 (선택 " + std::to_string(files.size()) + "개)";
+        if (!failList.empty()) msg += failList;
+        telegram.sendMessage(msg, resp);
     }
 
     // /CMD 명령 : /CMD 뒤의 문자열 전체(앞뒤 공백 제거)를 cmd.exe 로 실행하고 출력을 .txt 문서로 보낸다. (명령 스레드에서 호출)
@@ -3161,12 +3868,23 @@ private:
                    const std::string& filePrefix, const std::string& labelPrefix)
     {
         bool saved = false;
+        // 이번 호출에서 실제로 전송할 가능성이 있는지 (아니면 전송용 축소본을 만들 필요가 없다)
+        const bool willSend = (forceSend || !(cfg_.saveOnly || paused_ != 0)) &&
+                              !cfg_.token.empty() && !cfg_.chatId.empty();
         for (auto& shot : shots) {
             if (stop_.requested()) break;
 
             std::vector<BYTE> img;
             bool jpeg = false, asDoc = false;
             bool enc = encoder.encodeForTelegram(shot.bmp.get(), img, jpeg, asDoc);
+
+            // 저장본(img)은 원본 해상도 그대로 두고, 큰 화면(4K 등)은 전송용만 줄여서 올린다.
+            std::vector<BYTE> sendImg;
+            UINT sw = 0, sh = 0;
+            if (!(enc && jpeg && !asDoc && willSend &&
+                  encoder.encodeScaledJpeg(shot.bmp.get(), kSendMaxDim, 85, sendImg, sw, sh) &&
+                  !sendImg.empty() && sendImg.size() < img.size()))
+                sendImg.clear();
             shot.bmp.reset();
 
             if (!enc) {
@@ -3184,10 +3902,14 @@ private:
             const std::string label = labelPrefix + shot.label;
             const std::string caption = "[" + host + "] " + label + " " + ts;
             std::string resp;
-            if (telegram.sendImageWithRetry(caption, img, jpeg, asDoc, resp))
-                Logger::log("%s 전송 성공 (%zu KB, %s%s)", label.c_str(),
-                            img.size() / 1024, jpeg ? "JPEG" : "PNG",
-                            asDoc ? ", 문서로 전송" : "");
+            const std::vector<BYTE>& payload = sendImg.empty() ? img : sendImg;
+            const ULONGLONG tSend = GetTickCount64();
+            if (telegram.sendImageWithRetry(caption, payload, jpeg, asDoc, resp))
+                Logger::log("%s 전송 성공 (%zu KB, %s%s%s, %llu ms)", label.c_str(),
+                            payload.size() / 1024, jpeg ? "JPEG" : "PNG",
+                            asDoc ? ", 문서로 전송" : "",
+                            sendImg.empty() ? "" : (", 축소 " + std::to_string(sw) + "x" + std::to_string(sh)).c_str(),
+                            (unsigned long long)(GetTickCount64() - tSend));
             else
                 Logger::log("%s 전송 실패: %s", label.c_str(), resp.c_str());
         }
@@ -3212,10 +3934,16 @@ private:
     MotionDetector detector_;        // 탐지 스레드 전용 (켜질 때마다 새로 만듦)
     volatile LONG loopCount_ = 0;    // 완료한 반복 횟수 (/shot 은 제외)
     ULONGLONG startTick_ = 0;        // 시작 시각 (가동 시간 계산용)
+    static constexpr int kPollSec = 10;         // 명령 롱폴링 대기(초). 연결을 재사용하므로 길게 잡아도 종료 반응은 최대 이 시간
+    static constexpr UINT kSendMaxDim = 2560;   // 전송용 이미지의 긴 변 상한(px). 텔레그램 사진은 어차피 이 크기까지만 보관
     static constexpr int kMinInterval = 5;      // /INTERVAL 허용 범위(초). 너무 짧으면 텔레그램 전송 제한(429)에 걸림
     static constexpr int kMaxInterval = 86400;
     static constexpr int kDefaultLogLines = 50; // /log 기본 줄 수
     static constexpr int kMaxLogLines = 2000;   // /log n 허용 최대 줄 수
+    static constexpr size_t kUploadMaxBytes = 20u * 1024 * 1024;   // 폰 -> PC 수신 한도 (봇 API getFile 20MB)
+    static constexpr UINT kDownloadTimeoutMs = 300000;            // /download 파일 선택 창 대기 시간(5분)
+    static constexpr size_t kDownloadMaxBytes = 49000000;         // /download 파일 1개 한도 (sendDocument 50MB)
+    static constexpr size_t kPickBufChars = 262144;               // 파일 선택 창 결과 버퍼(문자 수)
     static constexpr DWORD kCmdTimeoutMs = 60000;                 // /CMD 최대 실행 시간
     static constexpr size_t kCmdMaxOut = 20u * 1024u * 1024u;     // /CMD 출력 최대 크기 (sendDocument 50MB 한도에 여유)
     std::string iniPath_;            // 로드한 INI 경로 (/INTERVAL 저장용)
@@ -3253,10 +3981,47 @@ static void terminateHandler()
     ExitProcess(3);
 }
 
+// 중복 실행 방지: 같은 폴더의 exe 마다 하나씩 이름 있는 뮤텍스를 잡는다.
+// (RUN.BAT 을 두 번 실행하거나, 시작프로그램 + 수동 실행이 겹쳐도 두 번째 인스턴스는 바로 종료한다.
+//  둘이 동시에 돌면 getUpdates 409 충돌, 이중 캡처/전송, 카메라 경합이 생긴다.)
+// 뮤텍스 이름은 exe 폴더 경로의 해시라서, 서로 다른 폴더의 복사본(테스트용 등)은 따로 실행할 수 있다.
+// 프로세스가 어떻게 끝나든(크래시, /stop, 작업 관리자) OS 가 핸들을 닫아 자동으로 풀린다.
+// 반환: 핸들(종료 때 닫음). another=true 이면 이미 다른 인스턴스가 실행 중.
+static HANDLE acquireSingleInstance(bool& another)
+{
+    another = false;
+    const std::wstring dir = StrUtil::toWide(SysUtil::exeDir());
+    unsigned long long h = 1469598103934665603ULL; // FNV-1a 64bit
+    for (wchar_t c : dir) {
+        h ^= (unsigned long long)towlower(c);
+        h *= 1099511628211ULL;
+    }
+    std::wstring name = L"Global\\ScreenTelegram_";
+    for (int shift = 60; shift >= 0; shift -= 4)
+        name += L"0123456789ABCDEF"[(h >> shift) & 0xF];
+
+    HANDLE m = CreateMutexW(nullptr, FALSE, name.c_str());
+    const DWORD err = GetLastError();
+    if (m && err == ERROR_ALREADY_EXISTS) another = true;
+    // 다른 사용자 계정이 만든 뮤텍스는 열 권한이 없어 ACCESS_DENIED 가 되는데, 이것도 이미 실행 중이라는 뜻이다.
+    if (!m && err == ERROR_ACCESS_DENIED) another = true;
+    return m; // 그 밖의 이유로 만들지 못하면(nullptr, another=false) 중복 방지 없이 그냥 실행한다
+}
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
     SetUnhandledExceptionFilter(crashFilter);
     std::set_terminate(terminateHandler);
+
+    bool another = false;
+    HANDLE instanceMutex = acquireSingleInstance(another);
+    if (another) {
+        // 시작 로그(PREVIOUS_SESSION_CLEAR 정리 포함)보다 먼저 빠지므로 실행 중인 쪽의 로그/이미지는 건드리지 않는다.
+        Logger::log("이미 실행 중인 screen_telegram 이 있어 이 인스턴스는 바로 종료합니다. (PID %lu)",
+                    (unsigned long)GetCurrentProcessId());
+        if (instanceMutex) CloseHandle(instanceMutex);
+        return 0;
+    }
 
     int rc = 0;
     try {
@@ -3270,5 +4035,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         rc = 2;
     }
     Logger::log("프로그램 종료 (종료 코드 %d)", rc);
+    if (instanceMutex) CloseHandle(instanceMutex);
     return rc;
 }
