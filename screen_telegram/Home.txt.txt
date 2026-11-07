@@ -1,6 +1,0 @@
-[HomeBack]
-https://api.telegram.org/bot<토큰>/sendMessage?chat_id=<ID>&text=/HomeBack
-
-
-[NotHome]
-https://api.telegram.org/bot<토큰>/sendMessage?chat_id=<ID>&text=/NotHome
