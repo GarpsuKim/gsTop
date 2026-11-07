@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-chcp 65001
+rem chcp 65001
 
 rem Wait (up to ~60s) until a real IPv4 address exists (right after boot the network may not be ready; 169.254.x.x is ignored)
 set /a TRIES=0
@@ -112,6 +112,6 @@ if exist "%UPD_NEW%" del "%UPD_NEW%" >nul 2>&1
 
 
 rem All keys and recipients are read from screen_telegram.ini
-echo screen_telegram.exe ...........
+rem echo screen_telegram.exe ...........
 start "" screen_telegram.exe
-if /i "%~1"=="pause" pause
+rem if /i "%~1"=="pause" pause

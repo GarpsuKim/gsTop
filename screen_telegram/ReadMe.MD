@@ -33,7 +33,7 @@ upload\ ................ 폰에서 봇 채팅으로 보낸 파일 저장 폴더 
 - 이미지가 10MB 를 넘으면 품질/해상도를 단계적으로 낮춰 전송. 가로+세로 10000px 초과 또는 비율 20:1 초과이면 원본을 문서(sendDocument)로 전송
 - CAMERA_KEEP_OPEN=TRUE 이면 카메라를 계속 열어 둠 (지연/LED 깜빡임 감소, 대신 다른 앱이 카메라를 쓸 수 없음. 기본 FALSE, 현재 INI 는 TRUE)
 - SAVE_ONLY=TRUE 이면 이미지를 텔레그램으로 보내지 않고 image 폴더에 저장만 함. 명령 수신(폴링)은 계속 동작하며 /shot 만 전송 (TOKEN/CHAT_ID 가 없으면 명령 수신 없이 저장만)
-- 텔레그램 명령 수신 (TELEGRAM_COMMANDS=TRUE): 봇에게 /shot(화면+카메라 즉시 캡처·전송) /screen(화면만 즉시 캡처·전송) /photo(카메라만 즉시 캡처·전송) /pause(이미지 전송 중단, 저장은 계속) /resume(전송 재개) /status(상태) /detectOn(침입 탐지 켜기) /detectOff(침입 탐지 끄기) /INTERVAL=nnn(캡처·전송 간격을 nnn초로 변경, 5~86400. 즉시 적용되고 INI 의 TELEGRAM_INTERVAL 도 갱신됨. /INTERVAL 만 보내면 현재 값 표시) /version(프로그램 버전과 빌드 시각 표시) /log(실행 로그 전송, 아래 설명) /CMD 명령(PC 에서 명령 실행 후 결과를 txt 로 전송, 아래 설명) /download(PC 에 파일 선택 창을 띄워 고른 파일들을 전송, 아래 설명) /ini 키=값(INI 에 새 키 추가, 아래 설명) /stop(종료, Yes/No 버튼으로 확인) /help 또는 //(도움말) 전송 (명령은 대소문자를 구분하지 않음).
+- 텔레그램 명령 수신 (TELEGRAM_COMMANDS=TRUE): 봇에게 /shot(화면+카메라 즉시 캡처·전송) /screen(화면만 즉시 캡처·전송) /photo(카메라만 즉시 캡처·전송) /pause(이미지 전송 중단, 저장은 계속) /resume(전송 재개) /status(상태) /detectOn(침입 탐지 켜기) /detectOff(침입 탐지 끄기) /INTERVAL=nnn(캡처·전송 간격을 nnn초로 변경, 5~86400. 즉시 적용되고 INI 의 TELEGRAM_INTERVAL 도 갱신됨. /INTERVAL 만 보내면 현재 값 표시) /version(프로그램 버전과 빌드 시각 표시) /log(실행 로그 전송, 아래 설명) /CMD 명령(PC 에서 명령 실행 후 결과를 txt 로 전송, 아래 설명) /HomeBack(귀가 인사 후 침입 탐지 끄기) /NotHome(외출 인사 후 침입 탐지 켜기) /download(PC 에 파일 선택 창을 띄워 고른 파일들을 전송, 아래 설명) /ini 키=값(INI 에 새 키 추가, 아래 설명) /stop(종료, Yes/No 버튼으로 확인) /help 또는 //(도움말) 전송 (명령은 대소문자를 구분하지 않음).
   * /stop 을 보내면 "종료하시겠습니까?(y/n)" 메시지에 Yes/No 버튼이 붙어 옴. Yes 를 눌러야 종료, No 는 취소. 버튼은 명령과 같은 chat/허용 사용자만 누를 수 있고, 5분이 지났거나 이미 처리한 메시지, 프로그램 재시작 전의 메시지 버튼은 무효(종료되지 않음) TELEGRAM_CHAT_ID 로 설정한 chat 의 명령만 처리. 명령은 별도 스레드가 받으므로 캡처/전송 중에도 /pause /resume /status /stop 은 수 초 내 반응 (/shot 은 진행 중인 캡처가 끝난 뒤 실행)
   * TELEGRAM_CHAT_ID 가 그룹(음수)이면 TELEGRAM_ALLOWED_USER_IDS=111,222 (명령 허용 사용자 ID) 를 반드시 설정해야 명령이 동작. 개인 chat 이면 생략 가능
   * 같은 봇 토큰을 다른 프로그램이 getUpdates/webhook 으로 쓰면 409 충돌이 나므로, 이 프로그램 전용 봇을 쓰는 것을 권장
@@ -50,7 +50,7 @@ upload\ ................ 폰에서 봇 채팅으로 보낸 파일 저장 폴더 
   * 오탐이 많으면 AREA_PERCENT/PIXEL_THRESHOLD 를 올리고, 놓치면 낮춤
 - 시작 인사말: 준비가 끝나면 텔레그램으로 인사말(간격/카메라/침입 탐지 상태 포함)을 한 번 전송. TELEGRAM_GREETING=FALSE 로 끌 수 있음
 - MAX_LOOP=N 이면 N회 캡처/전송 후 자동 종료 (0 또는 생략 시 무제한)
-- 버전: 1.0.0.8 (exe 속성 > 자세히 탭, 시작 인사말, /status, 로그에 표시)
+- 버전: 1.0.0.11 (exe 속성 > 자세히 탭, 시작 인사말, /status, 로그에 표시)
 - 저작권: 김갑수. 이 프로그램은 개인에 한하여 비상업적 목적으로 자유롭게 사용 할 수 있습니다. 기업이나 단체 등 개인이 아닌 사용자는 개발자 김갑수와 개별 협의하여야 합니다.
 - 자동 업데이트 (screen_telegram_RUN.BAT): exe 를 시작하기 전에 GitHub 의 서버 exe(https://github.com/GarpsuKim/gsTop/raw/main/screen_telegram/screen_telegram.exe)를 받아, 서버 exe 의 파일 버전이 PC 의 exe 보다 높을 때만 교체한 뒤 실행. 결과는 log.txt 의 UPDATE= 줄에 기록
   * 교체 전 기존 exe 는 screen_telegram.exe.bak 로 보관. 네트워크 오류/버전 정보 없음/exe 실행 중이면 교체하지 않고 현재 exe 로 계속 실행
@@ -76,6 +76,8 @@ upload\ ................ 폰에서 봇 채팅으로 보낸 파일 저장 폴더 
   * 한글 출력: 출력이 UTF-8 이 아니면 콘솔 코드 페이지(한국어 Windows 는 CP949)에서 UTF-8 로 변환해 전송
   * 보안 주의: 허용된 chat/사용자(TELEGRAM_CHAT_ID, TELEGRAM_ALLOWED_USER_IDS)가 PC 에서 임의의 명령을 실행할 수 있는 기능. 텔레그램 계정과 그룹 chat 의 허용 사용자 목록을 안전하게 관리할 것. 실행한 명령(200자까지)과 종료 코드는 log.txt 에 기록
   * 프로그램이 사용자 로그온 세션에서 실행 중인 권한으로 동작 (관리자 권한이 필요한 명령은 exe 를 관리자로 실행해야 함)
+- /HomeBack : 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 를 보낸 뒤 자동으로 /detectOff 를 처리 (침입 탐지 끄기, 카메라 해제, 상태 저장). 카메라를 쓸 수 없거나 이미 꺼져 있으면 /detectOff 와 같은 안내 메시지가 이어서 옴
+- /NotHome : 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 를 보낸 뒤 자동으로 /detectOn 을 처리 (침입 탐지 켜기, 카메라 상시 사용). 카메라를 쓸 수 없거나 이미 켜져 있으면 /detectOn 과 같은 안내 메시지가 이어서 옴
 - /download : PC 화면에 파일 탐색기(열기 창)를 띄워 사용자가 여러 파일을 선택하면 그 파일들을 텔레그램 문서(sendDocument, 원본 그대로)로 전송
   * PC 앞에 있는 사람이 파일을 고르는 방식. 창은 항상 맨 위에 뜨고, 5분 안에 고르지 않거나 취소하면 "취소/시간 초과" 메시지만 보냄
   * 파일 1개당 49MB 까지. 빈 파일, 49MB 초과, 열 수 없는 파일은 건너뛰고 완료 메시지에 파일별 사유를 표시. 전송된 파일명은 log.txt 에 기록

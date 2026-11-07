@@ -32,6 +32,8 @@
 //   UPLOAD_PLAY_MEDIA=TRUE         (폰에서 받은 .mp4 / .mp3 파일을 저장 직후 PC 의 기본 플레이어로 실행. 기본 TRUE. 예전 이름 UPLOAD_PLAY_VIDEO 도 인정)
 //   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
 //    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
+//   (텔레그램 /HomeBack 은 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 를 보낸다. 인사 뒤에 /detectOff 를 자동 처리한다.)
+//   (텔레그램 /NotHome 은 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 를 보낸다. 인사 뒤에 /detectOn 을 자동 처리한다.)
 //   (텔레그램 /download 는 PC 에 파일 탐색기(열기 창)를 띄워 사용자가 고른 여러 파일을 텔레그램으로 보낸다.
 //    창은 5분 안에 고르지 않으면 취소되고, 파일 1개당 49MB 까지, 빈 파일은 제외한다.)
 //   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
@@ -3131,6 +3133,14 @@ private:
                                  "\n빌드: " + __DATE__ + " " + __TIME__, resp);
         } else if (cmd == "/log") {
             handleLogCmd(arg, host, telegram);
+        } else if (cmd == "/homeback") { // 명령은 소문자로 정규화되어 들어온다 (/HomeBack -> /homeback)
+            telegram.sendMessage("[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]", resp);
+            Logger::log("/HomeBack: 귀가 인사 전송 -> /detectOff 자동 처리");
+            handleCommand("/detectoff", "", telegram); // 인사말 뒤에 침입 탐지 끄기 (카메라 없음/이미 꺼짐이면 그 안내 메시지가 나감)
+        } else if (cmd == "/nothome") { // /NotHome -> /nothome
+            telegram.sendMessage("안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다.", resp);
+            Logger::log("/NotHome: 외출 인사 전송 -> /detectOn 자동 처리");
+            handleCommand("/detecton", "", telegram); // 인사말 뒤에 침입 탐지 켜기 (카메라 없음/이미 켜짐이면 그 안내 메시지가 나감)
         } else if (cmd == "/download") {
             handleDownload(host, telegram);
         } else if (cmd == "/cmd") {
@@ -3204,6 +3214,8 @@ private:
                     "/ini 키=값 - INI 에 새 키 추가 (이미 있는 키는 경고만, 재시작 후 적용)\n"
                     "/log [n|all] - 실행 로그 전송 (기본 최근 50줄, 길면 문서로)\n"
                     "/CMD 명령 - 뒤의 문자열을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
+                    "/HomeBack - 귀가 인사 전송 후 침입 탐지 끄기\n"
+                    "/NotHome - 외출 인사 전송 후 침입 탐지 켜기\n"
                     "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
                     "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 창으로 표시, mp4/mp3 는 기본 플레이어로 실행\n"
                     "/version - 버전 표시\n"
