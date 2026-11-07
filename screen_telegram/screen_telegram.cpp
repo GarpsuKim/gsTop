@@ -33,6 +33,7 @@
 //   UPLOAD_PLAY_MEDIA=TRUE         (폰에서 받은 .mp4 / .mp3 파일을 저장 직후 PC 의 기본 플레이어로 실행. 기본 TRUE. 예전 이름 UPLOAD_PLAY_VIDEO 도 인정)
 //   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
 //    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
+//   (텔레그램 /github 는 PC 의 기본 브라우저로 GitHub 의 ReadMe 페이지(kGithubUrl)를 연다.)
 //   (텔레그램 /HomeBack 은 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 를 보낸다. 인사 뒤에 /detectOff 를 자동 처리한다.)
 //   (텔레그램 /NotHome 은 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 를 보낸다. 인사 뒤에 /detectOn 을 자동 처리한다.)
 //   (텔레그램 /download 는 PC 에 파일 탐색기(열기 창)를 띄워 사용자가 고른 여러 파일을 텔레그램으로 보낸다.
@@ -2904,6 +2905,7 @@ private:
             {"log", "📜 실행 로그 전송 (/log [n|all])"},
             {"cmd", "💻 PC 에서 명령 실행 (/CMD 명령)"},
             {"download", "📥 PC 에서 파일을 골라 전송"},
+            {"github", "🌐 PC 브라우저로 GitHub ReadMe 열기"},
             {"homeback", "🏠 귀가 인사 + 침입 탐지 끄기"},
             {"nothome", "🚪 외출 인사 + 침입 탐지 켜기"},
             {"version", "🔖 프로그램 버전 표시"},
@@ -3191,6 +3193,8 @@ private:
             telegram.sendMessage("안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다.", resp);
             Logger::log("/NotHome: 외출 인사 전송 -> /detectOn 자동 처리");
             handleCommand("/detecton", "", telegram); // 인사말 뒤에 침입 탐지 켜기 (카메라 없음/이미 켜짐이면 그 안내 메시지가 나감)
+        } else if (cmd == "/github") {
+            handleGithub(host, telegram);
         } else if (cmd == "/download") {
             handleDownload(host, telegram);
         } else if (cmd == "/cmd") {
@@ -3266,6 +3270,7 @@ private:
                     "/CMD 명령 - 뒤의 문자열을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
                     "/HomeBack - 귀가 인사 전송 후 침입 탐지 끄기\n"
                     "/NotHome - 외출 인사 전송 후 침입 탐지 켜기\n"
+                    "/github - PC 기본 브라우저로 GitHub ReadMe 페이지 열기\n"
                     "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
                     "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 창으로 표시, mp4/mp3 는 기본 플레이어로 실행\n"
                     "/version - 버전 표시\n"
@@ -3583,6 +3588,22 @@ private:
             else Logger::log("미디어 재생 실행 실패(코드 %lld): %s", (long long)(INT_PTR)r, saved.c_str());
         }
         telegram.sendMessage(pre + "저장 완료: " + saved + " (" + fmtSize(data.size()) + ")", resp);
+    }
+
+    // /github : PC 의 기본 브라우저로 kGithubUrl 을 연다. (명령 스레드에서 호출)
+    void handleGithub(const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        ComScope com; // ShellExecute 는 COM 초기화된 스레드에서 호출하도록 권장
+        const HINSTANCE r = ShellExecuteW(nullptr, L"open", StrUtil::toWide(kGithubUrl).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if ((INT_PTR)r > 32) {
+            Logger::log("/github: 기본 브라우저로 열기 성공");
+            telegram.sendMessage(pre + "PC 기본 브라우저로 GitHub 페이지를 열었습니다.\n" + kGithubUrl, resp);
+        } else {
+            Logger::log("/github: 브라우저 열기 실패 (코드 %lld)", (long long)(INT_PTR)r);
+            telegram.sendMessage(pre + "브라우저를 열지 못했습니다 (코드 " + std::to_string((long long)(INT_PTR)r) + "). 잠금 화면이거나 기본 브라우저가 없는지 확인하세요.", resp);
+        }
     }
 
     // /download : PC 화면에 파일 탐색기(열기 창)를 띄워 사용자가 여러 파일을 고르면 하나씩 문서로 전송한다.
@@ -4023,6 +4044,7 @@ private:
     static constexpr int kMaxInterval = 86400;
     static constexpr int kDefaultLogLines = 50; // /log 기본 줄 수
     static constexpr int kMaxLogLines = 2000;   // /log n 허용 최대 줄 수
+    static constexpr const char* kGithubUrl = "https://github.com/GarpsuKim/gsTop/blob/main/screen_telegram/ReadMe.MD"; // /github 가 여는 주소
     static constexpr size_t kUploadMaxBytes = 20u * 1024 * 1024;   // 폰 -> PC 수신 한도 (봇 API getFile 20MB)
     static constexpr UINT kDownloadTimeoutMs = 300000;            // /download 파일 선택 창 대기 시간(5분)
     static constexpr size_t kDownloadMaxBytes = 49000000;         // /download 파일 1개 한도 (sendDocument 50MB)
