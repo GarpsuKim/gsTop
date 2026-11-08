@@ -45,4 +45,4 @@ echo Build OK: ipcam.exe
 echo ==================== 
 timeout /t 3 /nobreak > nul
 del %LOG%
-exit /b 1
+exit /b 0

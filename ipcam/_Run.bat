@@ -26,4 +26,4 @@ echo.
 echo --- ipcam.log ---
 if exist ipcam.log (type ipcam.log) else (echo ipcam.log was NOT created - the exe did not start)
 pause
-exit /b 1
+exit /b 0
