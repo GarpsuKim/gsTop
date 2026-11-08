@@ -22,6 +22,9 @@
 //   KEEP_DAYS=7            (image 폴더에서 N일 지난 이미지 자동 삭제. 0 또는 미기재 시 삭제 안 함)
 //   KEEP_MAX_FILES=5000    (image 폴더 이미지 최대 개수. 초과분은 오래된 것부터 삭제. 0 또는 미기재 시 제한 없음)
 //   PREVIOUS_SESSION_CLEAR=TRUE  (TRUE 이면 프로그램 시작할 때 log.txt 와 image 폴더의 모든 파일을 삭제. 기본 FALSE)
+//   LOCAL_TRIGGER=TRUE (같은 PC 의 다른 프로그램(WiFiScan.exe)이 exe 폴더의 trigger.txt 에 "/HomeBack" 또는 "/NotHome" 한 줄을 쓰면
+//                       1초 안에 읽고 지운 뒤 그 명령을 처리. 기본 TRUE. 이 두 명령만 허용하고 300초 지난 파일은 무시.
+//                       시작할 때 이미 있던 파일도 300초 안이면 처리한다 - 부팅 직후 WiFiScan 이 먼저 쓴 첫 판정을 놓치지 않도록)
 //   TELEGRAM_MENU=TRUE (시작할 때 setMyCommands 로 텔레그램 입력창의 "메뉴"(/ 명령 목록)를 등록. 기본 TRUE. BotFather 에서 직접 만든 목록을 쓰려면 FALSE)
 //   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
 //   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
@@ -737,6 +740,7 @@ public:
     std::string uploadDir;       // UPLOAD_DIR=upload (폰 -> PC 파일 수신 폴더, 비어 있으면 exe 폴더\\upload)
     std::vector<std::string> allowedUsers; // TELEGRAM_ALLOWED_USER_IDS=111,222
 
+    bool localTrigger = true;         // LOCAL_TRIGGER=TRUE (trigger.txt 로 /HomeBack /NotHome 받기)
     bool menu = true;                 // TELEGRAM_MENU=TRUE (시작할 때 텔레그램 명령 메뉴 등록)
     bool greeting = true;             // TELEGRAM_GREETING=TRUE (시작 인사말)
 
@@ -803,7 +807,7 @@ public:
     {
         static const char* const names[] = {
             "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_INTERVAL", "TELEGRAM_COMMANDS",
-            "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "TELEGRAM_MENU", "SAVE_ONLY", "MAX_LOOP",
+            "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "TELEGRAM_MENU", "LOCAL_TRIGGER", "SAVE_ONLY", "MAX_LOOP",
             "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES", "PREVIOUS_SESSION_CLEAR",
             "UPLOAD_DIR", "UPLOAD_SHOW_IMAGE", "UPLOAD_PLAY_MEDIA", "UPLOAD_PLAY_VIDEO", "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
             "INTRUSION_CONFIRM_FRAMES", "INTRUSION_COOLDOWN", "INTRUSION_CHECK_MS"
@@ -876,6 +880,9 @@ private:
                     cur.clear();
                 } else cur += c;
             }
+        }
+        else if (key == "LOCAL_TRIGGER") {
+            localTrigger = StrUtil::parseBool(val, true);
         }
         else if (key == "TELEGRAM_MENU") {
             menu = StrUtil::parseBool(val, true);
@@ -1302,6 +1309,18 @@ public:
         return post(L"editMessageText", "multipart/form-data; boundary=" + boundary, body, resp);
     }
 
+    // 메시지를 채팅창 상단에 고정한다 (알림 없음)
+    bool pinMessage(const std::string& messageId, std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "chat_id", chatId_);
+        addField(body, boundary, "message_id", messageId);
+        addField(body, boundary, "disable_notification", "true");
+        body += "--" + boundary + "--\r\n";
+        return post(L"pinChatMessage", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
     // sendMessage 응답({"ok":true,"result":{"message_id":N,...}})에서 message_id 를 꺼낸다. 없으면 "".
     static std::string extractMessageId(const std::string& resp)
     {
@@ -1459,6 +1478,9 @@ struct BotEvent {
     bool isCallback() const { return !cbData.empty(); }
     bool isFile() const { return !fileId.empty(); }
 };
+
+// /restart 요청 플래그: WinMain 이 app.run() 이 끝난 뒤 같은 exe 를 다시 실행한다.
+static volatile LONG g_restartRequested = 0;
 
 class CommandListener {
 public:
@@ -2757,7 +2779,7 @@ public:
         if (cfg_.commands) {
             listener = std::make_unique<CommandListener>(telegram, cfg_.chatId, cfg_.allowedUsers);
             listener->skipPending();
-            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /ini /log /CMD /version /stop /help");
+            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /ini /log /CMD /version /restart /stop /help");
             if (cfg_.allowedUsers.empty() && StrUtil::trim(cfg_.chatId)[0] == '-')
                 Logger::log("경고: TELEGRAM_CHAT_ID 가 그룹입니다. TELEGRAM_ALLOWED_USER_IDS 를 설정하지 않으면 명령이 거부됩니다.");
         }
@@ -2799,7 +2821,9 @@ public:
         stop_.install();
         startTick_ = GetTickCount64();
         if (listener) startWorker(*listener, telegram);
+        if (cfg_.localTrigger && !cfg_.token.empty() && !cfg_.chatId.empty()) startTrigger(telegram); // trigger.txt 감시
         if (listener) registerMenu(telegram); // 텔레그램 입력창 "메뉴" 등록 (TELEGRAM_MENU=FALSE 로 끌 수 있음)
+        if (listener) updateDetectBar(telegram, initialDetectState()); // 채팅창 상단 고정: 현재 상태(/detectOn 또는 /detectOff)
         sendGreeting(telegram); // 준비 완료 인사말 (1회)
         if (camera_) startIntrusion(); // 침입 탐지 스레드 시작 (꺼져 있으면 대기만 함, 다른 기능과 독립)
 
@@ -2828,6 +2852,7 @@ public:
         }
 
         stop_.request(); // 명령/침입 탐지 스레드도 종료시킨다
+        stopTrigger();
         stopWorker();
         stopIntrusion();
         Logger::log("종료합니다.");
@@ -2855,6 +2880,87 @@ private:
         ctx_.telegram = &telegram;
         worker_ = CreateThread(nullptr, 0, workerThunk, &ctx_, 0, nullptr);
         if (!worker_) Logger::log("명령 수신 스레드 생성 실패 - 명령을 사용할 수 없습니다.");
+    }
+
+    // ---- 로컬 트리거 (trigger.txt) ----
+    // 같은 PC 의 WiFiScan.exe 가 텔레그램을 거치지 않고 /HomeBack, /NotHome 을 전달하는 통로.
+    // (봇이 sendMessage 로 보낸 글은 봇 자신이 getUpdates 로 받지 못해서 텔레그램 경유로는 동작하지 않는다.)
+    // 허용 명령은 /homeback, /nothome 두 개뿐이다 (파일을 쓸 수 있는 아무 프로그램이 /CMD 같은 걸 실행하지 못하도록).
+    struct TriggerCtx {
+        ScreenTelegramApp* app = nullptr;
+        const TelegramClient* telegram = nullptr;
+    };
+
+    static DWORD WINAPI triggerThunk(LPVOID p)
+    {
+        auto* c = static_cast<TriggerCtx*>(p);
+        c->app->triggerLoop(*c->telegram);
+        return 0;
+    }
+
+    void startTrigger(const TelegramClient& telegram)
+    {
+        tctx_.app = this;
+        tctx_.telegram = &telegram;
+        trigger_ = CreateThread(nullptr, 0, triggerThunk, &tctx_, 0, nullptr);
+        if (!trigger_) Logger::log("로컬 트리거 스레드 생성 실패 - trigger.txt 를 사용할 수 없습니다.");
+    }
+
+    void stopTrigger()
+    {
+        if (!trigger_) return;
+        if (WaitForSingleObject(trigger_, 20000) == WAIT_TIMEOUT) { // 명령 처리(네트워크) 중이면 끝날 때까지 잠시 대기
+            Logger::log("로컬 트리거 스레드 종료 지연 - 강제 종료");
+            TerminateThread(trigger_, 0);
+        }
+        CloseHandle(trigger_);
+        trigger_ = nullptr;
+    }
+
+    void triggerLoop(const TelegramClient& telegram)
+    {
+        const std::wstring path = StrUtil::toWide(SysUtil::exeDir() + "\\" + kTriggerFile);
+        // 시작할 때 이미 있는 트리거(부팅 직후 WiFiScan 이 먼저 쓴 첫 판정)도 처리한다. 오래된 것은 아래 나이 검사에서 버려진다.
+        Logger::log("로컬 트리거 감시 시작: %s (허용: /HomeBack /NotHome, %lld초 안의 것만)", kTriggerFile, kTriggerMaxAgeSec);
+        while (!stop_.wait(1000)) {
+            HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h == INVALID_HANDLE_VALUE) continue; // 파일 없음 (보통)
+            char buf[256] = {};
+            DWORD rd = 0;
+            ReadFile(h, buf, sizeof(buf) - 1, &rd, nullptr);
+            FILETIME wt = {}, nowFt = {};
+            GetFileTime(h, nullptr, nullptr, &wt);
+            GetSystemTimeAsFileTime(&nowFt);
+            CloseHandle(h);
+            if (!DeleteFileW(path.c_str())) continue; // 지우지 못하면 이번엔 처리하지 않고 다음 주기에 다시 (중복 처리 방지)
+
+            ULARGE_INTEGER a, b;
+            a.LowPart = wt.dwLowDateTime; a.HighPart = wt.dwHighDateTime;
+            b.LowPart = nowFt.dwLowDateTime; b.HighPart = nowFt.dwHighDateTime;
+            const long long ageSec = b.QuadPart >= a.QuadPart ? (long long)((b.QuadPart - a.QuadPart) / 10000000ULL) : 0;
+
+            std::string cmd(buf, rd);
+            if (cmd.size() >= 3 && (unsigned char)cmd[0] == 0xEF && (unsigned char)cmd[1] == 0xBB && (unsigned char)cmd[2] == 0xBF)
+                cmd.erase(0, 3);
+            const size_t nl = cmd.find_first_of("\r\n");
+            if (nl != std::string::npos) cmd.resize(nl);
+            cmd = StrUtil::trim(cmd);
+            for (auto& ch : cmd) ch = (char)tolower((unsigned char)ch);
+            if (!cmd.empty() && cmd[0] != '/') cmd = "/" + cmd;
+
+            if (ageSec > kTriggerMaxAgeSec) {
+                Logger::log("로컬 트리거 무시: 오래된 파일 (%lld초 전) %s", ageSec, cmd.c_str());
+                continue;
+            }
+            if (cmd != "/homeback" && cmd != "/nothome") {
+                Logger::log("로컬 트리거 무시: 허용되지 않은 내용 (%.40s)", cmd.c_str());
+                continue;
+            }
+            Logger::log("로컬 트리거 수신: %s", cmd.c_str());
+            CsLock lk(cmdCs_);
+            handleCommand(cmd, "", telegram);
+        }
     }
 
     void stopWorker()
@@ -2888,6 +2994,69 @@ private:
     // 텔레그램 입력창의 "메뉴"(/ 명령 목록)에 표시할 명령을 등록한다 (시작할 때 1회).
     // 명령 이름은 소문자/숫자/_ 만 허용되므로 소문자로 등록한다. 이 프로그램은 명령을 대소문자 구분 없이 처리하므로
     // 메뉴에서 누른 /homeback 도 /HomeBack 과 똑같이 동작한다. 실패해도 프로그램 동작에는 영향 없음.
+    // 채팅창 상단 고정 메시지: 현재 침입 탐지 상태 하나만 보여 준다. 켜짐 "❤️ /detectOn", 꺼짐 "💙 /detectOff".
+    // 상태가 바뀔 때마다 같은 메시지를 고쳐 쓴다. 메시지 id 는 exe 폴더의 pinned.id 에 저장한다.
+    // 메시지가 없으면(지웠거나 처음) 새로 보내서 고정한다. 안 나오면 pinned.id 를 지우고 재시작.
+    void updateDetectBar(const TelegramClient& telegram, bool on)
+    {
+        if (cfg_.token.empty() || cfg_.chatId.empty()) return;
+        CsLock lk(pinCs_);
+        // 카메라가 없거나 CAMERA=FALSE 이면 침입 탐지를 쓸 수 없으므로 상태 대신 안내를 보여 준다.
+        const std::string text = !camera_ ? "\xE2\x9D\xA4\xEF\xB8\x8F \xEC\xB9\xB4\xEB\xA9\x94\xEB\x9D\xBC\xEA\xB0\x80 \xEC\x9E\x91\xEB\x8F\x99\xED\x95\x98\xEC\xA7\x80 \xEC\x95\x8A\xEC\x8A\xB5\xEB\x8B\x88\xEB\x8B\xA4"
+                                          : on ? "\xE2\x9D\xA4\xEF\xB8\x8F /detectOn" : "\xF0\x9F\x92\x99 /detectOff";
+        const std::string idFile = SysUtil::exeDir() + "\\pinned.id";
+        std::string oldId;
+        {
+            std::ifstream f(idFile, std::ios::binary);
+            std::getline(f, oldId);
+            while (!oldId.empty() && !isdigit((unsigned char)oldId.back())) oldId.pop_back();
+        }
+        std::string resp;
+        if (!oldId.empty()) {      // 고쳐 쓰기: 성공 또는 "not modified"(이미 같은 내용) 이면 메시지가 남아 있다는 뜻
+            const bool ok = telegram.editMessageText(oldId, text, resp);
+            if (ok || resp.find("not modified") != std::string::npos) {
+                Logger::log("상단 고정 메시지: %s", !camera_ ? "카메라 없음" : on ? "detectOn" : "detectOff");
+                return;
+            }
+        }
+        if (!telegram.sendMessage(text, resp)) { Logger::log("상단 고정 메시지 전송 실패: %s", resp.substr(0, 120).c_str()); return; }
+        const std::string id = TelegramClient::extractMessageId(resp);
+        if (id.empty()) return;
+        std::string r2;
+        if (!telegram.pinMessage(id, r2)) {
+            Logger::log("상단 고정 실패 (그룹이면 봇에게 '메시지 고정' 권한 필요): %s", r2.substr(0, 120).c_str());
+            return;
+        }
+        SysUtil::writeFile(idFile, std::vector<BYTE>(id.begin(), id.end()));
+        Logger::log("상단 고정 메시지 생성: %s (id %s)", !camera_ ? "카메라 없음" : on ? "detectOn" : "detectOff", id.c_str());
+    }
+
+    // 시작할 때 처음 보여 줄 상태: trigger.txt 가 있고 최근 것이면 그 내용(/NotHome -> 켜짐, /HomeBack -> 꺼짐)을 따르고,
+    // 없으면 실제 침입 탐지 상태를 따른다. (파일은 지우지 않는다. 지우고 처리하는 건 트리거 스레드)
+    bool initialDetectState() const
+    {
+        const std::wstring path = StrUtil::toWide(SysUtil::exeDir() + "\\" + kTriggerFile);
+        WIN32_FILE_ATTRIBUTE_DATA fa = {};
+        if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fa)) {
+            FILETIME nowFt = {}; GetSystemTimeAsFileTime(&nowFt);
+            ULARGE_INTEGER a, b;
+            a.LowPart = fa.ftLastWriteTime.dwLowDateTime; a.HighPart = fa.ftLastWriteTime.dwHighDateTime;
+            b.LowPart = nowFt.dwLowDateTime; b.HighPart = nowFt.dwHighDateTime;
+            const long long ageSec = b.QuadPart >= a.QuadPart ? (long long)((b.QuadPart - a.QuadPart) / 10000000ULL) : 0;
+            std::ifstream f(SysUtil::exeDir() + "\\" + kTriggerFile, std::ios::binary);
+            std::string cmd; std::getline(f, cmd);
+            if (cmd.size() >= 3 && (unsigned char)cmd[0] == 0xEF && (unsigned char)cmd[1] == 0xBB && (unsigned char)cmd[2] == 0xBF) cmd.erase(0, 3);
+            cmd = StrUtil::trim(cmd);
+            for (auto& ch : cmd) ch = (char)tolower((unsigned char)ch);
+            if (!cmd.empty() && cmd[0] != '/') cmd = "/" + cmd;
+            if (ageSec <= kTriggerMaxAgeSec) {
+                if (cmd == "/nothome") return true;
+                if (cmd == "/homeback") return false;
+            }
+        }
+        return detectOn_ != 0;
+    }
+
     void registerMenu(const TelegramClient& telegram)
     {
         if (!cfg_.menu || cfg_.token.empty()) return;
@@ -2909,7 +3078,8 @@ private:
             {"homeback", "🏠 귀가 인사 + 침입 탐지 끄기"},
             {"nothome", "🚪 외출 인사 + 침입 탐지 켜기"},
             {"version", "🔖 프로그램 버전 표시"},
-            {"stop", "🛑 프로그램 종료 (Yes/No 확인)"},
+            {"restart", "🔄 프로그램 재시작 (Yes/No 확인)"},
+            {"stop", "🛑 WiFiScan 및 프로그램 종료 (Yes/No 확인)"},
             {"help", "❓ 도움말"},
         };
         std::string json = "{\"commands\":[";
@@ -2960,6 +3130,7 @@ private:
             }
             for (const auto& ev : events) {
                 if (stop_.requested()) break;
+                CsLock lk(cmdCs_); // 로컬 트리거 스레드의 명령 처리와 겹치지 않게 순서대로 처리
                 if (ev.isCallback()) handleCallback(ev, telegram);
                 else if (ev.isFile()) handleUpload(ev, telegram);
                 else handleCommand(ev.cmd, ev.arg, telegram);
@@ -3163,14 +3334,17 @@ private:
         } else if (cmd == "/detecton" || cmd == "/detectoff") {
             // 명령은 소문자로 정규화되어 들어온다 (/detectOn -> /detecton)
             const bool on = (cmd == "/detecton");
+            // 텔레그램 글자는 색을 지정할 수 없어 색깔 원 이모지로 표시: [detectOn] 빨강, [detectOff] 파랑
+            const std::string tag = on ? "\xF0\x9F\x94\xB4 [detectOn]\n" : "\xF0\x9F\x94\xB5 [detectOff]\n";
             if (!camera_) {
-                telegram.sendMessage("[" + host + "] 카메라를 사용할 수 없어 침입 탐지를 켜거나 끌 수 없습니다. "
+                telegram.sendMessage(tag + "[" + host + "] 카메라를 사용할 수 없어 침입 탐지를 켜거나 끌 수 없습니다. "
                                      "(CAMERA=TRUE 설정과 카메라 연결을 확인하세요)", resp);
             } else if ((detectOn_ != 0) == on) {
-                telegram.sendMessage("[" + host + "] 침입 탐지는 이미 " + (on ? "켜져" : "꺼져") + " 있습니다.", resp);
+                telegram.sendMessage(tag + "[" + host + "] 침입 탐지는 이미 " + (on ? "켜져" : "꺼져") + " 있습니다.", resp);
             } else {
                 const bool saved = applyDetect(on);
-                std::string msg = "[" + host + "] 침입 탐지를 " + (on ? "켰습니다." : "껐습니다.");
+                updateDetectBar(telegram, on); // 상단 고정 메시지도 현재 상태로
+                std::string msg = tag + "[" + host + "] 침입 탐지를 " + (on ? "켰습니다." : "껐습니다.");
                 if (on)
                     msg += " (카메라를 상시 사용하므로 다른 앱은 카메라를 쓸 수 없습니다. 끄려면 /detectOff)";
                 else
@@ -3186,11 +3360,11 @@ private:
         } else if (cmd == "/log") {
             handleLogCmd(arg, host, telegram);
         } else if (cmd == "/homeback") { // 명령은 소문자로 정규화되어 들어온다 (/HomeBack -> /homeback)
-            telegram.sendMessage("[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]", resp);
+            telegram.sendMessage("\xF0\x9F\x92\x99\xF0\x9F\x92\x99 [집에 돌아 오신 것을 환영합니다. 푹 쉬세요] \xF0\x9F\x92\x99\xF0\x9F\x92\x99", resp);   // 파란 하트 2개씩
             Logger::log("/HomeBack: 귀가 인사 전송 -> /detectOff 자동 처리");
             handleCommand("/detectoff", "", telegram); // 인사말 뒤에 침입 탐지 끄기 (카메라 없음/이미 꺼짐이면 그 안내 메시지가 나감)
         } else if (cmd == "/nothome") { // /NotHome -> /nothome
-            telegram.sendMessage("안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다.", resp);
+            telegram.sendMessage("\xE2\x9D\xA4\xEF\xB8\x8F\xE2\x9D\xA4\xEF\xB8\x8F 안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다. \xE2\x9D\xA4\xEF\xB8\x8F\xE2\x9D\xA4\xEF\xB8\x8F", resp);   // 빨간 하트 2개씩
             Logger::log("/NotHome: 외출 인사 전송 -> /detectOn 자동 처리");
             handleCommand("/detecton", "", telegram); // 인사말 뒤에 침입 탐지 켜기 (카메라 없음/이미 켜짐이면 그 안내 메시지가 나감)
         } else if (cmd == "/github") {
@@ -3244,6 +3418,17 @@ private:
             telegram.sendMessage("[" + host + "] " + (cfg_.saveOnly
                 ? "SAVE_ONLY=TRUE 이므로 /shot 으로만 이미지를 전송합니다."
                 : "이미지 전송을 다시 시작합니다."), resp);
+        } else if (cmd == "/restart") {
+            // /stop 처럼 Yes/No 버튼으로 확인한 뒤에만 재시작한다. 버튼 처리는 handleCallback().
+            const std::string keyboard =
+                "{\"inline_keyboard\":[[{\"text\":\"Yes\",\"callback_data\":\"restart_yes\"},"
+                "{\"text\":\"No\",\"callback_data\":\"restart_no\"}]]}";
+            if (telegram.sendMessageWithKeyboard("[" + host + "] 재시작하시겠습니까?(y/n)", keyboard, resp)) {
+                restartMsgId_ = TelegramClient::extractMessageId(resp);
+                restartAskTick_ = GetTickCount64();
+            } else {
+                Logger::log("재시작 확인 메시지 전송 실패 - 재시작하지 않음: %s", resp.substr(0, 120).c_str());
+            }
         } else if (cmd == "/stop") {
             // 바로 종료하지 않고 Yes/No 버튼으로 확인한다. 버튼 처리는 handleCallback().
             // 확인 메시지 전송에 실패하면 종료하지 않는다.
@@ -3274,7 +3459,7 @@ private:
                     "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
                     "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 창으로 표시, mp4/mp3 는 기본 플레이어로 실행\n"
                     "/version - 버전 표시\n"
-                    "/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
+                    "/restart - 프로그램 재시작 (Yes/No 확인)\n/stop - WiFiScan 에 종료 알림 후 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
             telegram.sendMessage(text, resp);
         }
     }
@@ -3852,6 +4037,15 @@ private:
         }
     }
 
+    // WiFiScan 종료 요청: exe 폴더의 wifiscanTriger.txt 에 "END" 를 쓴다. WiFiScan.exe 가 이 파일을 읽고 스스로 종료한다.
+    static void requestWiFiScanEnd()
+    {
+        const std::string path = SysUtil::exeDir() + "\\wifiscanTriger.txt";
+        const std::string end = "END\r\n";
+        const bool ok = SysUtil::writeFile(path, std::vector<BYTE>(end.begin(), end.end()));
+        Logger::log("wifiscanTriger.txt 에 END 기록 %s", ok ? "성공" : "실패");
+    }
+
     // 인라인 버튼 클릭 처리 (명령 스레드에서 호출). 지금은 /stop 의 Yes/No 확인 버튼만 있다.
     // 현재 대기 중인 확인 메시지의 버튼만 유효하다. 재시작 전의 오래된 메시지나 이미 처리된 메시지,
     // 5분이 지난 메시지의 버튼은 종료로 이어지지 않는다.
@@ -3860,6 +4054,31 @@ private:
         Logger::log("버튼 수신: %s", ev.cbData.c_str());
         const std::string host = SysUtil::hostName();
         std::string resp;
+
+        if (ev.cbData == "restart_yes" || ev.cbData == "restart_no") { // /restart 확인 버튼
+            const bool ryes = (ev.cbData == "restart_yes");
+            const bool rvalid = !restartMsgId_.empty() && ev.messageId == restartMsgId_ &&
+                                GetTickCount64() - restartAskTick_ < 300000ULL;
+            if (!rvalid) {
+                telegram.answerCallbackQuery(ev.cbId, "만료된 요청입니다. /restart 를 다시 보내세요.", resp);
+                if (!ev.messageId.empty())
+                    telegram.editMessageText(ev.messageId, "[" + host + "] 재시작 확인이 만료되었습니다.", resp);
+                return;
+            }
+            restartMsgId_.clear();
+            if (ryes) {
+                telegram.answerCallbackQuery(ev.cbId, "재시작합니다.", resp);
+                telegram.editMessageText(ev.messageId, "[" + host + "] 재시작합니다. 잠시 후 시작 인사가 오면 완료입니다.", resp);
+                Logger::log("재시작 확인(Yes) - 재시작합니다.");
+                InterlockedExchange(&g_restartRequested, 1);
+                stop_.request();
+            } else {
+                telegram.answerCallbackQuery(ev.cbId, "재시작을 취소했습니다.", resp);
+                telegram.editMessageText(ev.messageId, "[" + host + "] 재시작을 취소했습니다.", resp);
+                Logger::log("재시작 확인(No) - 재시작 취소");
+            }
+            return;
+        }
 
         const bool yes = (ev.cbData == "stop_yes");
         const bool no = (ev.cbData == "stop_no");
@@ -3881,8 +4100,9 @@ private:
         if (yes) {
             telegram.answerCallbackQuery(ev.cbId, "종료합니다.", resp);
             telegram.editMessageText(ev.messageId, "[" + host + "] 종료합니다.", resp);
-            Logger::log("종료 확인(Yes) - 종료합니다.");
-            stop_.request();
+            Logger::log("종료 확인(Yes) - WiFiScan 종료 후 종료합니다.");
+            requestWiFiScanEnd();   // 먼저 WiFiScan 에게 종료를 알리고 (wifiscanTriger.txt = END)
+            stop_.request();  // 자신도 종료
         } else {
             telegram.answerCallbackQuery(ev.cbId, "종료를 취소했습니다.", resp);
             telegram.editMessageText(ev.messageId, "[" + host + "] 종료를 취소했습니다.", resp);
@@ -4032,6 +4252,8 @@ private:
     CameraCapture* camera_ = nullptr; // sources 가 소유. 침입 탐지용 직접 접근
     bool cameraReady_ = false;       // 카메라 초기화 성공 여부 (명령 스레드 시작 전에 설정)
     std::string stopMsgId_;          // 대기 중인 /stop 확인 메시지의 id (명령 스레드 전용)
+    std::string restartMsgId_;       // 대기 중인 /restart 확인 메시지의 id (명령 스레드 전용)
+    ULONGLONG restartAskTick_ = 0;   // 그 확인 메시지를 보낸 시각
     ULONGLONG stopAskTick_ = 0;      // 그 확인 메시지를 보낸 시각 (GetTickCount64)
     volatile LONG detectOn_ = 0;     // 침입 탐지 켜짐 (/detectOn /detectOff 로 명령 스레드가 변경, 탐지 스레드가 읽음)
     MotionDetector::Params detParams_;
@@ -4045,6 +4267,8 @@ private:
     static constexpr int kDefaultLogLines = 50; // /log 기본 줄 수
     static constexpr int kMaxLogLines = 2000;   // /log n 허용 최대 줄 수
     static constexpr const char* kGithubUrl = "https://github.com/GarpsuKim/gsTop/blob/main/screen_telegram/ReadMe.MD"; // /github 가 여는 주소
+    static constexpr const char* kTriggerFile = "trigger.txt";     // 로컬 트리거 파일 (exe 폴더)
+    static constexpr long long kTriggerMaxAgeSec = 300;            // 이보다 오래된 트리거는 무시
     static constexpr size_t kUploadMaxBytes = 20u * 1024 * 1024;   // 폰 -> PC 수신 한도 (봇 API getFile 20MB)
     static constexpr UINT kDownloadTimeoutMs = 300000;            // /download 파일 선택 창 대기 시간(5분)
     static constexpr size_t kDownloadMaxBytes = 49000000;         // /download 파일 1개 한도 (sendDocument 50MB)
@@ -4057,6 +4281,23 @@ private:
     std::string lastCycle_;          // 마지막 캡처 시각 (cs_ 로 보호)
     CRITICAL_SECTION cs_;
     HANDLE shotEvent_ = nullptr;
+    // 명령 처리 직렬화 (명령 스레드 + 로컬 트리거 스레드). CRITICAL_SECTION 은 같은 스레드에서 다시 잡아도 안전.
+    struct CsGuard {
+        CRITICAL_SECTION cs;
+        CsGuard() { InitializeCriticalSection(&cs); }
+        ~CsGuard() { DeleteCriticalSection(&cs); }
+        NO_COPY(CsGuard);
+    };
+    struct CsLock {
+        CRITICAL_SECTION* p;
+        explicit CsLock(CsGuard& g) : p(&g.cs) { EnterCriticalSection(p); }
+        ~CsLock() { LeaveCriticalSection(p); }
+        NO_COPY(CsLock);
+    };
+    CsGuard cmdCs_;
+    CsGuard pinCs_;   // 상단 고정 메시지 갱신 직렬화
+    HANDLE trigger_ = nullptr;
+    TriggerCtx tctx_;
     HANDLE worker_ = nullptr;
     WorkerCtx ctx_;
     CRITICAL_SECTION ioCs_;          // image 폴더 정리 직렬화
@@ -4140,6 +4381,26 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         rc = 2;
     }
     Logger::log("프로그램 종료 (종료 코드 %d)", rc);
-    if (instanceMutex) CloseHandle(instanceMutex);
+    if (instanceMutex) CloseHandle(instanceMutex);   // 먼저 풀어야 새 인스턴스가 중복 실행으로 거부되지 않는다
+    if (g_restartRequested) {
+        wchar_t exe[MAX_PATH * 2] = {0};
+        GetModuleFileNameW(nullptr, exe, MAX_PATH * 2);
+        std::wstring cmdLine = L"\"" + std::wstring(exe) + L"\"";
+        const wchar_t* args = GetCommandLineW();             // 원래 인자를 유지 (첫 토큰은 exe 경로)
+        if (args) {
+            if (*args == L'"') { ++args; while (*args && *args != L'"') ++args; if (*args) ++args; }
+            else while (*args && *args != L' ') ++args;
+            cmdLine += args;
+        }
+        std::wstring dir = exe; dir.resize(dir.find_last_of(L"\\/") + 1);
+        STARTUPINFOW si = {}; si.cb = sizeof si;
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessW(exe, &cmdLine[0], nullptr, nullptr, FALSE, 0, nullptr, dir.c_str(), &si, &pi)) {
+            CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+            Logger::log("재시작: 새 프로세스를 실행했습니다 (PID %lu)", (unsigned long)pi.dwProcessId);
+        } else {
+            Logger::log("재시작 실패: CreateProcess 오류 %lu", (unsigned long)GetLastError());
+        }
+    }
     return rc;
 }

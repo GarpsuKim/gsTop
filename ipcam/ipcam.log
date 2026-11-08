@@ -1,0 +1,19 @@
+2026-11-08 18:55:20.429 [T17428] ==== ipcam start ====
+2026-11-08 18:55:20.429 [T17428] exe=C:\tools\ipcam\ipcam.exe
+2026-11-08 18:55:20.429 [T17428] cmdline=ipcam.exe  192.168.0.70:4747
+2026-11-08 18:55:20.429 [T17428] pid=3476
+2026-11-08 18:55:20.429 [T17428] target=192.168.0.70:4747/video
+2026-11-08 18:55:20.430 [T17428] WSAStartup -> 0 (version 2.2)
+2026-11-08 18:55:20.431 [T17428] GdiplusStartup -> status 0
+2026-11-08 18:55:20.462 [T17428] window created hwnd=00000000001909fc
+2026-11-08 18:55:20.462 [T2624] NetThread started
+2026-11-08 18:55:20.463 [T2624] connecting to 192.168.0.70:4747 ...
+2026-11-08 18:55:20.469 [T2624] connected
+2026-11-08 18:55:20.469 [T2624] send request (62 bytes) -> 62
+2026-11-08 18:55:20.625 [T2624] response head: HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET\r\nContent-Type: multipart/x-mixed-replace;boundary=--dcmjpeg\r\nConnection: Keep-Alive\r\nExpires: 0\r\nCache-Control: no-store, must-revalidate\r\n\r\n
+2026-11-08 18:55:21.175 [T2624] first frame decoded: 1280x720
+2026-11-08 18:55:31.160 [T2624] frames so far: 300
+2026-11-08 18:55:33.688 [T17428] WM_CLOSE
+2026-11-08 18:55:33.692 [T17428] WM_DESTROY
+2026-11-08 18:55:33.699 [T17428] message loop ended, total frames=375
+2026-11-08 18:55:33.699 [T17428] ==== ipcam exit ====

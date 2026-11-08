@@ -1,0 +1,15 @@
+==== run 2026-11-08 18:55:19.32 ==== 
+cwd=C:\tools\ipcam 
+CAM=192.168.0.70:4747 
+ping test... 
+
+Pinging 192.168.0.70 with 32 bytes of data:
+Reply from 192.168.0.70: bytes=32 time=3ms TTL=64
+Reply from 192.168.0.70: bytes=32 time=7ms TTL=64
+
+Ping statistics for 192.168.0.70:
+    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 3ms, Maximum = 7ms, Average = 5ms
+starting ipcam.exe 192.168.0.70:4747 
+ipcam.exe exit code=0 
