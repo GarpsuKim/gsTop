@@ -37,8 +37,8 @@
 //   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
 //    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
 //   (텔레그램 /github 는 PC 의 기본 브라우저로 GitHub 의 ReadMe 페이지(kGithubUrl)를 연다.)
-//   (텔레그램 /HomeBack 은 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 를 보낸다. 인사 뒤에 /detectOff 를 자동 처리한다.)
-//   (텔레그램 /NotHome 은 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 를 보낸다. 인사 뒤에 /detectOn 을 자동 처리한다.)
+//   (텔레그램 /HomeBack 은 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 를 보낸다. 인사 뒤에 /detectOff 와 /pause 를 자동 처리한다.)
+//   (텔레그램 /NotHome 은 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 를 보낸다. 인사 뒤에 /detectOn 과 /resume 을 자동 처리한다.)
 //   (텔레그램 /download 는 PC 에 파일 탐색기(열기 창)를 띄워 사용자가 고른 여러 파일을 텔레그램으로 보낸다.
 //    창은 5분 안에 고르지 않으면 취소되고, 파일 1개당 49MB 까지, 빈 파일은 제외한다.)
 //   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
@@ -3363,10 +3363,12 @@ private:
             telegram.sendMessage("\xF0\x9F\x92\x99\xF0\x9F\x92\x99 [집에 돌아 오신 것을 환영합니다. 푹 쉬세요] \xF0\x9F\x92\x99\xF0\x9F\x92\x99", resp);   // 파란 하트 2개씩
             Logger::log("/HomeBack: 귀가 인사 전송 -> /detectOff 자동 처리");
             handleCommand("/detectoff", "", telegram); // 인사말 뒤에 침입 탐지 끄기 (카메라 없음/이미 꺼짐이면 그 안내 메시지가 나감)
+            handleCommand("/pause", "", telegram);     // 집에 왔으니 이미지 전송도 중단
         } else if (cmd == "/nothome") { // /NotHome -> /nothome
             telegram.sendMessage("\xE2\x9D\xA4\xEF\xB8\x8F\xE2\x9D\xA4\xEF\xB8\x8F 안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다. \xE2\x9D\xA4\xEF\xB8\x8F\xE2\x9D\xA4\xEF\xB8\x8F", resp);   // 빨간 하트 2개씩
             Logger::log("/NotHome: 외출 인사 전송 -> /detectOn 자동 처리");
             handleCommand("/detecton", "", telegram); // 인사말 뒤에 침입 탐지 켜기 (카메라 없음/이미 켜짐이면 그 안내 메시지가 나감)
+            handleCommand("/resume", "", telegram);   // 외출하니 이미지 전송도 재개
         } else if (cmd == "/github") {
             handleGithub(host, telegram);
         } else if (cmd == "/download") {
