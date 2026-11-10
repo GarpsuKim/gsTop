@@ -1,4 +1,4 @@
-// 텍스트 시계 - Windows 11 GUI (WinMain), 클래스 구조, 전부 UTF-8, 저메모리, ESC 종료
+// 텍스트 시계 - Windows 11 GUI (WinMain), 클래스 구조, 전부 UTF-8, 저메모리
 // rc/manifest 불필요. 문자열은 UTF-8 char 로만 다루고, 화면 출력 직전에만 UTF-8 -> UTF-16 변환(char16_t 버퍼)
 // 빌드: g++ -Os -s -static -mwindows -Wl,--gc-sections -o clock_u8.exe clock_u8.cpp -lcomdlg32 -lole32 -lcomctl32
 //
@@ -202,6 +202,7 @@ struct Alarm {
     int  h = 0, m = 0, s = 0;                   // 알람 시각 (24시간제, 이 PC 로컬 시각)
     char file[784] = "";                        // 재생할 동영상/음악 파일 경로 (UTF-8)
     int  closeMode = 0;                         // 플레이어 자동 닫기: 0=끔, 1=재생이 끝나면(파일 길이), 2=지정 시간 후
+    char memo[320] = "";                       // 알람 메모 (UTF-8, 최대 100자). 알람 시각에 모니터 중앙에 30초 표시
     int  closeSec  = 60;                        // 모드 2 의 닫기까지 시간(초). 모드 1 에서 길이를 못 읽을 때도 사용 (0=닫지 않음)
 };
 
@@ -226,12 +227,16 @@ public:
     bool     topmost      = false;      // 항상 다른 앱보다 앞에
     bool     allMon       = false;      // 랜덤 이동을 모든 모니터로
     bool     allDesk      = false;      // 모든 가상 데스크톱에 표시
+    bool     visible      = true;       // 시계 보이기 (false = 숨기고 시스템 트레이에서만 동작 표시)
+    bool     showDate     = true;       // 년월일(도시 이름 포함) 표시
     bool     hour12       = false;      // 시각 표시: false=24시간제, true=12시간제(AM/PM)
     // [Global]
     char     baseCity[32] = "서울";     // 본 창의 기준 도시 이름 (시간은 이 PC 시간대)
     char     cities[1024] = "";         // Global 도시 창 목록 (도시 이름, 쉼표 구분). 시작할 때 모두 복원
     // [Alarm]
     Alarm    alarms[ALARM_COUNT];
+    bool     rbOn = false;              // 시스템 재시작 사용
+    int      rbH = 0, rbM = 0, rbS = 0; // 시스템 재시작 시각
 
     void Init() {
         InitPath();
@@ -305,6 +310,14 @@ public:
         WriteInt("Window", "Y", y);
     }
 
+    // 시스템 재시작 시각 저장: RebootOn / RebootTime
+    void SaveReboot() {
+        char t[16];
+        WriteInt("Alarm", "RebootOn", rbOn);
+        wsprintfA(t, "%02d:%02d:%02d", rbH, rbM, rbS);
+        WritePrivateProfileStringA("Alarm", "RebootTime", t, ini_);
+    }
+
     // 알람 i (0~9) 저장: AlarmNOn / AlarmNTime / AlarmNFile
     void SaveAlarm(int i) {
         const Alarm& a = alarms[i];
@@ -316,6 +329,8 @@ public:
         WritePrivateProfileStringA("Alarm", k, t, ini_);
         wsprintfA(k, "Alarm%dFile", i + 1);
         WritePrivateProfileStringA("Alarm", k, a.file, ini_);
+        wsprintfA(k, "Alarm%dMemo", i + 1);
+        WritePrivateProfileStringA("Alarm", k, a.memo, ini_);
         wsprintfA(k, "Alarm%dClose", i + 1);
         WriteInt("Alarm", k, a.closeMode);
         wsprintfA(k, "Alarm%dCloseSec", i + 1);
@@ -382,6 +397,10 @@ private:
             "AllDesktops=0\r\n"
             "; 시각(시분초) 표시 방식 (0=24시간제, 1=12시간제 AM/PM)\r\n"
             "Hour12=0\r\n"
+            "; ShowClock: 1=시계 보이기, 0=숨기기 (시스템 트레이 아이콘만 표시). 메뉴 설정 > 시계 보이기 로 바꿀 수 있습니다.\r\n"
+            "ShowClock=1\r\n"
+            "; ShowDate: 1=년월일 보이기, 0=숨기기 (시분초만 표시). 메뉴 설정 > 년월일 보이기 로 바꿀 수 있습니다.\r\n"
+            "ShowDate=1\r\n"
             "\r\n"
             "[Global]\r\n"
             "; 기준 도시 이름 (본 창의 날짜 앞에 표시. 시간은 이 PC 의 시간대 기준)\r\n"
@@ -395,6 +414,8 @@ private:
             "; 알람 시각이 되면 시스템 기본 플레이어로 파일을 엽니다. 사용 중인 알람은 매일 반복됩니다.\r\n"
             "; AlarmNClose=플레이어 자동 닫기 (0=끔, 1=재생이 끝나면: 파일 길이를 못 읽으면 AlarmNCloseSec 초 후, 2=AlarmNCloseSec 초 후)\r\n"
             "; AlarmNCloseSec=닫기까지 시간(초). 0 이면 닫지 않음\r\n"
+            "; AlarmNMemo=알람 시각에 모니터 중앙에 30초 동안 표시할 메모 (최대 100자, 파일 없이 메모만 써도 됨)\r\n"
+            "; RebootOn=1 이면 매일 RebootTime(HH:MM:SS) 에 재시작 확인창(300초)을 띄웁니다. Yes 또는 무응답이면 재시작 (shutdown /r /f /t 0, 앱 강제 종료), No 이면 재시작하지 않습니다\r\n"
             "\r\n"
             "[Window]\r\n"
             "; 윈도우 왼쪽 위 화면 좌표 X, Y (px) 는 앱이 창을 옮기거나 종료할 때 자동 저장됩니다.\r\n"
@@ -426,6 +447,8 @@ private:
         allMon  = ReadBool("Option", "AllMonitors", allMon);
         allDesk = ReadBool("Option", "AllDesktops", allDesk);
         hour12  = ReadBool("Option", "Hour12", hour12);
+        visible = ReadBool("Option", "ShowClock", visible);
+        showDate = ReadBool("Option", "ShowDate", showDate);
 
         ReadStr("Global", "BaseCity", baseCity, sizeof(baseCity));
         Utf8::Normalize(baseCity, sizeof(baseCity));
@@ -444,12 +467,21 @@ private:
             wsprintfA(k, "Alarm%dFile", i + 1);
             GetPrivateProfileStringA("Alarm", k, "", a.file, sizeof(a.file), ini_);
             Utf8::Normalize(a.file, sizeof(a.file));
+            wsprintfA(k, "Alarm%dMemo", i + 1);
+            GetPrivateProfileStringA("Alarm", k, "", a.memo, sizeof(a.memo), ini_);
+            Utf8::Normalize(a.memo, sizeof(a.memo));
             wsprintfA(k, "Alarm%dClose", i + 1);
             a.closeMode = (int)GetPrivateProfileIntA("Alarm", k, 0, ini_);
             if (a.closeMode < 0 || a.closeMode > 2) a.closeMode = 0;
             wsprintfA(k, "Alarm%dCloseSec", i + 1);
             a.closeSec = (int)GetPrivateProfileIntA("Alarm", k, 60, ini_);
             if (a.closeSec < 0 || a.closeSec > 86399) a.closeSec = 60;
+        }
+        {
+            char t[16];
+            rbOn = GetPrivateProfileIntA("Alarm", "RebootOn", 0, ini_) != 0;
+            GetPrivateProfileStringA("Alarm", "RebootTime", "00:00:00", t, sizeof(t), ini_);
+            ParseTime(t, rbH, rbM, rbS);
         }
     }
 
@@ -609,6 +641,228 @@ private:
     }
 };
 
+// Yes/No 확인 대화상자 + 남은 대기 시간 프로그레스 바(초 단위). 시간이 다 되면 defYes 가 true 면 Yes, false 면 No 로 처리 (기본 버튼도 같음)
+class ConfirmDialog {
+public:
+    // 반환: IDYES / IDNO (시간 초과 시 defYes ? IDYES : IDNO)
+    static int Show(HINSTANCE hi, int waitSec, const char* caption, const char* msg, const char* note, bool defYes) {
+        INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_PROGRESS_CLASS};
+        InitCommonControlsEx(&ic);
+
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | DS_SETFOREGROUND | WS_POPUP | WS_CAPTION);   // 닫기(X) 버튼 없음
+        b.D(0);
+        b.W(5); b.W(0); b.W(0); b.W(190); b.W(80);
+        b.W(0); b.W(0);
+        b.S(caption);
+        b.W(9); b.S("Segoe UI");
+        b.Control(WS_CHILD | WS_VISIBLE, 10, 8, 170, 12, IDC_MSG, "STATIC", msg);
+        b.Control(WS_CHILD | WS_VISIBLE, 10, 24, 170, 10, IDC_LEFT, "STATIC", "");
+        b.Control(WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 10, 38, 170, 10, IDC_BAR, "msctls_progress32", "");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | (defYes ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON), 40, 58, 45, 14, IDYES, "Yes");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | (defYes ? BS_PUSHBUTTON : BS_DEFPUSHBUTTON), 105, 58, 45, 14, IDNO, "No");
+
+        Ctx c = {GetTickCount(), waitSec, note, defYes};
+        return (int)DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), NULL, Proc, (LPARAM)&c);
+    }
+
+private:
+    enum { IDC_MSG = 100, IDC_LEFT = 101, IDC_BAR = 102 };
+    struct Ctx { DWORD start; int sec; const char* note; bool defYes; };
+
+    static void Update(HWND d, Ctx* c) {
+        int left = c->sec - (int)((GetTickCount() - c->start) / 1000);
+        if (left < 0) left = 0;
+        SendDlgItemMessageW(d, IDC_BAR, PBM_SETPOS, (WPARAM)left, 0);
+        char t[128];
+        char16_t u[128];
+        wsprintfA(t, "남은 시간: %d초 (%s)", left, c->note);
+        Utf8::ToUtf16(t, -1, u, 128);
+        SetDlgItemTextW(d, IDC_LEFT, (LPCWSTR)u);
+        if (left == 0) EndDialog(d, c->defYes ? IDYES : IDNO);   // 시간 초과 = 기본 응답
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        switch (msg) {
+        case WM_INITDIALOG: {
+            Ctx* c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            SetWindowPos(d, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SendDlgItemMessageW(d, IDC_BAR, PBM_SETRANGE32, 0, c->sec);
+            Update(d, c);
+            SetTimer(d, 1, 250, NULL);
+            return TRUE;
+        }
+        case WM_TIMER:
+            Update(d, (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA));
+            return TRUE;
+        case WM_COMMAND:
+            if (LOWORD(w) == IDYES || LOWORD(w) == IDNO) {
+                KillTimer(d, 1);
+                EndDialog(d, LOWORD(w));
+                return TRUE;
+            }
+            break;
+        }
+        return FALSE;
+    }
+};
+
+// 알람 메모 입력 대화상자 (한 줄, 최대 100자)
+class MemoDialog {
+public:
+    static bool Show(HINSTANCE hi, HWND owner, char* utf8, int cap) {
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(3); b.W(0); b.W(0); b.W(220); b.W(56);
+        b.W(0); b.W(0);
+        b.S("알람 메모 (알람 시각에 30초 동안 표시)");
+        b.W(9); b.S("Segoe UI");
+        b.Control(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, 10, 8, 200, 14, IDC_EDIT, "EDIT", "");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 60, 32, 45, 14, IDOK, "확인");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,   115, 32, 45, 14, IDCANCEL, "취소");
+        Ctx c = {utf8, cap};
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+    }
+
+private:
+    enum { IDC_EDIT = 100 };
+    struct Ctx { char* s; int cap; };
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        switch (msg) {
+        case WM_INITDIALOG: {
+            Ctx* c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            char16_t u[320];
+            u[0] = 0;
+            Utf8::ToUtf16(c->s, -1, u, 320);
+            SendDlgItemMessageW(d, IDC_EDIT, EM_LIMITTEXT, 100, 0);
+            SetDlgItemTextW(d, IDC_EDIT, (LPCWSTR)u);
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (LOWORD(w) == IDOK) {
+                Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+                char16_t u[128];
+                GetDlgItemTextW(d, IDC_EDIT, (LPWSTR)u, 128);
+                WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)u, -1, c->s, c->cap, NULL, NULL);
+                EndDialog(d, 1);
+                return TRUE;
+            }
+            if (LOWORD(w) == IDCANCEL) {
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        }
+        return FALSE;
+    }
+};
+
+// 알람 메모 표시 창: 모니터 중앙, 항상 위, 지정한 초 후 자동으로 닫힘 (클릭하면 즉시 닫힘). 창마다 독립적으로 동작
+class MemoWindow {
+public:
+    static void Show(HINSTANCE hi, const char* utf8, int sec) {
+        static bool reg = false;
+        if (!reg) {
+            WNDCLASSW wc = {};
+            wc.lpfnWndProc = Proc;
+            wc.hInstance = hi;
+            wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+            wc.lpszClassName = (LPCWSTR)u"TextClockMemo";
+            RegisterClassW(&wc);
+            reg = true;
+        }
+        Data* d = (Data*)malloc(sizeof(Data));
+        if (!d) return;
+        d->text[0] = 0;
+        Utf8::ToUtf16(utf8, -1, d->text, 320);
+        d->start = GetTickCount();
+        d->sec = sec;
+        const int W = 640, H = 220, off = live_ * 30;       // 동시에 여러 개면 조금씩 어긋나게
+        int x = (GetSystemMetrics(SM_CXSCREEN) - W) / 2 + off;
+        int y = (GetSystemMetrics(SM_CYSCREEN) - H) / 2 + off;
+        HWND h = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, (LPCWSTR)u"TextClockMemo", (LPCWSTR)u"",
+                                 WS_POPUP | WS_BORDER, x, y, W, H, NULL, NULL, hi, d);
+        if (!h) { free(d); return; }
+        live_++;
+        ShowWindow(h, SW_SHOWNOACTIVATE);
+        SetTimer(h, 1, 1000, NULL);
+    }
+
+private:
+    struct Data { char16_t text[320]; DWORD start; int sec; };
+    static inline int live_ = 0;
+
+    static void Paint(HWND h, HDC dc) {
+        Data* d = (Data*)GetWindowLongPtrW(h, GWLP_USERDATA);
+        RECT rc;
+        GetClientRect(h, &rc);
+        HBRUSH br = CreateSolidBrush(RGB(30, 30, 30));
+        FillRect(dc, &rc, br);
+        DeleteObject(br);
+        SetBkMode(dc, TRANSPARENT);
+
+        HFONT big = CreateFontW(-34, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        HGDIOBJ old = SelectObject(dc, big);
+        SetTextColor(dc, RGB(255, 255, 255));
+        RECT t = {20, 16, rc.right - 20, rc.bottom - 44};
+        RECT c = t;
+        DrawTextW(dc, (LPCWSTR)d->text, -1, &c, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+        int th = c.bottom - c.top;
+        t.top += ((t.bottom - t.top) - th) / 2;             // 세로 가운데 맞춤
+        if (t.top < 16) t.top = 16;
+        DrawTextW(dc, (LPCWSTR)d->text, -1, &t, DT_CENTER | DT_WORDBREAK);
+        SelectObject(dc, old);
+        DeleteObject(big);
+
+        int left = d->sec - (int)((GetTickCount() - d->start) / 1000);
+        if (left < 0) left = 0;
+        char s[48];
+        char16_t u[48];
+        wsprintfA(s, "%d초 후 자동으로 닫힙니다 (클릭하면 닫기)", left);
+        Utf8::ToUtf16(s, -1, u, 48);
+        HFONT sm = CreateFontW(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        old = SelectObject(dc, sm);
+        SetTextColor(dc, RGB(160, 160, 160));
+        RECT b = {0, rc.bottom - 36, rc.right, rc.bottom - 8};
+        DrawTextW(dc, (LPCWSTR)u, -1, &b, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        SelectObject(dc, old);
+        DeleteObject(sm);
+    }
+
+    static LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+        switch (msg) {
+        case WM_CREATE:
+            SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)l)->lpCreateParams);
+            return 0;
+        case WM_TIMER: {
+            Data* d = (Data*)GetWindowLongPtrW(h, GWLP_USERDATA);
+            if ((int)((GetTickCount() - d->start) / 1000) >= d->sec) DestroyWindow(h);
+            else InvalidateRect(h, NULL, FALSE);
+            return 0;
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(h, &ps);
+            Paint(h, dc);
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_LBUTTONDOWN:
+            DestroyWindow(h);
+            return 0;
+        case WM_NCDESTROY:
+            free((void*)GetWindowLongPtrW(h, GWLP_USERDATA));
+            live_--;
+            break;
+        }
+        return DefWindowProcW(h, msg, w, l);
+    }
+};
+
 // ---------------------------------------------------------------- ClockWindow
 // 시계 창 1개. owner 가 없으면 본 창(메뉴/ini 위치 저장/랜덤 이동 담당),
 // 있으면 Global 도시 창(본 창의 소유 창). 도시 창은 본 창 아래에 계속 추가되고 본 창과 함께 이동한다.
@@ -639,7 +893,7 @@ public:
             UpdateOptionChecks();
             UpdateCityChecks();                 // 기준 도시 체크
         }
-        RECT r = {0, 0, 420, 150};
+        RECT r = {0, 0, 336, ClientH()};
         AdjustWindowRect(&r, NormalStyle(), menu_ != NULL);   // 메뉴바 높이 포함
         int w = r.right - r.left, ht = r.bottom - r.top;
         if (!owner_) cfg_.LoadPos(x, y, w, ht); // ini 에 저장된 마지막 위치로 시작
@@ -649,9 +903,10 @@ public:
         if (!h) return false;
 
         char16_t tu[64];
-        Utf8::ToUtf16(owner_ ? city_ : "Text Clock (ESC = 종료)", -1, tu, 64);   // UTF-8 제목
+        Utf8::ToUtf16(owner_ ? city_ : "Text Clock", -1, tu, 64);   // UTF-8 제목
         SetWindowTextW(h, (LPCWSTR)tu);
-        ShowWindow(h, show);
+        ShowWindow(h, cfg_.visible ? show : SW_HIDE);   // 숨김 상태로 시작하면 트레이 아이콘만 표시
+        if (!owner_ && !cfg_.visible) TrayAdd();
         if (!owner_) RestoreCities();           // 저장된 도시 창을 모두 다시 열기
         return true;
     }
@@ -683,11 +938,15 @@ private:
         CMD_ALLDESK     = 108,
         CMD_H24         = 109,      // 24시간제 / 12시간제 (연속 ID)
         CMD_H12         = 110,
+        CMD_SHOWDATE    = 112,      // 년월일 보이기/숨기기 토글
+        CMD_SHOWCLOCK   = 111,      // 시계 보이기/숨기기 토글 (트레이 메뉴에서도 사용)
+        WM_TRAY         = WM_APP + 1,   // 트레이 아이콘 콜백
         CMD_OPACITY     = 200,      // 200 + (투명도/10) : 201~210
         CMD_CITY        = 300,      // 300 + 도시 인덱스
         CMD_MOVE        = 400,      // 400 + 이동 간격 선택지 인덱스
+        CMD_REBOOT      = 600,      // 600 사용, 601 시각 (CMD_ALARM + 10*ALARM_ACTS 이후)
         CMD_ALARM       = 500,      // 500 + 알람번호(0~9)*ALARM_ACTS + 동작
-        ALARM_ACTS      = 9         // 0 사용, 1 시각, 2 파일, 3 지우기, 4~6 자동 닫기(끔/재생 후/지정 시간 후), 7 닫기 시간, 8 테스트
+        ALARM_ACTS      = 10        // 0 사용, 1 시각, 2 파일, 3 지우기, 4~6 자동 닫기(끔/재생 후/지정 시간 후), 7 닫기 시간, 8 테스트, 9 메모
     };
 
     // 위치 이동 간격 선택지 (ms). 0 = 이동하지 않고 고정
@@ -738,14 +997,16 @@ private:
         case WM_TIMER:      OnTimer((UINT_PTR)w);                return 0;
         case WM_ERASEBKGND: return 1;                            // 배경은 OnPaint에서 채움
         case WM_PAINT:      OnPaint();                           return 0;
-        case WM_KEYDOWN:    if (w == VK_ESCAPE) RequestExit();   return 0;   // ESC: 앱 전체 종료
-        case WM_CLOSE:                                            // 본 창을 닫으면 앱 종료: 도시 목록 먼저 저장
+        case WM_CLOSE:                                            // 본 창을 닫으면(종료 확인 후) 앱 종료
             if (owner_) { DestroyWindow(hwnd_); return 0; }   // 도시 창: 이 도시 시계만 닫음 (앱은 계속 실행)
-            quitting_ = true;
-            SaveCities();
+            ConfirmExit();                                    // 본 창 X: '프로그램 종료' 와 동일한 확인창 (Yes 일 때만 종료)
+            return 0;
+        case WM_SYSKEYDOWN:                                       // ALT+F4: '프로그램 종료' 와 동일 (도시 창에서도 앱 종료 확인)
+            if (w == VK_F4) { ConfirmExit(); return 0; }
             break;
         case WM_EXITSIZEMOVE: SavePos();                         return 0;   // 사용자가 드래그를 끝냈을 때
         case WM_COMMAND:    OnCommand((int)LOWORD(w));           return 0;
+        case WM_TRAY:       OnTray((UINT)l);                     return 0;
         case WM_LBUTTONDBLCLK: ToggleFrame();                    return 0;   // 더블클릭: 타이틀/메뉴바 숨김<->보임
         case WM_NCLBUTTONDBLCLK:
             if (hidden_) { ToggleFrame(); return 0; }            // 숨김 상태에서는 전체가 캡션 영역
@@ -775,7 +1036,10 @@ private:
         switch (id) {
         case TID_SECOND:
             ScheduleSecondTick();
-            if (!owner_) CheckAlarms();         // 알람 확인은 본 창만
+            if (!owner_) {
+                CheckAlarms();                  // 알람 확인은 본 창만
+                if (trayOn_) TrayUpdate();      // 숨김 상태: 트레이 툴팁에 현재 시각 표시
+            }
             break;
         case TID_MOVE:
             if (!modal_) MoveGroup();
@@ -820,16 +1084,18 @@ private:
             n = wsprintfA(buf, "%02d:%02d:%02d", t.wHour, t.wMinute, t.wSecond);
         }
         RECT r1 = rc;
-        r1.bottom = rc.bottom * 3 / 5;
+        if (cfg_.showDate) r1.bottom = rc.bottom * 3 / 5;     // 년월일을 숨기면 시분초를 창 전체 가운데에 표시
         DrawLine(dc, font_, cfg_.timeColor, buf, n, r1, timeScroll_.Offset(),
                  DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
         // 기준 도시 이름 + 년월일 (작은 글자)
+        if (cfg_.showDate) {
         n = wsprintfA(buf, "%s %04d-%02d-%02d (%s)", city_, t.wYear, t.wMonth, t.wDay, WD[t.wDayOfWeek]);
         RECT r2 = rc;
         r2.top = rc.bottom * 3 / 5;
         DrawLine(dc, dateFont_, cfg_.dateColor, buf, n, r2,
                  dateScroll_.Offset(), DT_CENTER | DT_TOP | DT_SINGLELINE);
+        }
 
         BitBlt(sdc, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
         SelectObject(dc, obm);
@@ -851,6 +1117,7 @@ private:
             }
             return;
         }
+        TrayRemove();
         SavePos();                              // 본 창 종료 = 앱 종료: 마지막 위치 저장
         if (cfg_.allDesk) DesktopPin::Set(false);   // 고정 해제 (ini 값은 유지)
         if (hidden_ && menu_) DestroyMenu(menu_);   // 창에서 떼어낸 메뉴는 직접 해제
@@ -942,6 +1209,8 @@ private:
         AddMenu(set, 0,        CMD_TOPMOST,   "항상 다른 앱보다 앞에 보이기(&A)");
         AddMenu(set, 0,        CMD_ALLMON,    "모든 모니터에 적용(&M)");
         AddMenu(set, 0,        CMD_ALLDESK,   "모든 가상 데스크톱에 적용(&V)");
+        AddMenu(set, 0,        CMD_SHOWDATE,  "년월일 보이기(&Y)");
+        AddMenu(set, 0,        CMD_SHOWCLOCK, "시계 보이기(&H)  (해제하면 트레이에서만 동작)");
         AppendMenuA(set, MF_SEPARATOR, 0, NULL);
         AddMenu(set, 0,        CMD_EXIT,      "프로그램 종료 (&Exit)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)set, "설정(&S)");
@@ -956,6 +1225,7 @@ private:
             AddMenu(sub, 0, CMD_ALARM + i * ALARM_ACTS + 0, "사용(&E)");
             AddMenu(sub, 0, CMD_ALARM + i * ALARM_ACTS + 1, "시각 설정(&T)...");
             AddMenu(sub, 0, CMD_ALARM + i * ALARM_ACTS + 2, "동영상/음악 파일 선택(&F)...");
+            AddMenu(sub, 0, CMD_ALARM + i * ALARM_ACTS + 9, "메모 설정(&M)...");
             AppendMenuA(sub, MF_SEPARATOR, 0, NULL);
             AddMenu(sub, 0, CMD_ALARM + i * ALARM_ACTS + 4, "플레이어 자동 닫기: 끔(&0)");
             AddMenu(sub, 0, CMD_ALARM + i * ALARM_ACTS + 5, "플레이어 자동 닫기: 재생이 끝나면(&1)");
@@ -967,8 +1237,40 @@ private:
             AppendMenuA(menuAlarm_, MF_POPUP | MF_STRING, (UINT_PTR)sub, "-");
             UpdateAlarmMenu(i);                 // 항목 이름: 알람N  시각  파일명
         }
+        AppendMenuA(menuAlarm_, MF_SEPARATOR, 0, NULL);
+        menuReboot_ = CreatePopupMenu();        // 시스템 재시작 시각 (알람 10개 + 구분선 다음, 위치 ALARM_COUNT+1)
+        AddMenu(menuReboot_, 0, CMD_REBOOT,     "사용(&E)");
+        AddMenu(menuReboot_, 0, CMD_REBOOT + 1, "시각 설정(&T)...");
+        AppendMenuA(menuAlarm_, MF_POPUP | MF_STRING, (UINT_PTR)menuReboot_, "-");
+        UpdateRebootMenu();
         AddMenu(bar, MF_POPUP, (UINT_PTR)menuAlarm_, "알람(&A)");
         return bar;
+    }
+
+    void UpdateRebootMenu() {
+        char s[96];
+        wsprintfA(s, "시스템 재시작 시각   %02d:%02d:%02d", cfg_.rbH, cfg_.rbM, cfg_.rbS);
+        char16_t u[96];
+        Utf8::ToUtf16(s, -1, u, 96);
+        ModifyMenuW(menuAlarm_, ALARM_COUNT + 1, MF_BYPOSITION | MF_POPUP | MF_STRING,
+                    (UINT_PTR)menuReboot_, (LPCWSTR)u);
+        UINT chk = cfg_.rbOn ? MF_CHECKED : MF_UNCHECKED;
+        CheckMenuItem(menuAlarm_, ALARM_COUNT + 1, MF_BYPOSITION | chk);
+        CheckMenuItem(menuReboot_, CMD_REBOOT, MF_BYCOMMAND | chk);
+    }
+
+    void RebootCommand(int act) {
+        if (act == 0) {
+            cfg_.rbOn = !cfg_.rbOn;
+        } else {
+            modal_ = true;
+            bool ok = TimeDialog::Show(hi_, hwnd_, "시스템 재시작 시각 (시:분:초)", cfg_.rbH, cfg_.rbM, cfg_.rbS);
+            modal_ = false;
+            if (!ok) return;
+        }
+        rbFiredYmd_ = 0;
+        cfg_.SaveReboot();
+        UpdateRebootMenu();
     }
 
     // 알람 메뉴 항목 이름/체크 갱신 (체크 = 사용 중)
@@ -989,6 +1291,7 @@ private:
         CheckMenuItem(menuAlarm_, i, MF_BYPOSITION | chk);
         HMENU sub = menuAlarmSub_[i];
         CheckMenuItem(sub, CMD_ALARM + i * ALARM_ACTS, MF_BYCOMMAND | chk);
+        CheckMenuItem(sub, CMD_ALARM + i * ALARM_ACTS + 9, MF_BYCOMMAND | (a.memo[0] ? MF_CHECKED : MF_UNCHECKED));   // 체크 = 메모 있음
         CheckMenuRadioItem(sub, CMD_ALARM + i * ALARM_ACTS + 4, CMD_ALARM + i * ALARM_ACTS + 6,
                            CMD_ALARM + i * ALARM_ACTS + 4 + a.closeMode, MF_BYCOMMAND);
         wsprintfA(s, "닫기 시간 설정 (%02d:%02d:%02d)...(&S)", a.closeSec / 3600, a.closeSec % 3600 / 60, a.closeSec % 60);
@@ -999,12 +1302,25 @@ private:
 
     void AlarmCommand(int i, int act) {
         Alarm& a = cfg_.alarms[i];
-        if (act == 8) {                         // 알람 테스트: 선택된 파일을 1회만 실행 (설정/사용 여부 변경 없음)
+        if (act == 8) {                         // 알람 테스트: 메모 표시 + 선택된 파일 1회 실행 (설정/사용 여부 변경 없음)
+            if (a.memo[0]) MemoWindow::Show(hi_, a.memo, 30);
             if (a.file[0]) LaunchAlarm(i);
             return;
         }
-        if (act == 0) {                         // 사용 On/Off (파일이 없으면 먼저 고르게 함)
-            if (!a.on && !a.file[0] && !PickAlarmFile(a)) return;
+        if (act == 9) {                         // 메모 설정
+            char m[sizeof(a.memo)];
+            lstrcpynA(m, a.memo, sizeof(m));
+            modal_ = true;
+            bool ok = MemoDialog::Show(hi_, hwnd_, m, sizeof(m));
+            modal_ = false;
+            if (!ok) return;
+            lstrcpynA(a.memo, m, sizeof(a.memo));
+            cfg_.SaveAlarm(i);
+            UpdateAlarmMenu(i);
+            return;
+        }
+        if (act == 0) {                         // 사용 On/Off (파일/메모가 없으면 먼저 파일을 고르게 함)
+            if (!a.on && !a.file[0] && !a.memo[0] && !PickAlarmFile(a)) return;
             a.on = !a.on;
         } else if (act == 1) {                  // 시각 설정
             modal_ = true;
@@ -1016,6 +1332,7 @@ private:
         } else if (act == 3) {                  // 알람 지우기
             a.on = false;
             a.file[0] = 0;
+            a.memo[0] = 0;
         } else if (act >= 4 && act <= 6) {      // 플레이어 자동 닫기: 끔 / 재생이 끝나면 / 지정 시간 후
             a.closeMode = act - 4;
         } else {                                // 7: 닫기까지 시간 (모드 2, 모드 1 에서 길이를 못 읽을 때)
@@ -1060,12 +1377,29 @@ private:
         int ymd = t.wYear * 10000 + t.wMonth * 100 + t.wDay;
         for (int i = 0; i < ALARM_COUNT; i++) {
             const Alarm& a = cfg_.alarms[i];
-            if (!a.on || !a.file[0] || firedYmd_[i] == ymd) continue;
+            if (!a.on || (!a.file[0] && !a.memo[0]) || firedYmd_[i] == ymd) continue;
             int d = now - (a.h * 3600 + a.m * 60 + a.s);
             if (d < 0 || d > 5) continue;       // 타이머가 조금 늦어도 놓치지 않도록 5초 여유
             firedYmd_[i] = ymd;
-            LaunchAlarm(i);
+            if (a.memo[0]) MemoWindow::Show(hi_, a.memo, 30);
+            if (a.file[0]) LaunchAlarm(i);
         }
+        if (cfg_.rbOn && rbFiredYmd_ != ymd) {  // 시스템 재시작 (재부팅 직후 재실행되어도 5초 여유가 지나 다시 실행되지 않음)
+            int d = now - (cfg_.rbH * 3600 + cfg_.rbM * 60 + cfg_.rbS);
+            if (d >= 0 && d <= 5) {
+                rbFiredYmd_ = ymd;
+                ConfirmReboot();
+            }
+        }
+    }
+
+    // 재시작 확인창: 300초 동안 Yes/No 대기(남은 시간 프로그레스 바). Yes 또는 무응답(시간 초과) = 즉시 재시작, No = 재시작 안 함
+    void ConfirmReboot() {
+        modal_ = true;
+        int r = ConfirmDialog::Show(hi_, 300, "시스템 재시작", "시스템을 재시작 하겠습니까? (Yes/No)", "무응답 시 재시작", true);
+        modal_ = false;
+        if (r != IDNO)
+            ShellExecuteW(NULL, (LPCWSTR)u"open", (LPCWSTR)u"shutdown.exe", (LPCWSTR)u"/r /f /t 0", NULL, SW_HIDE);
     }
 
     // ---- 알람 실행 + 플레이어 자동 닫기
@@ -1259,10 +1593,20 @@ private:
         CheckMenuItem(menuSet_, CMD_TOPMOST, MF_BYCOMMAND | (cfg_.topmost ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menuSet_, CMD_ALLMON,  MF_BYCOMMAND | (cfg_.allMon  ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menuSet_, CMD_ALLDESK, MF_BYCOMMAND | (cfg_.allDesk ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menuSet_, CMD_SHOWDATE, MF_BYCOMMAND | (cfg_.showDate ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menuSet_, CMD_SHOWCLOCK, MF_BYCOMMAND | (cfg_.visible ? MF_CHECKED : MF_UNCHECKED));
     }
 
     void OnCommand(int id) {
-        if (id == CMD_EXIT)            RequestExit();
+        if (id == CMD_EXIT)            ConfirmExit();
+        else if (id == CMD_SHOWCLOCK)  SetClockVisible(!cfg_.visible);
+        else if (id == CMD_SHOWDATE) {
+            cfg_.showDate = !cfg_.showDate;
+            cfg_.WriteInt("Option", "ShowDate", cfg_.showDate);
+            ResizeAll();                        // 숨기면 년월일 영역만큼 높이 축소
+            ForAll(&ClockWindow::ApplyFormat);  // 모든 창 다시 그리기
+            UpdateOptionChecks();
+        }
         else if (id == CMD_RESET)      ResetSettings();
         else if (id == CMD_BACKCOLOR)  PickBackColor();
         else if (id == CMD_TIMEFONT)   PickFont(cfg_.timeFont, (int)sizeof(cfg_.timeFont), cfg_.timeSize, cfg_.timeColor);
@@ -1287,6 +1631,8 @@ private:
             CheckHourFormat();
             cfg_.WriteInt("Option", "Hour12", cfg_.hour12);
         }
+        else if (id == CMD_REBOOT || id == CMD_REBOOT + 1)
+            RebootCommand(id - CMD_REBOOT);
         else if (id >= CMD_ALARM && id < CMD_ALARM + ALARM_COUNT * ALARM_ACTS)
             AlarmCommand((id - CMD_ALARM) / ALARM_ACTS, (id - CMD_ALARM) % ALARM_ACTS);
         else if (id >= CMD_MOVE && id < CMD_MOVE + MOVE_COUNT) {
@@ -1295,6 +1641,115 @@ private:
             CheckMoveInterval();
             cfg_.WriteInt("Timer", "MoveMs", cfg_.moveMs);
         }
+    }
+
+    // 클라이언트 높이: 년월일 표시 150, 숨김 90 (시분초 영역 = 3/5)
+    int ClientH() const { return cfg_.showDate ? 150 : 90; }
+
+    // 모든 창의 높이를 현재 ClientH() 로 바꾸고, 아래로 쌓인 도시 창은 바로 밑에 다시 붙임 (새 열의 시작 위치는 유지)
+    void ResizeAll() {
+        ClockWindow* w[CITY_COUNT + 1];
+        RECT old[CITY_COUNT + 1];
+        int n = 0;
+        w[n++] = this;
+        for (ClockWindow* p = head_; p && n < CITY_COUNT + 1; p = p->next_) w[n++] = p;
+        for (int i = 0; i < n; i++) GetWindowRect(w[i]->hwnd_, &old[i]);
+
+        int prevBottom = 0;
+        for (int i = 0; i < n; i++) {
+            RECT wr, cr;
+            GetWindowRect(w[i]->hwnd_, &wr);
+            GetClientRect(w[i]->hwnd_, &cr);
+            int h = (wr.bottom - wr.top) - cr.bottom + ClientH();      // 비클라이언트(캡션/메뉴) 높이는 유지
+            int top = wr.top;
+            if (i > 0 && old[i].left == old[i - 1].left && old[i].top == old[i - 1].bottom)
+                top = prevBottom;               // 바로 위 창 밑에 붙어 있던 창은 새 위치로
+            SetWindowPos(w[i]->hwnd_, NULL, wr.left, top, wr.right - wr.left, h,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            prevBottom = top + h;
+        }
+        SavePos();
+    }
+
+    // 시계 보이기/숨기기 (본 창 + 도시 창 모두). 숨기면 트레이 아이콘만 남음
+    void ApplyShow() { ShowWindow(hwnd_, cfg_.visible ? SW_SHOWNA : SW_HIDE); }
+
+    void SetClockVisible(bool v) {
+        ClockWindow* root = owner_ ? owner_ : this;
+        root->cfg_.visible = v;
+        root->cfg_.WriteInt("Option", "ShowClock", v);
+        root->ForAll(&ClockWindow::ApplyShow);
+        if (v) root->TrayRemove(); else root->TrayAdd();
+        root->UpdateOptionChecks();
+    }
+
+    // ---- 시스템 트레이 (본 창만, 숨김 상태에서만 표시)
+    void TrayFill(NOTIFYICONDATAW& n) {
+        n = NOTIFYICONDATAW();
+        n.cbSize = sizeof(n);
+        n.hWnd = hwnd_;
+        n.uID = 1;
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        char s[64];
+        wsprintfA(s, "Text Clock  %02d:%02d:%02d", t.wHour, t.wMinute, t.wSecond);
+        Utf8::ToUtf16(s, -1, (char16_t*)n.szTip, 64);
+    }
+
+    void TrayAdd() {
+        if (trayOn_) return;
+        NOTIFYICONDATAW n;
+        TrayFill(n);
+        n.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        n.uCallbackMessage = WM_TRAY;
+        n.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+        trayOn_ = Shell_NotifyIconW(NIM_ADD, &n) != FALSE;
+    }
+
+    void TrayUpdate() {
+        NOTIFYICONDATAW n;
+        TrayFill(n);
+        n.uFlags = NIF_TIP;
+        Shell_NotifyIconW(NIM_MODIFY, &n);
+    }
+
+    void TrayRemove() {
+        if (!trayOn_) return;
+        NOTIFYICONDATAW n = NOTIFYICONDATAW();
+        n.cbSize = sizeof(n);
+        n.hWnd = hwnd_;
+        n.uID = 1;
+        Shell_NotifyIconW(NIM_DELETE, &n);
+        trayOn_ = false;
+    }
+
+    void OnTray(UINT ev) {
+        if (ev == WM_LBUTTONUP) {               // 클릭: 시계 다시 보이기
+            SetClockVisible(true);
+        } else if (ev == WM_RBUTTONUP) {        // 우클릭: 보이기 / 종료 메뉴
+            HMENU m = CreatePopupMenu();
+            AddMenu(m, 0, CMD_SHOWCLOCK, "시계 보이기(&H)");
+            AddMenu(m, 0, CMD_EXIT, "프로그램 종료 (&Exit)");
+            POINT pt;
+            GetCursorPos(&pt);
+            SetForegroundWindow(hwnd_);
+            TrackPopupMenu(m, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, NULL);
+            PostMessage(hwnd_, WM_NULL, 0, 0);
+            DestroyMenu(m);
+        }
+    }
+
+    // 종료 확인: 30초 동안 Yes/No. Yes 일 때만 종료, No 또는 무응답이면 계속 동작
+    void ConfirmExit() {
+        static bool asking = false;
+        if (asking) return;
+        asking = true;
+        ClockWindow* root = owner_ ? owner_ : this;
+        root->modal_ = true;
+        int r = ConfirmDialog::Show(hi_, 30, "시계 종료", "시계 앱을 종료하겠습니까? (Yes/No)", "무응답 시 종료하지 않음", false);
+        root->modal_ = false;
+        asking = false;
+        if (r == IDYES) RequestExit();
     }
 
     // 앱 종료: 도시 목록을 먼저 저장한 뒤 본 창을 닫음 (소유 창인 도시 창도 함께 닫힘)
@@ -1355,7 +1810,7 @@ private:
             GetWindowRect(p->hwnd_, &r);
             if (r.bottom > low.bottom) low = r;
         }
-        RECT c = {0, 0, 420, 150};
+        RECT c = {0, 0, 336, ClientH()};
         AdjustWindowRect(&c, NormalStyle(), FALSE);
         int w = c.right - c.left, ht = c.bottom - c.top;
 
@@ -1638,10 +2093,13 @@ private:
     HMENU        menuGlobal_   = NULL;
     HMENU        menuHour_     = NULL;
     HMENU        menuAlarm_    = NULL;
+    HMENU        menuReboot_   = NULL;
+    int          rbFiredYmd_   = 0;     // 시스템 재시작을 마지막으로 실행한 날짜
     HMENU        menuAlarmSub_[ALARM_COUNT] = {};
     int          firedYmd_[ALARM_COUNT]     = {};   // 알람이 마지막으로 울린 날짜 (YYYYMMDD)
     Pending      pend_[ALARM_COUNT];                // 자동 닫기 대기 중인 플레이어 창 정보
     bool         quitting_     = false; // 본 창: 앱 종료 중 (도시 창 닫힘을 목록 변경으로 저장하지 않음)
+    bool         trayOn_       = false; // 트레이 아이콘 표시 중 (본 창)
     bool         hidden_       = false; // 타이틀바/메뉴바 숨김 상태
     bool         modal_        = false; // 메뉴/대화상자 사용 중 (자동 이동 일시 정지)
     ClockWindow* head_         = NULL;  // 본 창: 도시 창 목록
