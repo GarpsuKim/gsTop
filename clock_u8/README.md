@@ -1,6 +1,11 @@
 # TextClock U8
 
-Windows 11용 텍스트 시계 앱입니다. C++(g++/MinGW) 단일 소스 파일이며, 외부 라이브러리와 리소스 파일(.rc, .manifest) 없이 빌드됩니다.
+Windows 11용 텍스트 시계 앱입니다. 
+
+C++(g++/MinGW) 단일 소스 파일이며, 외부 라이브러리와 리소스 파일(.rc, .manifest) 없이 빌드됩니다.
+
+<img width="546" height="395" alt="image" src="https://github.com/user-attachments/assets/70549507-fd58-4ad2-a8f7-8637d766a24d" />
+
 
 ## 특징
 
