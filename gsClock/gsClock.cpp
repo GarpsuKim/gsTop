@@ -118,10 +118,10 @@ public:
     static const UINT WM_TAKEOVER = WM_APP + 3;     // 새로 시작한 프로세스가 기존 본 창에 보내는 종료 요청
 
 private:
-    // 같은 클래스("TextClock")의 소유자 없는 최상위 창 = 다른 프로세스의 본 창
+    // 같은 클래스("gsClock")의 소유자 없는 최상위 창 = 다른 프로세스의 본 창
     static BOOL CALLBACK FindOld(HWND h, LPARAM) {
         char cls[32];
-        if (GetClassNameA(h, cls, sizeof(cls)) && lstrcmpA(cls, "TextClock") == 0 && !GetWindow(h, GW_OWNER)) {
+        if (GetClassNameA(h, cls, sizeof(cls)) && lstrcmpA(cls, "gsClock") == 0 && !GetWindow(h, GW_OWNER)) {
             DWORD pid = 0;
             GetWindowThreadProcessId(h, &pid);
             if (pid && pid != GetCurrentProcessId()) {
@@ -231,7 +231,7 @@ public:
     }
 
 private:
-    static const char16_t* AppId() { return u"GarpsuKim.TextClock.U8"; }
+    static const char16_t* AppId() { return u"GarpsuKim.gsClock"; }
 };
 
 // ---------------------------------------------------------------- CITIES / Zone
@@ -486,7 +486,7 @@ private:
     void CreateDefaultIni() {
         if (GetFileAttributesA(ini_) != INVALID_FILE_ATTRIBUTES) return;
         static const char text[] =
-            "; ===== Text Clock 설정 =====\r\n"
+            "; ===== gsClock 설정 =====\r\n"
             "; 앱 시작 시 한 번 읽습니다. 수정 후 앱을 다시 시작하세요.\r\n"
             "; 주석은 반드시 별도 줄에 쓰세요 (값 뒤에 붙이면 값으로 읽힙니다).\r\n"
             "; 파일은 UTF-8 (BOM 없음) 또는 ANSI 로 저장하세요.\r\n"
@@ -742,7 +742,7 @@ public:
     const void* Data() const { return buf_; }
 
 private:
-    enum { CAP = 512 };
+    enum { CAP = 1024 };
     alignas(4) WORD buf_[CAP];
     int n_ = 0;
 };
@@ -880,6 +880,113 @@ private:
     }
 };
 
+// 안내 대화상자 (About / 홈페이지): 여러 줄 문구 + (선택) 링크 + 남은 시간 프로그레스 바. 시간이 다 되면 자동으로 닫힘
+// 링크를 누르면 시스템 기본 브라우저로 연다 (SysLink 는 매니페스트가 필요해서 파란 밑줄 STATIC 으로 처리)
+class InfoDialog {
+public:
+    static void Show(HINSTANCE hi, const char* caption, const char* msg, const char* link, int waitSec) {
+        INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_PROGRESS_CLASS};
+        InitCommonControlsEx(&ic);
+
+        int lines = 1;
+        for (const char* p = msg; *p; p++) if (*p == '\n') lines++;
+        int y = 8, mh = lines * 10 + 2;
+
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | DS_SETFOREGROUND | WS_POPUP | WS_CAPTION);
+        b.D(0);
+        b.W(link ? 5 : 4); b.W(0); b.W(0); b.W(230); b.W(mh + (link ? 12 : 0) + 60);   // 컨트롤 개수: 링크 없으면 4
+        b.W(0); b.W(0);
+        b.S(caption);
+        b.W(9); b.S("Segoe UI");
+        b.Control(WS_CHILD | WS_VISIBLE, 10, y, 210, mh, IDC_MSG, "STATIC", msg);
+        y += mh;
+        if (link) { b.Control(WS_CHILD | WS_VISIBLE | SS_NOTIFY, 10, y, 210, 10, IDC_LINK, "STATIC", link); y += 12; }
+        b.Control(WS_CHILD | WS_VISIBLE, 10, y + 4, 210, 10, IDC_LEFT, "STATIC", "");
+        b.Control(WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 10, y + 18, 210, 10, IDC_BAR, "msctls_progress32", "");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 92, y + 34, 46, 14, IDOK, "OK");
+
+        Ctx c = {GetTickCount(), waitSec, link, NULL};
+        DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), NULL, Proc, (LPARAM)&c);
+    }
+
+private:
+    enum { IDC_MSG = 100, IDC_LEFT = 101, IDC_BAR = 102, IDC_LINK = 103 };
+    struct Ctx { DWORD start; int sec; const char* link; HFONT font; };
+
+    static void Update(HWND d, Ctx* c) {
+        int left = c->sec - (int)((GetTickCount() - c->start) / 1000);
+        if (left < 0) left = 0;
+        SendDlgItemMessageW(d, IDC_BAR, PBM_SETPOS, (WPARAM)left, 0);
+        char t[64];
+        char16_t u[64];
+        wsprintfA(t, "남은 시간: %d초 (끝나면 자동으로 닫힘)", left);
+        Utf8::ToUtf16(t, -1, u, 64);
+        SetDlgItemTextW(d, IDC_LEFT, (LPCWSTR)u);
+        if (left == 0) EndDialog(d, IDOK);
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG: {
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            SetWindowPos(d, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SendDlgItemMessageW(d, IDC_BAR, PBM_SETRANGE32, 0, c->sec);
+            HWND hl = GetDlgItem(d, IDC_LINK);
+            if (hl) {                                            // 링크: 밑줄 글꼴
+                LOGFONTW lf;
+                HFONT f = (HFONT)SendMessageW(hl, WM_GETFONT, 0, 0);
+                if (f && GetObjectW(f, sizeof(lf), &lf)) {
+                    lf.lfUnderline = TRUE;
+                    c->font = CreateFontIndirectW(&lf);
+                    SendMessageW(hl, WM_SETFONT, (WPARAM)c->font, TRUE);
+                }
+            }
+            Update(d, c);
+            SetTimer(d, 1, 250, NULL);
+            return TRUE;
+        }
+        case WM_TIMER:
+            Update(d, c);
+            return TRUE;
+        case WM_CTLCOLORSTATIC:
+            if ((HWND)l == GetDlgItem(d, IDC_LINK)) {
+                SetTextColor((HDC)w, RGB(0, 0, 255));
+                SetBkMode((HDC)w, TRANSPARENT);
+                return (INT_PTR)GetSysColorBrush(COLOR_3DFACE);
+            }
+            break;
+        case WM_SETCURSOR:
+            if ((HWND)w == GetDlgItem(d, IDC_LINK)) {
+                SetCursor(LoadCursor(NULL, IDC_HAND));
+                SetWindowLongPtrA(d, DWLP_MSGRESULT, TRUE);
+                return TRUE;
+            }
+            break;
+        case WM_COMMAND:
+            if (LOWORD(w) == IDC_LINK && c && c->link) {         // 링크 클릭 -> 기본 브라우저
+                char16_t u[300];
+                Utf8::ToUtf16(c->link, -1, u, 300);
+                HINSTANCE r = ShellExecuteW(NULL, (LPCWSTR)u"open", (LPCWSTR)u, NULL, NULL, SW_SHOWNORMAL);
+                Log::Put("브라우저로 열기: %s (결과코드 %d)", c->link, (int)(INT_PTR)r);
+                return TRUE;
+            }
+            if (LOWORD(w) == IDOK || LOWORD(w) == IDCANCEL) {
+                EndDialog(d, IDOK);
+                return TRUE;
+            }
+            break;
+        case WM_DESTROY:
+            KillTimer(d, 1);
+            if (c && c->font) DeleteObject(c->font);
+            break;
+        }
+        return FALSE;
+    }
+};
+
 // 알람 메모 입력 대화상자 (한 줄, 최대 100자)
 class MemoDialog {
 public:
@@ -943,7 +1050,7 @@ public:
             wc.lpfnWndProc = Proc;
             wc.hInstance = hi;
             wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-            wc.lpszClassName = (LPCWSTR)u"TextClockMemo";
+            wc.lpszClassName = (LPCWSTR)u"gsClockMemo";
             RegisterClassW(&wc);
             reg = true;
         }
@@ -957,7 +1064,7 @@ public:
         const int W = 640, H = 220, off = live_ * 30;       // 동시에 여러 개면 조금씩 어긋나게
         int x = (GetSystemMetrics(SM_CXSCREEN) - W) / 2 + off;
         int y = (GetSystemMetrics(SM_CYSCREEN) - H) / 2 + off;
-        HWND h = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, (LPCWSTR)u"TextClockMemo", (LPCWSTR)u"",
+        HWND h = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, (LPCWSTR)u"gsClockMemo", (LPCWSTR)u"",
                                  WS_POPUP | WS_BORDER, x, y, W, H, NULL, NULL, hi, d);
         if (!h) { free(d); return; }
         live_++;
@@ -1185,7 +1292,7 @@ private:
         FnSetOpt   fSetOpt  = (FnSetOpt)GetProcAddress(m, "InternetSetOptionA");
         bool ok = false;
         if (fOpen && fOpenUrl && fRead && fClose) {
-            HINTERNET net = fOpen("TextClock/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+            HINTERNET net = fOpen("gsClock/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
             if (net) {
                 DWORD to = 8000;                                  // 접속/수신 제한 시간 8초
                 if (fSetOpt) {
@@ -1275,12 +1382,12 @@ public:
         int w = r.right - r.left, ht = r.bottom - r.top;
         if (!owner_) cfg_.LoadPos(x, y, w, ht); // ini 에 저장된 마지막 위치로 시작
 
-        HWND h = CreateWindowExA(0, "TextClock", "Text Clock", NormalStyle(), x, y, w, ht,
+        HWND h = CreateWindowExA(0, "gsClock", "gsClock", NormalStyle(), x, y, w, ht,
                                  owner_ ? owner_->hwnd_ : NULL, menu_, hi, this);
         if (!h) return false;
 
         char16_t tu[64];
-        Utf8::ToUtf16(owner_ ? city_ : "Text Clock", -1, tu, 64);   // UTF-8 제목
+        Utf8::ToUtf16(owner_ ? city_ : "gsClock", -1, tu, 64);   // UTF-8 제목
         SetWindowTextW(h, (LPCWSTR)tu);
         ShowWindow(h, cfg_.visible ? show : SW_HIDE);   // 숨김 상태로 시작하면 트레이 아이콘만 표시
         if (!owner_) {
@@ -1354,7 +1461,7 @@ private:
         wc.lpfnWndProc   = &ClockWindow::StaticProc;
         wc.hInstance     = hi;
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = "TextClock";
+        wc.lpszClassName = "gsClock";
         RegisterClassA(&wc);
     }
 
@@ -2363,7 +2470,7 @@ private:
         SYSTEMTIME t;
         GetLocalTime(&t);
         char s[64];
-        wsprintfA(s, "Text Clock  %02d:%02d:%02d", t.wHour, t.wMinute, t.wSecond);
+        wsprintfA(s, "gsClock  %02d:%02d:%02d", t.wHour, t.wMinute, t.wSecond);
         Utf8::ToUtf16(s, -1, (char16_t*)n.szTip, 64);
     }
 
@@ -2588,26 +2695,21 @@ private:
         Log::Put("브라우저로 열기: %s (결과코드 %d)", url, (int)(INT_PTR)r);
     }
 
-    void ShowInfo(const char* title, const char* text) {
-        char16_t t[64], m[600];
-        Utf8::ToUtf16(title, -1, t, 64);
-        Utf8::ToUtf16(text, -1, m, 600);
+    void ShowInfo(const char* title, const char* text, const char* link = NULL) {
         modal_ = true;
-        MessageBoxW(hwnd_, (LPCWSTR)m, (LPCWSTR)t, MB_OK | MB_ICONINFORMATION);
+        InfoDialog::Show(hi_, title, text, link, 30);          // 30초 프로그레스 바 (끝나면 자동으로 닫힘)
         modal_ = false;
     }
 
     void HelpCommand(int act) {
         if (act == 0) {                         // About
             char m[300];
-            wsprintfA(m, "프로그램 이름 : %s\n버전 : %s\n개발자 : 김갑수 ( koreastaaa@gmail.com )", APP_NAME, APP_VERSION_STR);
+            wsprintfA(m, "프로그램 이름 : %s\r\n버전 : %s\r\n개발자 : 김갑수 ( koreastaaa@gmail.com )", APP_NAME, APP_VERSION_STR);
             ShowInfo("About", m);
         } else if (act == 1) {                  // ReadMe.MD -> 기본 브라우저
             OpenUrl(ReadmeUrl());
         } else if (act == 2) {                  // 홈페이지 주소 표시
-            char m[300];
-            wsprintfA(m, "홈페이지 : %s", HomeUrl());
-            ShowInfo("홈페이지", m);
+            ShowInfo("홈페이지", "홈페이지 :", HomeUrl());     // 링크를 누르면 기본 브라우저로 열기
         } else {                                // 최신 버전 다운로드 (GitHub 폴더를 zip 으로 내려받는 링크)
             OpenUrl(DownloadUrl());
         }
@@ -2940,7 +3042,7 @@ static void WriteVersionFile() {
 
 int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
     Log::Init();
-    SingleInstance guard("TextClock_U8_SingleInstance");   // 중복 실행 방지
+    SingleInstance guard("gsClock_SingleInstance");   // 중복 실행 방지
     if (!guard.IsFirst()) {                     // 이미 실행 중이면 기존 앱을 종료시키고 이 프로세스가 대신 실행
         Log::Put("기존 실행 중인 앱 감지: 기존 프로세스를 종료하고 새로 시작");
         guard.TakeOver();
