@@ -1,3 +1,3 @@
 @echo off
-if not exist gsClock.exe call _build.bat
+cd /d "%~dp0"
 start "" gsClock.exe
