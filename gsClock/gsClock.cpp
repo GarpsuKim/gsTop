@@ -894,23 +894,29 @@ public:
         INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_PROGRESS_CLASS};
         InitCommonControlsEx(&ic);
 
-        int lines = 1;
-        for (const char* p = msg; *p; p++) if (*p == '\n') lines++;
+        int lines = 0;                          // 줄 수 (긴 줄은 창 폭에서 줄바꿈되므로 글자 수로 추정해 더함)
+        for (const char* p = msg; ; ) {
+            int n = 0;
+            while (*p && *p != '\n') { if (((unsigned char)*p & 0xC0) != 0x80) n++; p++; }
+            lines += 1 + (n > 0 ? (n - 1) / 34 : 0);
+            if (!*p) break;
+            p++;
+        }
         int y = 8, mh = lines * 10 + 2;
 
         DlgBuilder b;
         b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | DS_SETFOREGROUND | WS_POPUP | WS_CAPTION);
         b.D(0);
-        b.W(link ? 5 : 4); b.W(0); b.W(0); b.W(230); b.W(mh + (link ? 12 : 0) + 60);   // 컨트롤 개수: 링크 없으면 4
+        b.W(link ? 5 : 4); b.W(0); b.W(0); b.W(300); b.W(mh + (link ? 12 : 0) + 60);   // 컨트롤 개수: 링크 없으면 4
         b.W(0); b.W(0);
         b.S(caption);
         b.W(9); b.S("Segoe UI");
-        b.Control(WS_CHILD | WS_VISIBLE, 10, y, 210, mh, IDC_MSG, "STATIC", msg);
+        b.Control(WS_CHILD | WS_VISIBLE, 10, y, 280, mh, IDC_MSG, "STATIC", msg);
         y += mh;
-        if (link) { b.Control(WS_CHILD | WS_VISIBLE | SS_NOTIFY, 10, y, 210, 10, IDC_LINK, "STATIC", link); y += 12; }
-        b.Control(WS_CHILD | WS_VISIBLE, 10, y + 4, 210, 10, IDC_LEFT, "STATIC", "");
-        b.Control(WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 10, y + 18, 210, 10, IDC_BAR, "msctls_progress32", "");
-        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 92, y + 34, 46, 14, IDOK, "OK");
+        if (link) { b.Control(WS_CHILD | WS_VISIBLE | SS_NOTIFY, 10, y, 280, 10, IDC_LINK, "STATIC", link); y += 12; }
+        b.Control(WS_CHILD | WS_VISIBLE, 10, y + 4, 280, 10, IDC_LEFT, "STATIC", "");
+        b.Control(WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 10, y + 18, 280, 10, IDC_BAR, "msctls_progress32", "");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 127, y + 34, 46, 14, IDOK, "OK");
 
         Ctx c = {GetTickCount(), waitSec, link, NULL};
         DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), NULL, Proc, (LPARAM)&c);
@@ -2844,8 +2850,8 @@ private:
 
     void HelpCommand(int act) {
         if (act == 0) {                         // About
-            char m[300];
-            wsprintfA(m, "프로그램 이름 : %s\r\n버전 : %s\r\n개발자 : 김갑수 ( koreastaaa@gmail.com )", APP_NAME, APP_VERSION_STR);
+            char m[600];
+            wsprintfA(m, "프로그램 이름 : %s\r\n버전 : %s\r\n개발자 : 김갑수 ( koreastaaa@gmail.com )\r\n\r\n%s", APP_NAME, APP_VERSION_STR, APP_COPYRIGHT);
             ShowInfo("About", m);
         } else if (act == 1) {                  // ReadMe.MD -> 기본 브라우저
             OpenUrl(ReadmeUrl());

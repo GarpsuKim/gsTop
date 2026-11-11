@@ -2,8 +2,6 @@
 
 Windows 11용 시계 앱입니다. 
 
-<img width="338" height="227" alt="image" src="https://github.com/user-attachments/assets/6687a4b3-9887-48c4-ae35-5e63fbae3507" />
-
 C++(g++/MinGW) 단일 소스 파일이며, 외부 라이브러리 없이 빌드됩니다. 버전 정보(exe 속성)는 `version.h` + `gsClock.rc` 로 넣습니다.
 
 ## 특징
