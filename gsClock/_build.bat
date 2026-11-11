@@ -4,6 +4,10 @@ cd /d "%~dp0"
 set APP=gsClock
 set ERR=build_ERR.txt
 
+echo *****************
+echo build [%APP%.cpp]
+echo *****************
+
 rem --- 필수 도구/입력 파일 확인
 where g++ >nul 2>&1 || (echo [%APP%] g++ not found in PATH & pause & exit /b 1)
 where windres >nul 2>&1 || (echo [%APP%] windres not found in PATH & pause & exit /b 1)
@@ -28,11 +32,10 @@ for %%f in (%ERR%) do if %%~zf gtr 0 (echo [%APP%] warnings: & type %ERR%)
 del %APP%_res.o >nul 2>&1
 del %ERR% >nul 2>&1
 for %%f in (%APP%.exe) do echo [%APP%] BUILD OK  v%VER%  %%~zf bytes
-pause
 exit /b 0
 
 :fail
 echo [%APP%] Build FAILED. See %ERR%
-start "" c:\Windows\system32\notepad.exe %APP%.cpp
+rem start "" c:\Windows\system32\notepad.exe %APP%.cpp
 start "" c:\Windows\system32\notepad.exe %ERR%
 exit /b 1

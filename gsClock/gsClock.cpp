@@ -371,6 +371,12 @@ public:
         topmost = d.topmost;  allMon = d.allMon;  allDesk = d.allDesk;  timeFmt = d.timeFmt;  dateFmt = d.dateFmt;
     }
 
+    // 음력 API 키 변경: 메모리와 ini [Lunar] ApiKey 에 저장
+    void SetLunarKey(const char* key) {
+        lstrcpynA(lunarKey, key, sizeof(lunarKey));
+        WritePrivateProfileStringA("Lunar", "ApiKey", lunarKey, ini_);
+    }
+
     void WriteInt(const char* section, const char* key, int v) {
         char b[16];
         wsprintfA(b, "%d", v);
@@ -742,7 +748,7 @@ public:
     const void* Data() const { return buf_; }
 
 private:
-    enum { CAP = 1024 };
+    enum { CAP = 2048 };
     alignas(4) WORD buf_[CAP];
     int n_ = 0;
 };
@@ -987,6 +993,118 @@ private:
     }
 };
 
+// 음력 API 키값 등록 대화상자: 설명문 + 발급 주소 링크(기본 브라우저로 열림) + 키 입력 칸
+class LunarKeyDialog {
+public:
+    static bool Show(HINSTANCE hi, HWND owner, char* key, int cap) {
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(13); b.W(0); b.W(0); b.W(340); b.W(208);
+        b.W(0); b.W(0);
+        b.S("음력 API 키값 등록");
+        b.W(9); b.S("Segoe UI");
+        const DWORD T = WS_CHILD | WS_VISIBLE;
+        b.Control(T, 10, 8,  320, 12, 110, "STATIC", "1)  음력 날짜를 구하려면 천문대 서버에 API로 접속하여야 합니다.");
+        b.Control(T, 10, 22, 320, 22, 111, "STATIC", "2) 천문대 서버 API 키값은, [정부 공공 데이타 포탈]에서 무료로 발급합니다.");
+        b.Control(T, 10, 46, 320, 22, 112, "STATIC", "3) [정부 공공 데이타 포탈] 에 회원 가입을 하고, 공공API 키값 발급 신청을 하면, 즉시 무료로 발급됩니다.");
+        b.Control(T, 10, 70, 320, 12, 113, "STATIC", "4) [정부 공공 데이타 포탈] API 키 발급 주소 :");
+        b.Control(T | SS_NOTIFY, 22, 82, 308, 12, IDC_LINK, "STATIC", URLS[0]);
+        b.Control(T, 10, 98, 320, 12, 114, "STATIC", "5) 발급 받은 키 값을, 아래 칸에 붙여넣기 하세요");
+        b.Control(T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, 10, 112, 320, 14, IDC_EDIT, "EDIT", "");
+        b.Control(T, 10, 132, 320, 12, 115, "STATIC", "6) 참고사항1 : 한국천문연구원_음양력 정보 api 해설");
+        b.Control(T | SS_NOTIFY, 22, 144, 308, 12, IDC_LINK + 1, "STATIC", URLS[1]);
+        b.Control(T, 10, 160, 320, 12, 116, "STATIC", "7) 참고사항2 : 한국천문연구원 음양력 변환, 일반용 홈페이지");
+        b.Control(T | SS_NOTIFY, 22, 172, 308, 12, IDC_LINK + 2, "STATIC", URLS[2]);
+        b.Button(T | WS_TABSTOP | BS_DEFPUSHBUTTON, 100, 190, 45, 14, IDOK, "확인");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,    195, 190, 45, 14, IDCANCEL, "취소");
+        Ctx c = {key, cap, NULL};
+        bool ok = DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+        return ok;
+    }
+
+private:
+    enum { IDC_EDIT = 100, IDC_LINK = 103 };
+    static constexpr const char* URLS[3] = {
+        "https://www.data.go.kr/iim/api/selectApiKeyList.do",
+        "https://www.data.go.kr/data/15012679/openapi.do",
+        "https://astro.kasi.re.kr/kor/life/pageView/8"};
+    struct Ctx { char* s; int cap; HFONT font; };
+
+    static int LinkIdx(HWND d, HWND h) {                         // 링크 컨트롤이면 0..2, 아니면 -1
+        for (int i = 0; i < 3; i++) if (h && h == GetDlgItem(d, IDC_LINK + i)) return i;
+        return -1;
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG: {
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            char16_t u[320];
+            u[0] = 0;
+            Utf8::ToUtf16(c->s, -1, u, 320);
+            SendDlgItemMessageW(d, IDC_EDIT, EM_LIMITTEXT, 190, 0);
+            SetDlgItemTextW(d, IDC_EDIT, (LPCWSTR)u);
+            LOGFONTW lf;                                         // 링크: 밑줄 글꼴 (3개가 공유)
+            HFONT f = (HFONT)SendDlgItemMessageW(d, IDC_LINK, WM_GETFONT, 0, 0);
+            if (f && GetObjectW(f, sizeof(lf), &lf)) {
+                lf.lfUnderline = TRUE;
+                c->font = CreateFontIndirectW(&lf);
+                for (int i = 0; i < 3; i++) SendDlgItemMessageW(d, IDC_LINK + i, WM_SETFONT, (WPARAM)c->font, TRUE);
+            }
+            return TRUE;
+        }
+        case WM_CTLCOLORSTATIC:
+            if (LinkIdx(d, (HWND)l) >= 0) {
+                SetTextColor((HDC)w, RGB(0, 0, 255));
+                SetBkMode((HDC)w, TRANSPARENT);
+                return (INT_PTR)GetSysColorBrush(COLOR_3DFACE);
+            }
+            break;
+        case WM_SETCURSOR:
+            if (LinkIdx(d, (HWND)w) >= 0) {
+                SetCursor(LoadCursor(NULL, IDC_HAND));
+                SetWindowLongPtrA(d, DWLP_MSGRESULT, TRUE);
+                return TRUE;
+            }
+            break;
+        case WM_COMMAND:
+            if (LOWORD(w) >= IDC_LINK && LOWORD(w) <= IDC_LINK + 2) {   // 링크 클릭 -> 기본 브라우저
+                const char* url = URLS[LOWORD(w) - IDC_LINK];
+                char16_t u[300];
+                Utf8::ToUtf16(url, -1, u, 300);
+                HINSTANCE r = ShellExecuteW(NULL, (LPCWSTR)u"open", (LPCWSTR)u, NULL, NULL, SW_SHOWNORMAL);
+                Log::Put("브라우저로 열기: %s (결과코드 %d)", url, (int)(INT_PTR)r);
+                return TRUE;
+            }
+            if (LOWORD(w) == IDOK) {
+                char16_t u[200];
+                GetDlgItemTextW(d, IDC_EDIT, (LPWSTR)u, 200);
+                char k[400];
+                WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)u, -1, k, sizeof(k), NULL, NULL);
+                char* p = k;                                      // 앞뒤 공백 제거
+                while (*p == ' ' || *p == '\t') p++;
+                int n = lstrlenA(p);
+                while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '\t' || p[n - 1] == '\r' || p[n - 1] == '\n')) p[--n] = 0;
+                lstrcpynA(c->s, p, c->cap);
+                EndDialog(d, 1);
+                return TRUE;
+            }
+            if (LOWORD(w) == IDCANCEL) {
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        case WM_DESTROY:
+            if (c && c->font) DeleteObject(c->font);
+            break;
+        }
+        return FALSE;
+    }
+};
+
 // 알람 메모 입력 대화상자 (한 줄, 최대 100자)
 class MemoDialog {
 public:
@@ -1194,6 +1312,12 @@ public:
         notify_ = notify;
         lstrcpynA(url_, url, sizeof(url_));
         lstrcpynA(key_, key, sizeof(key_));
+    }
+
+    // 키가 바뀌면 이전 조회 결과(특히 실패)를 버리고 다시 조회
+    static void Reset() {
+        for (int i = 0; i < CACHE; i++) { cache_[i].ymd = 0; cache_[i].state = 0; }
+        next_ = 0;
     }
 
     // ymd(YYYYMMDD) 의 표시 문자열: 정상이면 "음력 YYYY/MM/DD (평달|윤달)", 조회 중이면 안내, 실패면 서버 오류 문구
@@ -1425,7 +1549,7 @@ private:
         CMD_TOPMOST     = 106,
         CMD_ALLMON      = 107,
         CMD_ALLDESK     = 108,
-        CMD_HELP        = 730,      // 730 About, 731 ReadMe.MD, 732 홈페이지, 733 최신 버전 다운로드
+        CMD_HELP        = 730,      // 730 About, 731 ReadMe.MD, 732 홈페이지, 733 최신 버전 다운로드, 734 음력 API 키값 등록
         CMD_TFMT        = 700,      // 시분초 표시 형식 700~709
         CMD_DFMT        = 720,      // 년월일 표시 형식 720~729
         FMT_COUNT       = 10,
@@ -1809,6 +1933,7 @@ private:
         AddMenu(help, 0, CMD_HELP + 1, "ReadMe.MD(&R)");
         AddMenu(help, 0, CMD_HELP + 2, "홈페이지(&H)");
         AddMenu(help, 0, CMD_HELP + 3, "최신 버전 다운로드(&D)");
+        AddMenu(help, 0, CMD_HELP + 4, "음력 API 키값 등록(&K)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)help, "Help(&H)");
         return bar;
     }
@@ -2329,8 +2454,8 @@ private:
         }
         if (n) Log::Put("메뉴: %s", n);
         else if (id > CMD_OPACITY && id <= CMD_OPACITY + 10) Log::Put("메뉴: 투명도 %d%%", (id - CMD_OPACITY) * 10);
-        else if (id >= CMD_HELP && id <= CMD_HELP + 3) {
-            static const char* const A[] = {"About", "ReadMe.MD", "홈페이지", "최신 버전 다운로드"};
+        else if (id >= CMD_HELP && id <= CMD_HELP + 4) {
+            static const char* const A[] = {"About", "ReadMe.MD", "홈페이지", "최신 버전 다운로드", "음력 API 키값 등록"};
             Log::Put("메뉴: Help > %s", A[id - CMD_HELP]);
         }
         else if (id >= CMD_TFMT && id < CMD_TFMT + FMT_COUNT) Log::Put("메뉴: 시분초 표시 형식 %d", id - CMD_TFMT);
@@ -2353,7 +2478,7 @@ private:
         LogCommand(id);
         if (id == CMD_EXIT)            ConfirmExit();
         else if (id == CMD_SHOWCLOCK)  SetClockVisible(!cfg_.visible);
-        else if (id >= CMD_HELP && id <= CMD_HELP + 3) HelpCommand(id - CMD_HELP);
+        else if (id >= CMD_HELP && id <= CMD_HELP + 4) HelpCommand(id - CMD_HELP);
         else if (id == CMD_SHOWLUNAR) {
             if (!cfg_.LunarReady()) return;
             cfg_.showLunar = !cfg_.showLunar;
@@ -2701,6 +2826,22 @@ private:
         modal_ = false;
     }
 
+    void LunarKeyCommand() {
+        char key[200];
+        lstrcpynA(key, cfg_.lunarKey, sizeof(key));
+        modal_ = true;
+        bool ok = LunarKeyDialog::Show(hi_, hwnd_, key, sizeof(key));
+        modal_ = false;
+        if (!ok) { Log::Put("음력 API 키값 등록 취소"); return; }
+        cfg_.SetLunarKey(key);
+        Lunar::Init(cfg_.lunarUrl, cfg_.lunarKey, hwnd_);
+        Lunar::Reset();
+        Log::Put("음력 API 키값 등록: %s", key[0] ? "저장함" : "비움 (음력 사용 불가)");
+        ResizeAll();                            // 키를 비우면 음력 줄이 사라지므로 높이 조정
+        ForAll(&ClockWindow::ApplyFormat);
+        UpdateOptionChecks();                   // '음력 보이기' 활성/비활성 갱신
+    }
+
     void HelpCommand(int act) {
         if (act == 0) {                         // About
             char m[300];
@@ -2710,6 +2851,8 @@ private:
             OpenUrl(ReadmeUrl());
         } else if (act == 2) {                  // 홈페이지 주소 표시
             ShowInfo("홈페이지", "홈페이지 :", HomeUrl());     // 링크를 누르면 기본 브라우저로 열기
+        } else if (act == 4) {                  // 음력 API 키값 등록
+            LunarKeyCommand();
         } else {                                // 최신 버전 다운로드 (GitHub 폴더를 zip 으로 내려받는 링크)
             OpenUrl(DownloadUrl());
         }
