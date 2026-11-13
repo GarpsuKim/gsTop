@@ -1,0 +1,6 @@
+[HomeBack]
+https://api.telegram.org/bot8652608268:AAEou1fQVdp9o7A8Fh6j2_RdzbB6HJ2eNTQ/sendMessage?chat_id=5943910062&text=/HomeBack
+
+
+[NotHome]
+https://api.telegram.org/bot8652608268:AAEou1fQVdp9o7A8Fh6j2_RdzbB6HJ2eNTQ/sendMessage?chat_id=5943910062&text=/NotHome
