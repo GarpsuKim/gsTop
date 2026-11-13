@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-start "" gsHomeManager.exe
+if exist gsHomeManagerLauncher.exe (start "" gsHomeManagerLauncher.exe) else start "" gsHomeManager.exe

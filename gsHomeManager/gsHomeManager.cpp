@@ -6752,6 +6752,15 @@ private:
         if (on) {
             wchar_t exe[MAX_PATH], val[MAX_PATH + 4];
             GetModuleFileNameW(NULL, exe, MAX_PATH);
+            {   // 같은 폴더에 gsHomeManagerLauncher.exe 가 있으면 그것을 등록 (부팅 때도 서버 버전 확인/갱신)
+                wchar_t* sl = wcsrchr(exe, L'\\');
+                if (sl) {
+                    wchar_t ln[MAX_PATH + 16];
+                    lstrcpynW(ln, exe, (int)(sl - exe) + 2);
+                    lstrcatW(ln, L"gsHomeManagerLauncher.exe");
+                    if (GetFileAttributesW(ln) != INVALID_FILE_ATTRIBUTES) lstrcpyW(exe, ln);
+                }
+            }
             wsprintfW(val, L"\"%s\"", exe);                       // 경로에 공백이 있어도 되도록 따옴표로 감쌈
             r = RegSetValueExW(k, RUN_NAME, 0, REG_SZ, (const BYTE*)val, (lstrlenW(val) + 1) * sizeof(wchar_t));
         } else {
