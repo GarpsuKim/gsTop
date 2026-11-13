@@ -1,0 +1,33 @@
+2026-11-13 14:49:46.235  ==== rdp_client start ====
+2026-11-13 14:49:46.241  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_client.ini (ip=192.168.0.118, port=7071)
+2026-11-13 14:49:46.246  Connecting to 192.168.0.118:7071
+2026-11-13 14:49:46.248  Connected, sending password
+2026-11-13 14:49:46.250  Authenticated
+2026-11-13 14:49:46.277  Server has 2 monitor(s)
+2026-11-13 14:49:46.277    monitor 1: 1920x1080
+2026-11-13 14:49:46.278    monitor 2: 1680x1050
+2026-11-13 14:51:43.180  Window closed, shutting down
+2026-11-13 14:51:43.181  Connection closed by server or network (frames received: 652)
+2026-11-13 14:51:43.184  ==== rdp_client exit (rc=0) ====
+2026-11-13 14:51:46.414  ==== rdp_client start ====
+2026-11-13 14:51:46.415  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_client.ini (ip=192.168.0.118, port=7071)
+2026-11-13 14:51:46.419  Connecting to 192.168.0.118:7071
+2026-11-13 14:51:46.422  Connected, sending password
+2026-11-13 14:51:46.422  Authenticated
+2026-11-13 14:51:46.433  Server has 2 monitor(s)
+2026-11-13 14:51:46.434    monitor 1: 1920x1080
+2026-11-13 14:51:46.434    monitor 2: 1680x1050
+2026-11-13 14:54:05.487  Window closed, shutting down
+2026-11-13 14:54:05.487  Connection closed by server or network (frames received: 858)
+2026-11-13 14:54:05.491  ==== rdp_client exit (rc=0) ====
+2026-11-13 15:01:22.023  ==== rdp_client start ====
+2026-11-13 15:01:22.025  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_client.ini (ip=192.168.0.118, port=7071)
+2026-11-13 15:01:22.031  Connecting to 192.168.0.118:7071
+2026-11-13 15:01:22.041  Connected, sending password
+2026-11-13 15:01:22.046  Authenticated
+2026-11-13 15:01:22.055  Server has 2 monitor(s)
+2026-11-13 15:01:22.055    monitor 1: 1920x1080
+2026-11-13 15:01:22.056    monitor 2: 1680x1050
+2026-11-13 15:03:13.399  Window closed, shutting down
+2026-11-13 15:03:13.399  Connection closed by server or network (frames received: 735)
+2026-11-13 15:03:13.403  ==== rdp_client exit (rc=0) ====

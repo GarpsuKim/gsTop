@@ -1,0 +1,24 @@
+2026-11-13 14:40:02.370  ==== rdp_server start ====
+2026-11-13 14:40:02.377  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_server.ini
+2026-11-13 14:40:02.383  Listening (port 7071, allowed IP: any, accept mode: auto)
+2026-11-13 14:41:53.495  ==== rdp_server start ====
+2026-11-13 14:41:53.496  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_server.ini
+2026-11-13 14:41:53.502  Listening (port 7071, allowed IP: any, accept mode: auto)
+2026-11-13 14:44:34.292  ==== rdp_server start ====
+2026-11-13 14:44:34.293  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_server.ini
+2026-11-13 14:44:34.298  Listening (port 7071, allowed IP: any, accept mode: auto)
+2026-11-13 14:54:21.161  ==== rdp_server start ====
+2026-11-13 14:54:21.162  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_server.ini
+2026-11-13 14:54:21.167  Listening (port 7071, allowed IP: any, accept mode: auto)
+2026-11-13 14:56:26.759  ==== rdp_server start ====
+2026-11-13 14:56:26.760  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_server.ini
+2026-11-13 14:56:26.767  Listening (port 7071, allowed IP: any, accept mode: auto)
+2026-11-13 14:56:40.383  ==== rdp_server start ====
+2026-11-13 14:56:40.384  ERROR: already running, exiting
+2026-11-13 14:57:08.187  ==== rdp_server start ====
+2026-11-13 14:57:08.188  ERROR: already running, exiting
+2026-11-13 14:59:32.550  ==== rdp_server start ====
+2026-11-13 14:59:32.552  Settings loaded: C:\tools\gsHomeManager\rdpMini\rdp_server.ini
+2026-11-13 14:59:32.557  Listening (port 7071, allowed IP: any, accept mode: auto)
+2026-11-13 14:59:49.947  ==== rdp_server start ====
+2026-11-13 14:59:49.948  ERROR: already running, exiting

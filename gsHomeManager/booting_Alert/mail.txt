@@ -1,0 +1,21 @@
+■■ PC Log_On alert 
+---
+PC '로그온' 발생 통보
+---
+
+PC=GSKIM-WIN11
+USERNAME=garpsu
+IP= 192.168.0.36
+DATE=2026-11-13
+TIME=14:10:13.46
+analogclockseoul@gmail.com -> <garpsu@naver.com>, <garpsu@kakao.com>, <garpsu@gmail.com> 전송 중... (메시지 0.0 MB, 수신 3건)
+SMS(LMS) 1명 발송 요청 중... (142바이트)
+텔레그램(나에게) 발송 요청 중...
+카카오톡(나에게) 발송 요청 중...
+카카오톡 발송 성공
+텔레그램 발송 실패 (HTTP 401): {"ok":false,"error_code":401,"description":"Unauthorized"}
+SMS 실패 (HTTP 402): {"errors":[{"type":"group","value":"G4V202611131410136QHWSIEUO94LNBZ","detail":"보유 잔액이 부족하여 발송에 실패하였습니다.\n[차감금액: 45, 보유잔액: 0, 보유포인트: 0, 보유예치금: 43.900001525878906]"}],"errorCode":"NotEnoughBalance","errorMessage":"보유 잔액이 부족하여 발송에 실패하였습니다.\n[차감금액: 45, 보유잔액: 0, 보유포인트: 0, 보유예치금: 43.900001525878906]"}
+  업로드 100%
+전송 성공
+시간: 읽기 0.01초 / 인코딩 0.00초 / 전송 2.92초 (업로드 평균 0.00 MB/s)
+전송 세부: 연결·로그인 2.23초 / 데이터 업로드 0.00초 / 서버 응답 대기 0.70초
