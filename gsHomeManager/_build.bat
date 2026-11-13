@@ -24,6 +24,8 @@ if errorlevel 1 goto :fail
 rem --- 성공: 경고가 있으면 보여 주고, 중간 파일/로그 정리
 set VER=?
 for /f "tokens=3" %%v in ('findstr /b /c:"#define APP_VERSION_STR" version.h') do set VER=%%~v
+rem --- 새 version.txt 생성 (내용: version.h 의 APP_VERSION_STR). exe 와 함께 GitHub 에 올려야 launcher 가 갱신을 인식함
+if not "%VER%"=="?" (>version.txt echo %VER%)
 for %%f in (%ERR%) do if %%~zf gtr 0 (echo [%APP%] warnings: & type %ERR%)
 del %APP%_res.o >nul 2>&1
 del %ERR% >nul 2>&1
