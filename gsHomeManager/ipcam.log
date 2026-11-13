@@ -1,0 +1,22 @@
+2026-11-13 11:36:21.335 [T10776] exe=C:\tools\gsHomeManager\gsHomeManager.exe
+2026-11-13 11:36:21.335 [T10776] ==== ipcam start ====
+2026-11-13 11:36:21.335 [T10776] cmdline=gsHomeManager.exe 
+2026-11-13 11:36:21.335 [T10776] pid=17044
+2026-11-13 11:36:21.335 [T10776] WSAStartup -> 0 (version 2.2)
+2026-11-13 11:36:21.335 [T10776] GdiplusStartup -> status 0
+2026-11-13 11:36:21.335 [T10776] target=192.168.0.5:4747/video
+2026-11-13 11:36:21.345 [T10776] window created hwnd=000000000007192e
+2026-11-13 11:36:21.345 [T11456] NetThread started
+2026-11-13 11:36:21.345 [T11456] connecting to 192.168.0.5:4747 ...
+2026-11-13 11:36:21.419 [T11456] connected
+2026-11-13 11:36:21.419 [T11456] send request (61 bytes) -> 61
+2026-11-13 11:36:21.632 [T11456] response head: HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET\r\nContent-Type: multipart/x-mixed-replace;boundary=--dcmjpeg\r\nConnection: Keep-Alive\r\nExpires: 0\r\nCache-Control: no-store, must-revalidate\r\n\r\n
+2026-11-13 11:36:22.125 [T11456] first frame decoded: 1280x720
+2026-11-13 11:36:32.145 [T11456] frames so far: 300
+2026-11-13 11:36:42.164 [T11456] frames so far: 600
+2026-11-13 11:36:52.157 [T11456] frames so far: 900
+2026-11-13 11:37:02.154 [T11456] frames so far: 1200
+2026-11-13 11:37:02.521 [T10776] WM_CLOSE
+2026-11-13 11:37:02.525 [T10776] WM_DESTROY
+2026-11-13 11:37:02.530 [T11456] NetThread exit
+2026-11-13 11:37:02.532 [T10776] ==== ipcam exit ====

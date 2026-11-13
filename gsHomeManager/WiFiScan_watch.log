@@ -1,0 +1,1076 @@
+2026-11-12 17:26:31 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 17:26:31 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 17:26:31 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 17:26:45 블루투스 스캔 완료: 9개 장치 (ON 5 / OFF 4) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 17:26:45 Wi-Fi 스캔 중
+2026-11-12 17:26:45 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 17:27:07 Wi-Fi 스캔 완료: 28개 장치 (ON 28 / OFF 0) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 17:27:07 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 17:27:07 감시 시작: 블루투스 (없음) -> Wi-Fi (없음) (간격 15초, 외출 판정 60초)
+2026-11-12 17:27:07 HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중
+2026-11-12 17:36:11 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 17:36:11 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 17:36:11 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 17:36:16 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 17:36:16 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 17:36:16 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 17:36:19 scan Off (정지 요청)
+2026-11-12 17:36:22 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 17:36:22 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 17:36:22 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 17:36:24 scan Off (정지 요청)
+2026-11-12 17:44:17 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 17:44:17 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 17:44:17 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 17:44:30 블루투스 스캔 완료: 9개 장치 (ON 4 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 17:44:30 Wi-Fi 스캔 중
+2026-11-12 17:44:30 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 17:44:52 Wi-Fi 스캔 완료: 29개 장치 (ON 29 / OFF 0) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 17:44:52 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 17:44:52 감시 시작: 블루투스 (없음) -> Wi-Fi (없음) (간격 15초, 외출 판정 60초)
+2026-11-12 17:44:52 HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중
+2026-11-12 17:46:29 설정 변경: 블루투스 F0-F5-64-13-CF-31 / Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 17:46:32 Bluetooth: 응답 없음 (오류 10064)
+2026-11-12 17:46:36 Wi-Fi: 확인됨 (192.168.0.5)
+2026-11-12 17:46:36 초기 상태: HOME (Wi-Fi 192.168.0.5)
+2026-11-12 17:46:36 트리거 파일 기록 성공: /HomeBack
+2026-11-12 17:46:52 Bluetooth: 연결 상태
+2026-11-12 18:02:50 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:02:50 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:02:50 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:03:04 블루투스 스캔 완료: 9개 장치 (ON 5 / OFF 4) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:03:04 Wi-Fi 스캔 중
+2026-11-12 18:03:04 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 18:03:27 Wi-Fi 스캔 완료: 34개 장치 (ON 33 / OFF 1) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:03:27 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 18:03:27 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 18:03:27 Bluetooth: 연결 상태
+2026-11-12 18:03:27 초기 상태: HOME (Bluetooth)
+2026-11-12 18:03:27 트리거 파일 기록 성공: /HomeBack
+2026-11-12 18:06:45 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:06:45 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:06:45 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:06:59 블루투스 스캔 완료: 10개 장치 (ON 5 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:06:59 Wi-Fi 스캔 중
+2026-11-12 18:06:59 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 18:07:21 Wi-Fi 스캔 완료: 35개 장치 (ON 33 / OFF 2) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:07:21 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 18:07:21 감시 시작: 블루투스 (없음) -> Wi-Fi (없음) (간격 15초, 외출 판정 60초)
+2026-11-12 18:07:21 HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중
+2026-11-12 18:07:23 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:07:23 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:07:23 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:07:29 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:07:29 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:07:29 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:07:33 scan Off (정지 요청)
+2026-11-12 18:08:09 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:08:09 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:08:09 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:08:22 블루투스 스캔 완료: 10개 장치 (ON 5 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:08:22 Wi-Fi 스캔 중
+2026-11-12 18:08:22 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 18:08:46 Wi-Fi 스캔 완료: 35개 장치 (ON 34 / OFF 1) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:08:46 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 18:08:46 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 18:08:46 Bluetooth: 연결 상태
+2026-11-12 18:08:46 초기 상태: HOME (Bluetooth)
+2026-11-12 18:08:46 트리거 파일 기록 성공: /HomeBack
+2026-11-12 18:09:23 Bluetooth: 응답 없음 (오류 10060)
+2026-11-12 18:10:21 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-12 18:10:21 AWAY (60초 연속 미확인: 블루투스, Wi-Fi)
+2026-11-12 18:10:21 트리거 파일 기록 성공: /NotHome
+2026-11-12 18:23:06 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:23:06 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:23:06 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:23:19 블루투스 스캔 완료: 10개 장치 (ON 4 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:23:19 Wi-Fi 스캔 중
+2026-11-12 18:23:19 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 18:23:44 Wi-Fi 스캔 완료: 35개 장치 (ON 29 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:23:44 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 18:23:44 감시 시작: 블루투스 (없음) -> Wi-Fi (없음) (간격 15초, 외출 판정 60초)
+2026-11-12 18:23:44 HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중
+2026-11-12 18:24:00 설정 변경: 블루투스 F0-F5-64-13-CF-31 / Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 18:24:06 Bluetooth: 응답 없음 (오류 10060)
+2026-11-12 18:25:05 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-12 18:25:05 초기 상태: AWAY
+2026-11-12 18:25:05 트리거 파일 기록 성공: /NotHome
+2026-11-12 18:33:10 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:33:10 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:33:10 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:33:24 블루투스 스캔 완료: 10개 장치 (ON 5 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:33:24 Wi-Fi 스캔 중
+2026-11-12 18:33:24 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 18:33:49 Wi-Fi 스캔 완료: 35개 장치 (ON 29 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:33:49 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 18:33:49 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 18:33:54 Bluetooth: 응답 없음 (오류 10060)
+2026-11-12 18:34:56 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-12 18:34:56 초기 상태: AWAY
+2026-11-12 18:34:56 트리거 파일 기록 성공: /NotHome
+2026-11-12 18:35:31 scan Off (정지 요청)
+2026-11-12 18:39:25 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:39:25 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:39:25 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:39:40 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:39:40 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:39:40 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:39:52 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 18:39:52 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 18:39:52 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 18:40:05 블루투스 스캔 완료: 10개 장치 (ON 3 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:40:05 Wi-Fi 스캔 중
+2026-11-12 18:40:05 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 18:40:30 Wi-Fi 스캔 완료: 35개 장치 (ON 29 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 18:40:30 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 18:40:30 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 18:40:35 Bluetooth: 응답 없음 (오류 10060)
+2026-11-12 18:41:37 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-12 18:41:37 초기 상태: AWAY
+2026-11-12 18:41:37 트리거 파일 기록 성공: /NotHome
+2026-11-12 19:37:06 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 19:37:06 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 19:37:06 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 19:37:20 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:37:20 Wi-Fi 스캔 중
+2026-11-12 19:37:20 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 19:37:45 Wi-Fi 스캔 완료: 35개 장치 (ON 25 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:37:45 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 19:37:45 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 19:37:50 Bluetooth: 응답 없음 (오류 10060)
+2026-11-12 19:38:52 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-12 19:38:52 초기 상태: AWAY
+2026-11-12 19:38:52 트리거 파일 기록 성공: /NotHome
+2026-11-12 19:40:27 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 19:40:27 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 19:40:27 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 19:40:41 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:40:41 Wi-Fi 스캔 중
+2026-11-12 19:40:41 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 19:41:02 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 19:41:02 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 19:41:02 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 19:41:16 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:41:16 Wi-Fi 스캔 중
+2026-11-12 19:41:16 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 19:41:40 Wi-Fi 스캔 완료: 35개 장치 (ON 25 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:41:40 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 19:41:40 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 19:41:46 Bluetooth: 응답 없음 (오류 10060)
+2026-11-12 19:42:47 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-12 19:42:47 초기 상태: AWAY
+2026-11-12 19:42:47 트리거 파일 기록 성공: /NotHome
+2026-11-12 19:50:15 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 19:50:15 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 19:50:15 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 19:50:29 블루투스 스캔 완료: 11개 장치 (ON 2 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:50:29 Wi-Fi 스캔 중
+2026-11-12 19:50:29 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 19:50:54 Wi-Fi 스캔 완료: 35개 장치 (ON 26 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 19:50:54 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 19:50:54 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 19:50:54 Bluetooth: 연결 상태
+2026-11-12 19:50:54 초기 상태: HOME (Bluetooth)
+2026-11-12 19:50:54 트리거 파일 기록 성공: /HomeBack
+2026-11-12 20:04:37 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 20:04:37 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 20:04:37 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 20:04:47 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 20:04:47 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 20:04:47 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 20:05:12 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:05:12 Wi-Fi 스캔 중
+2026-11-12 20:05:12 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 20:05:40 Wi-Fi 스캔 완료: 35개 장치 (ON 26 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:05:40 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 20:05:40 감시 시작: 블루투스 (없음) -> Wi-Fi (없음) (간격 15초, 외출 판정 60초)
+2026-11-12 20:05:40 HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중
+2026-11-12 20:09:57 설정 변경: 블루투스 F0-F5-64-13-CF-31 / Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 20:09:57 Bluetooth: 연결 상태
+2026-11-12 20:09:57 초기 상태: HOME (Bluetooth)
+2026-11-12 20:09:57 트리거 파일 기록 성공: /HomeBack
+2026-11-12 20:25:07 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 20:25:07 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 20:25:07 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 20:25:21 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:25:21 Wi-Fi 스캔 중
+2026-11-12 20:25:21 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 20:25:45 Wi-Fi 스캔 완료: 35개 장치 (ON 26 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:25:45 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 20:25:45 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 20:25:45 Bluetooth: 연결 상태
+2026-11-12 20:25:45 초기 상태: HOME (Bluetooth)
+2026-11-12 20:25:45 트리거 파일 기록 성공: /HomeBack
+2026-11-12 20:30:57 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 20:30:57 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 20:30:57 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 20:31:11 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:31:11 Wi-Fi 스캔 중
+2026-11-12 20:31:11 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 20:31:35 Wi-Fi 스캔 완료: 35개 장치 (ON 26 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:31:36 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 20:31:36 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 20:31:36 Bluetooth: 연결 상태
+2026-11-12 20:31:36 초기 상태: HOME (Bluetooth)
+2026-11-12 20:31:36 트리거 파일 기록 성공: /HomeBack
+2026-11-12 20:35:12 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 20:35:12 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 20:35:12 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 20:35:26 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:35:26 Wi-Fi 스캔 중
+2026-11-12 20:35:26 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 20:35:50 Wi-Fi 스캔 완료: 35개 장치 (ON 25 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:35:51 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 20:35:51 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 20:35:51 Bluetooth: 연결 상태
+2026-11-12 20:35:51 초기 상태: HOME (Bluetooth)
+2026-11-12 20:35:51 트리거 파일 기록 성공: /HomeBack
+2026-11-12 20:45:10 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 20:45:10 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 20:45:10 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 20:45:24 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:45:24 Wi-Fi 스캔 중
+2026-11-12 20:45:24 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 20:45:48 Wi-Fi 스캔 완료: 35개 장치 (ON 25 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 20:45:49 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 20:45:49 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 20:45:49 Bluetooth: 연결 상태
+2026-11-12 20:45:49 초기 상태: HOME (Bluetooth)
+2026-11-12 20:45:49 트리거 파일 기록 성공: /HomeBack
+2026-11-12 21:29:20 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 21:29:20 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:29:20 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:29:20 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 21:29:28 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 21:29:28 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:29:28 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:29:28 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 21:29:46 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 21:29:46 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:29:46 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:29:46 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 21:29:59 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 21:29:59 Wi-Fi 스캔 중
+2026-11-12 21:29:59 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 21:30:21 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-12 21:30:21 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:30:21 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-12 21:30:21 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-12 21:30:35 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 21:30:35 Wi-Fi 스캔 중
+2026-11-12 21:30:35 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-12 21:31:00 Wi-Fi 스캔 완료: 35개 장치 (ON 28 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-12 21:31:00 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-12 21:31:00 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-12 21:31:00 Bluetooth: 연결 상태
+2026-11-12 21:31:00 초기 상태: HOME (Bluetooth)
+2026-11-12 21:31:00 트리거 파일 기록 성공: /HomeBack
+2026-11-13 07:35:38 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 07:35:38 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 07:35:38 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 07:35:38 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 07:35:52 블루투스 스캔 완료: 11개 장치 (ON 0 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 07:35:52 Wi-Fi 스캔 중
+2026-11-13 07:35:52 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 07:36:17 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 07:36:17 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 07:36:17 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 07:36:17 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 07:36:30 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 07:36:30 Wi-Fi 스캔 중
+2026-11-13 07:36:30 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 07:36:55 Wi-Fi 스캔 완료: 35개 장치 (ON 23 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 07:36:55 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 07:36:55 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 07:36:55 Bluetooth: 연결 상태
+2026-11-13 07:36:55 초기 상태: HOME (Bluetooth)
+2026-11-13 07:36:55 트리거 파일 기록 성공: /HomeBack
+2026-11-13 07:42:16 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 07:42:16 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 07:42:16 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 07:42:16 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 07:42:30 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 07:42:30 Wi-Fi 스캔 중
+2026-11-13 07:42:30 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 07:42:55 Wi-Fi 스캔 완료: 35개 장치 (ON 24 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 07:42:55 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 07:42:55 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 07:42:55 Bluetooth: 연결 상태
+2026-11-13 07:42:55 초기 상태: HOME (Bluetooth)
+2026-11-13 07:42:55 트리거 파일 기록 성공: /HomeBack
+2026-11-13 09:14:57 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 09:14:57 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:14:57 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:14:57 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 09:15:10 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:15:10 Wi-Fi 스캔 중
+2026-11-13 09:15:10 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 09:15:35 Wi-Fi 스캔 완료: 36개 장치 (ON 26 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:15:35 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 09:15:35 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 09:15:35 Bluetooth: 연결 상태
+2026-11-13 09:15:35 초기 상태: HOME (Bluetooth)
+2026-11-13 09:15:35 트리거 파일 기록 성공: /HomeBack
+2026-11-13 09:26:06 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 09:26:06 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:26:06 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:26:06 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 09:26:17 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:26:17 Wi-Fi 스캔 중
+2026-11-13 09:26:17 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 09:26:42 Wi-Fi 스캔 완료: 36개 장치 (ON 27 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:26:42 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 09:26:42 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 09:26:42 Bluetooth: 연결 상태
+2026-11-13 09:26:42 초기 상태: HOME (Bluetooth)
+2026-11-13 09:26:42 트리거 파일 기록 성공: /HomeBack
+2026-11-13 09:31:31 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 09:31:31 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:31:31 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:31:31 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 09:31:45 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:31:45 Wi-Fi 스캔 중
+2026-11-13 09:31:45 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 09:32:10 Wi-Fi 스캔 완료: 38개 장치 (ON 29 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:32:10 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 09:32:10 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 09:32:10 Bluetooth: 연결 상태
+2026-11-13 09:32:10 초기 상태: HOME (Bluetooth)
+2026-11-13 09:32:10 트리거 파일 기록 성공: /HomeBack
+2026-11-13 09:35:43 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 09:35:43 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:35:43 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 09:35:43 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 09:35:53 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:35:53 Wi-Fi 스캔 중
+2026-11-13 09:35:53 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 09:36:18 Wi-Fi 스캔 완료: 38개 장치 (ON 29 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 09:36:18 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 09:36:18 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 09:36:18 Bluetooth: 연결 상태
+2026-11-13 09:36:18 초기 상태: HOME (Bluetooth)
+2026-11-13 09:36:18 트리거 파일 기록 성공: /HomeBack
+2026-11-13 09:36:32 scan Off (정지 요청)
+2026-11-13 11:13:36 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 11:13:36 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:13:36 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:13:36 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 11:13:46 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:13:46 Wi-Fi 스캔 중
+2026-11-13 11:13:46 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 11:14:11 Wi-Fi 스캔 완료: 38개 장치 (ON 27 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:14:12 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 11:14:12 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 11:14:12 Bluetooth: 연결 상태
+2026-11-13 11:14:12 초기 상태: HOME (Bluetooth)
+2026-11-13 11:14:12 트리거 파일 기록 성공: /HomeBack
+2026-11-13 11:16:59 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 11:16:59 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:16:59 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:16:59 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 11:17:09 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:17:09 Wi-Fi 스캔 중
+2026-11-13 11:17:09 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 11:17:35 Wi-Fi 스캔 완료: 38개 장치 (ON 26 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:17:35 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 11:17:35 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 11:17:35 Bluetooth: 연결 상태
+2026-11-13 11:17:35 초기 상태: HOME (Bluetooth)
+2026-11-13 11:17:35 트리거 파일 기록 성공: /HomeBack
+2026-11-13 11:24:22 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 11:24:22 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:24:22 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:24:22 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 11:24:33 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:24:33 Wi-Fi 스캔 중
+2026-11-13 11:24:33 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 11:24:59 Wi-Fi 스캔 완료: 38개 장치 (ON 27 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:24:59 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 11:24:59 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 11:24:59 Bluetooth: 연결 상태
+2026-11-13 11:24:59 초기 상태: HOME (Bluetooth)
+2026-11-13 11:24:59 트리거 파일 기록 성공: /HomeBack
+2026-11-13 11:32:25 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 11:32:25 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:32:25 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 11:32:25 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 11:32:35 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:32:35 Wi-Fi 스캔 중
+2026-11-13 11:32:35 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 11:33:00 Wi-Fi 스캔 완료: 38개 장치 (ON 26 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 11:33:00 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 11:33:00 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 11:33:00 Bluetooth: 연결 상태
+2026-11-13 11:33:00 초기 상태: HOME (Bluetooth)
+2026-11-13 11:33:00 트리거 파일 기록 성공: /HomeBack
+2026-11-13 11:52:41 Bluetooth: 응답 없음 (오류 10060)
+2026-11-13 11:53:38 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-13 11:53:38 AWAY (60초 연속 미확인: 블루투스, Wi-Fi)
+2026-11-13 11:53:38 트리거 파일 기록 성공: /NotHome
+2026-11-13 12:20:12 Bluetooth: 응답 없음 (오류 10064)
+2026-11-13 12:20:17 Wi-Fi: 확인됨 (192.168.0.5)
+2026-11-13 12:20:17 HOME (Wi-Fi 192.168.0.5)
+2026-11-13 12:20:17 트리거 파일 기록 성공: /HomeBack
+2026-11-13 12:20:33 Bluetooth: 연결 상태
+2026-11-13 12:21:23 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 12:21:23 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 12:21:23 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 12:21:23 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 12:21:33 블루투스 스캔 완료: 11개 장치 (ON 2 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 12:21:33 Wi-Fi 스캔 중
+2026-11-13 12:21:33 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 12:21:58 Wi-Fi 스캔 완료: 38개 장치 (ON 31 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 12:21:58 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 12:21:58 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 12:21:58 Bluetooth: 연결 상태
+2026-11-13 12:21:58 초기 상태: HOME (Bluetooth)
+2026-11-13 12:21:58 트리거 파일 기록 성공: /HomeBack
+2026-11-13 12:25:59 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 12:25:59 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 12:25:59 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 12:25:59 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 12:26:10 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 12:26:10 Wi-Fi 스캔 중
+2026-11-13 12:26:10 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 12:26:35 Wi-Fi 스캔 완료: 38개 장치 (ON 32 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 12:26:35 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 12:26:35 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 12:26:35 Bluetooth: 연결 상태
+2026-11-13 12:26:35 초기 상태: HOME (Bluetooth)
+2026-11-13 12:26:35 트리거 파일 기록 성공: /HomeBack
+2026-11-13 13:48:07 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 13:48:07 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 13:48:07 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 13:48:07 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 13:48:18 블루투스 스캔 완료: 11개 장치 (ON 2 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 13:48:18 Wi-Fi 스캔 중
+2026-11-13 13:48:18 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 13:48:42 Wi-Fi 스캔 완료: 38개 장치 (ON 27 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 13:48:42 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 13:48:42 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 13:48:42 Bluetooth: 연결 상태
+2026-11-13 13:48:42 초기 상태: HOME (Bluetooth)
+2026-11-13 13:48:42 트리거 파일 기록 성공: /HomeBack
+2026-11-13 14:04:47 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 14:04:47 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:04:47 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:04:47 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 14:05:24 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 14:05:24 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:05:24 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:05:24 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 14:05:35 블루투스 스캔 완료: 11개 장치 (ON 2 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:05:35 Wi-Fi 스캔 중
+2026-11-13 14:05:35 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 14:06:00 Wi-Fi 스캔 완료: 38개 장치 (ON 29 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:06:00 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 14:06:00 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 14:06:00 Bluetooth: 연결 상태
+2026-11-13 14:06:00 초기 상태: HOME (Bluetooth)
+2026-11-13 14:06:00 트리거 파일 기록 성공: /HomeBack
+2026-11-13 14:07:49 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 14:07:49 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:07:49 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:07:49 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 14:08:00 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:08:00 Wi-Fi 스캔 중
+2026-11-13 14:08:00 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 14:08:17 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 14:08:17 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:08:17 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:08:17 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 14:08:31 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:08:31 Wi-Fi 스캔 중
+2026-11-13 14:08:31 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 14:08:56 Wi-Fi 스캔 완료: 39개 장치 (ON 28 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:08:56 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 14:08:56 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 14:08:56 Bluetooth: 연결 상태
+2026-11-13 14:08:56 초기 상태: HOME (Bluetooth)
+2026-11-13 14:08:56 트리거 파일 기록 성공: /HomeBack
+2026-11-13 14:10:13 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 14:10:13 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:10:13 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 14:10:13 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 14:10:24 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:10:24 Wi-Fi 스캔 중
+2026-11-13 14:10:24 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 14:10:49 Wi-Fi 스캔 완료: 39개 장치 (ON 27 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 14:10:49 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 14:10:49 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 14:10:49 Bluetooth: 연결 상태
+2026-11-13 14:10:49 초기 상태: HOME (Bluetooth)
+2026-11-13 14:10:49 트리거 파일 기록 성공: /HomeBack
+2026-11-13 15:33:06 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 15:33:06 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:33:06 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:33:06 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 15:33:19 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:33:19 Wi-Fi 스캔 중
+2026-11-13 15:33:19 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 15:33:45 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:33:45 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 15:33:45 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 15:33:45 Bluetooth: 연결 상태
+2026-11-13 15:33:45 초기 상태: HOME (Bluetooth)
+2026-11-13 15:33:45 트리거 파일 기록 성공: /HomeBack
+2026-11-13 15:43:40 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 15:43:40 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:43:40 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:43:40 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 15:43:52 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:43:52 Wi-Fi 스캔 중
+2026-11-13 15:43:52 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 15:44:17 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:44:17 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 15:44:17 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 15:44:17 Bluetooth: 연결 상태
+2026-11-13 15:44:17 초기 상태: HOME (Bluetooth)
+2026-11-13 15:44:17 트리거 파일 기록 성공: /HomeBack
+2026-11-13 15:49:59 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 15:49:59 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:49:59 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:49:59 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 15:50:10 블루투스 스캔 완료: 11개 장치 (ON 6 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:50:10 Wi-Fi 스캔 중
+2026-11-13 15:50:10 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 15:50:35 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:50:35 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 15:50:35 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 15:50:35 Bluetooth: 연결 상태
+2026-11-13 15:50:35 초기 상태: HOME (Bluetooth)
+2026-11-13 15:50:35 트리거 파일 기록 성공: /HomeBack
+2026-11-13 15:54:14 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 15:54:14 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:54:14 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:54:14 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 15:54:25 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:54:25 Wi-Fi 스캔 중
+2026-11-13 15:54:25 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 15:55:45 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 15:55:45 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:55:45 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 15:55:45 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 15:55:59 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:55:59 Wi-Fi 스캔 중
+2026-11-13 15:55:59 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 15:56:24 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 15:56:24 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 15:56:24 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 15:56:24 Bluetooth: 연결 상태
+2026-11-13 15:56:24 초기 상태: HOME (Bluetooth)
+2026-11-13 15:56:24 트리거 파일 기록 성공: /HomeBack
+2026-11-13 16:10:03 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:10:03 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:10:03 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:10:03 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:10:16 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:10:16 Wi-Fi 스캔 중
+2026-11-13 16:10:16 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:10:41 Wi-Fi 스캔 완료: 39개 장치 (ON 28 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:10:41 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:10:41 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:10:41 Bluetooth: 연결 상태
+2026-11-13 16:10:41 초기 상태: HOME (Bluetooth)
+2026-11-13 16:10:41 트리거 파일 기록 성공: /HomeBack
+2026-11-13 16:11:47 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:11:47 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:11:47 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:11:47 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:11:53 블루투스 스캔 완료: 11개 장치 (ON 1 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:11:53 Wi-Fi 스캔 중
+2026-11-13 16:11:53 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:12:18 Wi-Fi 스캔 완료: 39개 장치 (ON 28 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:12:18 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:12:18 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:12:26 Bluetooth: 응답 없음 (8초 시간 초과)
+2026-11-13 16:12:31 Wi-Fi: 확인됨 (192.168.0.5)
+2026-11-13 16:12:31 초기 상태: HOME (Wi-Fi 192.168.0.5)
+2026-11-13 16:12:31 트리거 파일 기록 성공: /HomeBack
+2026-11-13 16:12:47 Bluetooth: 연결 상태
+2026-11-13 16:19:58 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:19:58 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:19:58 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:19:58 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:20:12 블루투스 스캔 완료: 12개 장치 (ON 5 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:20:12 Wi-Fi 스캔 중
+2026-11-13 16:20:12 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:20:33 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:20:33 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:20:33 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:20:33 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:20:45 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:20:45 Wi-Fi 스캔 중
+2026-11-13 16:20:45 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:20:51 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:20:51 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:20:51 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:20:51 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:21:56 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:21:56 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:21:56 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:21:56 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:22:09 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:22:09 Wi-Fi 스캔 중
+2026-11-13 16:22:09 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:22:34 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:22:34 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:22:34 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:22:34 Bluetooth: 연결 상태
+2026-11-13 16:22:34 초기 상태: HOME (Bluetooth)
+2026-11-13 16:22:34 트리거 파일 기록 성공: /HomeBack
+2026-11-13 16:24:23 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:24:23 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:24:23 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:24:23 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:24:35 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:24:35 Wi-Fi 스캔 중
+2026-11-13 16:24:35 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:24:42 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:24:42 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:24:42 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:24:42 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:24:53 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:24:53 Wi-Fi 스캔 중
+2026-11-13 16:24:53 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:25:17 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:25:17 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:25:17 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:25:17 Bluetooth: 연결 상태
+2026-11-13 16:25:17 초기 상태: HOME (Bluetooth)
+2026-11-13 16:25:17 트리거 파일 기록 성공: /HomeBack
+2026-11-13 16:26:01 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:26:01 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:26:01 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:26:01 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:26:11 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:26:11 Wi-Fi 스캔 중
+2026-11-13 16:26:11 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:27:22 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:27:22 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:27:22 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:27:22 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:27:27 블루투스 스캔 완료: 11개 장치 (ON 1 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:27:27 Wi-Fi 스캔 중
+2026-11-13 16:27:27 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:27:52 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:27:52 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:27:52 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:27:56 Bluetooth: 응답 없음 (오류 10064)
+2026-11-13 16:35:51 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:35:51 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:35:51 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:35:51 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:36:04 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:36:04 Wi-Fi 스캔 중
+2026-11-13 16:36:04 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:37:14 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:37:14 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:37:14 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:37:14 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:37:29 블루투스 스캔 완료: 11개 장치 (ON 1 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:37:29 Wi-Fi 스캔 중
+2026-11-13 16:37:29 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:38:36 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:38:36 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:38:36 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:38:36 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:38:48 블루투스 스캔 완료: 11개 장치 (ON 1 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:38:48 Wi-Fi 스캔 중
+2026-11-13 16:38:48 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:40:05 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:40:05 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:40:05 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:40:05 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:40:17 블루투스 스캔 완료: 11개 장치 (ON 0 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:40:17 Wi-Fi 스캔 중
+2026-11-13 16:40:17 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:40:42 Wi-Fi 스캔 완료: 39개 장치 (ON 28 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:40:42 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:40:42 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:40:42 Bluetooth: 연결 상태
+2026-11-13 16:40:42 초기 상태: HOME (Bluetooth)
+2026-11-13 16:40:42 트리거 파일 기록 성공: /HomeBack
+2026-11-13 16:54:55 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 16:54:55 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:54:55 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 16:54:55 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 16:55:06 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:55:06 Wi-Fi 스캔 중
+2026-11-13 16:55:06 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 16:55:31 Wi-Fi 스캔 완료: 39개 장치 (ON 28 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 16:55:31 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 16:55:31 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 16:55:31 Bluetooth: 연결 상태
+2026-11-13 16:55:31 초기 상태: HOME (Bluetooth)
+2026-11-13 16:55:31 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:00:59 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:00:59 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:00:59 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:00:59 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:01:13 블루투스 스캔 완료: 11개 장치 (ON 6 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:01:13 Wi-Fi 스캔 중
+2026-11-13 17:01:13 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:01:38 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:01:38 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:01:38 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:01:38 Bluetooth: 연결 상태
+2026-11-13 17:01:38 초기 상태: HOME (Bluetooth)
+2026-11-13 17:01:38 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:02:18 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:02:18 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:02:18 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:02:18 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:02:29 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:02:29 Wi-Fi 스캔 중
+2026-11-13 17:02:29 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:02:53 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:02:53 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:02:53 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:02:53 Bluetooth: 연결 상태
+2026-11-13 17:02:53 초기 상태: HOME (Bluetooth)
+2026-11-13 17:02:53 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:08:28 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:08:28 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:08:28 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:08:28 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:08:38 블루투스 스캔 완료: 11개 장치 (ON 5 / OFF 6) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:08:38 Wi-Fi 스캔 중
+2026-11-13 17:08:38 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:09:03 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:09:03 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:09:03 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:09:03 Bluetooth: 연결 상태
+2026-11-13 17:09:03 초기 상태: HOME (Bluetooth)
+2026-11-13 17:09:03 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:09:37 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:09:37 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:09:37 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:09:37 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:09:47 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:09:47 Wi-Fi 스캔 중
+2026-11-13 17:09:47 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:10:12 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:10:12 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:10:12 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:10:12 Bluetooth: 연결 상태
+2026-11-13 17:10:12 초기 상태: HOME (Bluetooth)
+2026-11-13 17:10:12 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:10:29 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:10:29 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:10:29 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:10:29 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:10:39 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:10:39 Wi-Fi 스캔 중
+2026-11-13 17:10:39 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:11:04 Wi-Fi 스캔 완료: 39개 장치 (ON 27 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:11:04 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:11:04 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:11:04 Bluetooth: 연결 상태
+2026-11-13 17:11:04 초기 상태: HOME (Bluetooth)
+2026-11-13 17:11:04 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:11:50 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:11:50 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:11:50 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:11:50 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:12:02 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:12:02 Wi-Fi 스캔 중
+2026-11-13 17:12:02 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:12:27 Wi-Fi 스캔 완료: 39개 장치 (ON 27 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:12:27 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:12:27 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:12:27 Bluetooth: 연결 상태
+2026-11-13 17:12:27 초기 상태: HOME (Bluetooth)
+2026-11-13 17:12:27 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:14:48 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:14:48 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:14:48 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:14:48 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:15:01 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:15:01 Wi-Fi 스캔 중
+2026-11-13 17:15:01 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:20:31 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:20:31 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:20:31 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:20:31 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:20:42 블루투스 스캔 완료: 11개 장치 (ON 3 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:20:42 Wi-Fi 스캔 중
+2026-11-13 17:20:42 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:21:07 Wi-Fi 스캔 완료: 39개 장치 (ON 27 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:21:07 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:21:07 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:21:07 Bluetooth: 연결 상태
+2026-11-13 17:21:07 초기 상태: HOME (Bluetooth)
+2026-11-13 17:21:07 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:32:10 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:32:10 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:32:10 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:32:10 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:32:21 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:32:21 Wi-Fi 스캔 중
+2026-11-13 17:32:21 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:32:50 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:32:50 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:32:50 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:32:50 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:33:00 블루투스 스캔 완료: 11개 장치 (ON 4 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:33:00 Wi-Fi 스캔 중
+2026-11-13 17:33:00 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:33:25 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:33:25 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:33:25 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:33:25 Bluetooth: 연결 상태
+2026-11-13 17:33:25 초기 상태: HOME (Bluetooth)
+2026-11-13 17:33:25 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:40:33 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:40:33 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:40:33 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:40:33 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:40:44 블루투스 스캔 완료: 12개 장치 (ON 7 / OFF 5) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:40:44 Wi-Fi 스캔 중
+2026-11-13 17:40:44 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:41:09 Wi-Fi 스캔 완료: 39개 장치 (ON 27 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:41:09 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:41:09 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:41:09 Bluetooth: 연결 상태
+2026-11-13 17:41:09 초기 상태: HOME (Bluetooth)
+2026-11-13 17:41:09 트리거 파일 기록 성공: /HomeBack
+2026-11-13 17:49:37 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 17:49:37 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:49:37 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 17:49:37 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 17:49:48 블루투스 스캔 완료: 12개 장치 (ON 4 / OFF 8) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:49:48 Wi-Fi 스캔 중
+2026-11-13 17:49:48 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 17:50:13 Wi-Fi 스캔 완료: 39개 장치 (ON 25 / OFF 14) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 17:50:13 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 17:50:13 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 17:50:13 Bluetooth: 연결 상태
+2026-11-13 17:50:13 초기 상태: HOME (Bluetooth)
+2026-11-13 17:50:13 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:03:38 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:03:38 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:03:38 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:03:38 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:03:49 블루투스 스캔 완료: 13개 장치 (ON 6 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:03:49 Wi-Fi 스캔 중
+2026-11-13 18:03:49 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:04:13 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:04:13 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:04:13 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:04:13 Bluetooth: 연결 상태
+2026-11-13 18:04:13 초기 상태: HOME (Bluetooth)
+2026-11-13 18:04:13 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:14:58 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:14:58 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:14:58 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:14:58 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:15:09 블루투스 스캔 완료: 13개 장치 (ON 3 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:15:09 Wi-Fi 스캔 중
+2026-11-13 18:15:09 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:15:33 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:15:33 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:15:33 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:15:33 Bluetooth: 연결 상태
+2026-11-13 18:15:33 초기 상태: HOME (Bluetooth)
+2026-11-13 18:15:33 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:18:14 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:18:14 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:18:14 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:18:14 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:18:25 블루투스 스캔 완료: 13개 장치 (ON 3 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:18:25 Wi-Fi 스캔 중
+2026-11-13 18:18:25 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:18:49 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:18:49 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:18:49 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:18:49 Bluetooth: 연결 상태
+2026-11-13 18:18:49 초기 상태: HOME (Bluetooth)
+2026-11-13 18:18:49 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:22:21 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:22:21 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:22:21 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:22:21 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:22:31 블루투스 스캔 완료: 13개 장치 (ON 4 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:22:31 Wi-Fi 스캔 중
+2026-11-13 18:22:31 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:22:56 Wi-Fi 스캔 완료: 39개 장치 (ON 25 / OFF 14) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:22:56 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:22:56 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:22:56 Bluetooth: 연결 상태
+2026-11-13 18:22:56 초기 상태: HOME (Bluetooth)
+2026-11-13 18:22:56 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:29:01 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:29:01 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:29:01 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:29:01 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:29:11 블루투스 스캔 완료: 13개 장치 (ON 4 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:29:11 Wi-Fi 스캔 중
+2026-11-13 18:29:11 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:29:36 Wi-Fi 스캔 완료: 39개 장치 (ON 25 / OFF 14) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:29:36 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:29:36 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:29:36 Bluetooth: 연결 상태
+2026-11-13 18:29:36 초기 상태: HOME (Bluetooth)
+2026-11-13 18:29:36 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:33:35 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:33:35 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:33:35 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:33:35 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:33:45 블루투스 스캔 완료: 13개 장치 (ON 4 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:33:45 Wi-Fi 스캔 중
+2026-11-13 18:33:45 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:34:10 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:34:10 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:34:10 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:34:10 Bluetooth: 연결 상태
+2026-11-13 18:34:10 초기 상태: HOME (Bluetooth)
+2026-11-13 18:34:10 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:39:22 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:39:22 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:39:22 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:39:22 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:39:32 블루투스 스캔 완료: 13개 장치 (ON 4 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:39:32 Wi-Fi 스캔 중
+2026-11-13 18:39:32 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:39:57 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:39:57 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:39:57 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:39:57 Bluetooth: 연결 상태
+2026-11-13 18:39:57 초기 상태: HOME (Bluetooth)
+2026-11-13 18:39:57 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:42:29 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:42:29 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:42:29 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:42:29 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:42:39 블루투스 스캔 완료: 13개 장치 (ON 6 / OFF 7) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:42:39 Wi-Fi 스캔 중
+2026-11-13 18:42:39 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:43:04 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:43:04 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:43:04 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:43:04 Bluetooth: 연결 상태
+2026-11-13 18:43:04 초기 상태: HOME (Bluetooth)
+2026-11-13 18:43:04 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:49:40 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:49:40 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:49:40 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:49:40 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:49:50 블루투스 스캔 완료: 13개 장치 (ON 4 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:49:50 Wi-Fi 스캔 중
+2026-11-13 18:49:50 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:50:15 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:50:15 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:50:15 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:50:15 Bluetooth: 연결 상태
+2026-11-13 18:50:15 초기 상태: HOME (Bluetooth)
+2026-11-13 18:50:15 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:53:23 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:53:23 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:53:23 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:53:23 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:53:33 블루투스 스캔 완료: 13개 장치 (ON 2 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:53:33 Wi-Fi 스캔 중
+2026-11-13 18:53:33 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:53:58 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:53:58 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:53:58 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:53:58 Bluetooth: 연결 상태
+2026-11-13 18:53:58 초기 상태: HOME (Bluetooth)
+2026-11-13 18:53:58 트리거 파일 기록 성공: /HomeBack
+2026-11-13 18:59:04 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 18:59:04 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:59:04 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 18:59:04 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 18:59:14 블루투스 스캔 완료: 13개 장치 (ON 3 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:59:14 Wi-Fi 스캔 중
+2026-11-13 18:59:14 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 18:59:39 Wi-Fi 스캔 완료: 39개 장치 (ON 26 / OFF 13) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 18:59:39 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 18:59:39 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 18:59:39 Bluetooth: 연결 상태
+2026-11-13 18:59:39 초기 상태: HOME (Bluetooth)
+2026-11-13 18:59:39 트리거 파일 기록 성공: /HomeBack
+2026-11-13 19:08:58 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 19:08:58 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:08:58 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:08:58 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 19:09:08 블루투스 스캔 완료: 14개 장치 (ON 3 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:09:08 Wi-Fi 스캔 중
+2026-11-13 19:09:08 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 19:09:33 Wi-Fi 스캔 완료: 39개 장치 (ON 25 / OFF 14) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:09:33 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 19:09:33 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 19:09:33 Bluetooth: 연결 상태
+2026-11-13 19:09:33 초기 상태: HOME (Bluetooth)
+2026-11-13 19:09:33 트리거 파일 기록 성공: /HomeBack
+2026-11-13 19:14:12 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 19:14:12 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:14:12 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:14:12 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 19:14:26 블루투스 스캔 완료: 14개 장치 (ON 3 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:14:26 Wi-Fi 스캔 중
+2026-11-13 19:14:26 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 19:14:51 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:14:51 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 19:14:51 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 19:14:51 Bluetooth: 연결 상태
+2026-11-13 19:14:51 초기 상태: HOME (Bluetooth)
+2026-11-13 19:14:51 트리거 파일 기록 성공: /HomeBack
+2026-11-13 19:25:08 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 19:25:08 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:25:08 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:25:08 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 19:25:18 블루투스 스캔 완료: 14개 장치 (ON 2 / OFF 12) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:25:18 Wi-Fi 스캔 중
+2026-11-13 19:25:18 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 19:25:43 Wi-Fi 스캔 완료: 39개 장치 (ON 30 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:25:43 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 19:25:43 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 19:25:43 Bluetooth: 연결 상태
+2026-11-13 19:25:43 초기 상태: HOME (Bluetooth)
+2026-11-13 19:25:43 트리거 파일 기록 성공: /HomeBack
+2026-11-13 19:28:45 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 19:28:45 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:28:45 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 19:28:45 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 19:28:57 블루투스 스캔 완료: 14개 장치 (ON 3 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:28:57 Wi-Fi 스캔 중
+2026-11-13 19:28:57 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 19:29:22 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 19:29:22 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 19:29:22 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 19:29:22 Bluetooth: 연결 상태
+2026-11-13 19:29:22 초기 상태: HOME (Bluetooth)
+2026-11-13 19:29:22 트리거 파일 기록 성공: /HomeBack
+2026-11-13 19:36:24 Bluetooth: 응답 없음 (오류 10060)
+2026-11-13 19:37:22 Wi-Fi: 응답 없음 (HomeMac F0-F5-64-13-CF-32, 범위 192.168.0.1 ~ 192.168.0.254)
+2026-11-13 19:37:22 AWAY (60초 연속 미확인: 블루투스, Wi-Fi)
+2026-11-13 19:37:22 트리거 파일 기록 성공: /NotHome
+2026-11-13 20:11:49 Bluetooth: 응답 없음 (오류 10064)
+2026-11-13 20:13:16 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 20:13:16 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 20:13:16 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 20:13:16 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 20:13:26 블루투스 스캔 완료: 14개 장치 (ON 3 / OFF 11) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 20:13:26 Wi-Fi 스캔 중
+2026-11-13 20:13:26 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 20:13:51 Wi-Fi 스캔 완료: 39개 장치 (ON 29 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 20:13:51 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 20:13:51 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 20:13:51 Bluetooth: 연결 상태
+2026-11-13 20:13:51 초기 상태: HOME (Bluetooth)
+2026-11-13 20:13:51 트리거 파일 기록 성공: /HomeBack
+2026-11-13 20:33:59 WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: C:\tools\gsHomeManager\..\screen_telegram\wifiscanTriger.txt 에 END)
+2026-11-13 20:33:59 로컬 IP 192.168.0.36 -> scan 범위 192.168.0.1 ~ 192.168.0.254
+2026-11-13 20:33:59 스캔 범위: 192.168.0.1 ~ 192.168.0.254
+2026-11-13 20:33:59 블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)
+2026-11-13 20:34:09 블루투스 스캔 완료: 14개 장치 (ON 4 / OFF 10) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 20:34:09 Wi-Fi 스캔 중
+2026-11-13 20:34:09 (oui.txt 없음: 제조사명은 비어 있습니다)
+2026-11-13 20:34:34 Wi-Fi 스캔 완료: 39개 장치 (ON 30 / OFF 9) -> C:\tools\gsHomeManager\WiFiScan_result.txt
+2026-11-13 20:34:34 설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: C:\tools\gsHomeManager\..\screen_telegram\trigger.txt
+2026-11-13 20:34:34 감시 시작: 블루투스 F0-F5-64-13-CF-31 -> Wi-Fi F0-F5-64-13-CF-32 (간격 15초, 외출 판정 60초)
+2026-11-13 20:34:34 Bluetooth: 연결 상태
+2026-11-13 20:34:34 초기 상태: HOME (Bluetooth)
+2026-11-13 20:34:34 트리거 파일 기록 성공: /HomeBack
