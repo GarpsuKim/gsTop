@@ -1,4 +1,0 @@
-■■ PC booting alert 
----
-PC '로그인' 발생 통보
----
