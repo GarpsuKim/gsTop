@@ -1,6 +1,6 @@
 # gsHomeManager
 
-Windows 11용 텍스트/아날로그 시계 + 집 감시(WiFiScan) 앱입니다. 기존 gsClock 과 WiFiScan 을 하나로 합쳤습니다. C++(g++/MinGW) 단일 소스 파일이며, 외부 라이브러리 없이 빌드됩니다. 버전 정보(exe 속성)는 `version.h` + `gsHomeManager.rc` 로 넣습니다. 아이콘은 `gsHomeManager.ico` 를 같은 rc 로 exe 에 넣습니다 (빌드할 때 `gsHomeManager.ico` 가 같은 폴더에 있어야 함).
+Windows 11용 텍스트/아날로그 시계 + 집 감시(WiFiScan) + 텔레그램 원격 제어(화면/웹캠 캡처, 침입 탐지) 앱입니다. 기존 gsClock, WiFiScan, screen_telegram 을 하나로 합쳤습니다. C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)이며, 버전 정보(exe 속성)는 `version.h` + `gsHomeManager.rc` 로 넣습니다. 아이콘은 `gsHomeManager.ico` 를 같은 rc 로 exe 에 넣습니다 (빌드할 때 `gsHomeManager.ico` 가 같은 폴더에 있어야 함).
 
 ## 특징
 
@@ -18,12 +18,32 @@ Windows 11용 텍스트/아날로그 시계 + 집 감시(WiFiScan) 앱입니다.
 - 부팅(또는 로그온) 자동 실행 on/off (레지스트리 Run 키), 시작할 때 동반 실행 앱 최대 5개, `booting_alert` BAT 자동 실행
 - 이미 실행 중이면 기존 앱을 정상 종료(위치/도시 목록 저장)시키고 새로 시작, 응답이 없으면 강제 종료
 - 마지막 창 위치 저장
-- WiFiScan: 앱 시작 시 자동으로 scan On. Bluetooth / Wi-Fi(LAN) scan 으로 집에 있는지 감시하고 `/HomeBack`, `/NotHome` 을 `..\screen_telegram\trigger.txt` 에 기록 (아래 WiFiScan 참고)
-- trigger.txt 를 갱신할 때마다 모니터 중앙에 5초 동안 팝업 메시지를 표시
+- WiFiScan: 앱 시작 시 자동으로 scan On. Bluetooth / Wi-Fi(LAN) scan 으로 집에 있는지 감시하고 `/HomeBack`, `/NotHome` 을 같은 프로세스의 Telegram 모듈에 직접 전달 (아래 WiFiScan 참고)
+- `/HomeBack`, `/NotHome` 판정이 날 때마다 모니터 중앙에 5초 동안 팝업 메시지를 표시
 - WiFiScan 메뉴의 Wifi공유기 자동감시 On / Off: 정해 둔 시각에 scan 을 자동으로 켜고 끄며, 음악/동영상 재생·메모 표시도 가능 (설정하지 않으면 scan 에 영향 없음)
 - 메인 윈도우 맨 아래 상태줄에 scan On / Off 가 될 때마다 시각과 사유를 표시 (아나로그 모드에서는 상태줄 없음)
-- IP cam: 안드로이드 폰 카메라 앱(DroidCam, IP Webcam 등)의 MJPEG 영상을 별도 창에 실시간 표시, 폰 탐색기(FTP)로 폰 파일 열기
+- 카메라 영상: 한 창에서 WebCam1 / WebCam2(PC 웹캠) / IP Cam(안드로이드 폰 카메라 앱 DroidCam, IP Webcam 등의 MJPEG 영상)을 골라 실시간 표시, 사진 저장/동영상 촬영, 폰 탐색기(FTP)로 폰 파일 열기
+- **다른 PC 원격 제어**: 같은 내부망의 다른 PC 화면을 보면서 마우스로 조작(클라이언트), 또는 이 PC 를 다른 PC 가 조작하게 허용(서버). 연결 요청이 오면 Yes/No 확인창을 띄움 (아래 다른 PC 원격 제어 참고)
+- **Telegram**: 모니터/웹캠 화면을 주기적으로 텔레그램으로 전송, 봇 명령으로 PC 제어(`/shot`, `/CMD`, `/download` 등), 카메라 침입 탐지, 폰 → PC 파일 수신 (아래 Telegram 참고). 전용 스레드로 동작하므로 시계/WiFiScan 과 독립적이며, 토큰이 없으면 이 기능만 꺼집니다.
 - 내부 문자열은 모두 UTF-8 (소스에 `wchar_t` 없음), 메모리 사용 최소화
+
+## 파일 구성
+
+```
+gsHomeManager.cpp ............ 소스 (시계 + WiFiScan + IP cam + Telegram 모듈)
+gsHomeManager.rc ............. exe 속성(자세히 탭) 버전 리소스 (UTF-8)
+gsHomeManager.ico ............ 아이콘
+version.h .................... 버전/저작권 정보 (버전을 올릴 때 이 파일만 수정)
+version.txt .................. _build.bat 이 version.h 에서 자동 생성 (exe 와 함께 GitHub 에 올림)
+_build.bat ................... 컴파일 & 링크
+_build_gsHomeManagerLauncher.bat  런처 빌드
+_run.bat ..................... 런처(없으면 exe) 실행
+_Setup.bat ................... 시작 메뉴에 바로가기 등록
+gsHomeManager.ini ............ 설정 (없으면 자동 생성. [Telegram] 섹션 포함)
+README.md .................... 이 안내문
+```
+
+실행 중에 exe 폴더에 생기는 파일: `gsHomeManager.log`(시계/WiFiScan/IP cam), `log.txt`(Telegram 모듈), `WiFiScan_result.txt`, `WiFiScan_watch.log`, `oui.txt`, `ipcam.log`, `detect.state`, `pinned.id`, `image\`, `upload\`, `IPCam\`
 
 ## 빌드
 
@@ -31,14 +51,16 @@ MinGW-w64 의 g++ 와 windres 가 필요합니다. `gsHomeManager.cpp` 는 `vers
 
 ```bat
 windres -c 65001 -I. -O coff -i gsHomeManager.rc -o gsHomeManager_res.o
-g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManager.cpp gsHomeManager_res.o -lcomdlg32 -lole32 -lcomctl32 -liphlpapi -lws2_32 -lbthprops -lgdiplus -lgdi32
+g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManager.cpp gsHomeManager_res.o -lcomdlg32 -lole32 -loleaut32 -lcomctl32 -liphlpapi -lws2_32 -lbthprops -lgdiplus -lgdi32 -lwinhttp -lmfuuid
 ```
 
-- 실행 중인 `gsHomeManager.exe` 가 있으면 먼저 종료합니다 (파일 잠금으로 링크가 실패하는 것을 방지).
-- 실패하면 소스와 `build_ERR.txt` 를 메모장으로 엽니다. 성공하면 경고(있으면)와 버전/크기를 표시합니다.
-- 프로그램 이름(`APP_NAME`, 현재 gsHomeManager)과 버전은 `version.h` 의 `APP_NAME`, `APP_VERSION_NUM`, `APP_VERSION_STR` 만 고치면 됩니다. About 창, exe 속성, `version.txt` 에 모두 반영됩니다.
+- 텔레그램 통합으로 `-lwinhttp`(텔레그램 통신), `-lmfuuid`(카메라 GUID 상수만 담긴 정적 라이브러리), `-loleaut32` 가 추가되었습니다. `wininet.dll`, `mfplat.dll`, `mfreadwrite.dll` 은 실행 중에 불러오므로 링크하지 않습니다 (해당 DLL 이 없는 Windows N/KN 에서도 앱은 시작되고 카메라만 비활성).
+- 실행 중인 `gsHomeManager.exe` 가 있으면 먼저 종료합니다 (파일 잠금으로 링크가 실패하는 것을 방지). 옛 `screen_telegram.exe` 도 함께 종료합니다.
+- 실패하면 소스와 `build_ERR.txt` 를 메모장으로 엽니다. 성공하면 경고(있으면)와 버전/크기를 표시하고 `version.txt` 를 새로 만듭니다.
+- 프로그램 이름(`APP_NAME`)과 버전은 `version.h` 의 `APP_NAME`, `APP_VERSION_NUM`, `APP_VERSION_STR` 만 고치면 됩니다. About 창, exe 속성, `version.txt`, 텔레그램 인사말, `/status`, `/version` 에 모두 반영됩니다.
 - 앱은 실행할 때마다 exe 와 같은 폴더에 `version.txt` (내용: `APP_VERSION_STR`)를 새로 만듭니다.
-- `_run.bat` 은 exe 가 없으면 빌드 후 실행합니다.
+- 새 버전 배포: `version.h` 의 버전을 올리고 빌드한 exe 와 `version.txt` 를 GitHub 저장소의 `gsHomeManager` 폴더에 올립니다. 런처(`gsHomeManagerLauncher.exe`)가 실행할 때마다 서버 버전을 확인해 갱신합니다. 예전 `screen_telegram_RUN.BAT` 의 자동 업데이트/INI 자동 다운로드는 없어졌습니다.
+- `_Setup.bat` 은 런처(없으면 exe)를 시작 메뉴에 등록합니다.
 
 ## 사용법
 
@@ -66,17 +88,17 @@ g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManage
 | F5 | Global | 도시 선택(중복 선택 불가). 도시 창을 닫으면 그 도시 시계만 종료 |
 | F6 | 알람 / 다른 앱 호출 | 알람1 ~ 알람10, 시스템 재시작, 다른 앱 호출 (아래 참고) |
 | F7 | WiFiScan | WifiScan모니터링(설정/진행 상황 대화상자), Wifi공유기 자동감시 On / Off, HomeBack 프로그램, NotHome 프로그램 (아래 참고) |
-| F8 | IP cam / 폰 연결 | IP cam 등록(IP address / port 를 ini 에 저장), IP cam 영상(영상 창 열기), 폰 탐색기 |
+| F8 | IP cam / 폰 연결 | IP cam 등록(IP address / port 를 ini 에 저장), 카메라 영상(영상 창 열기 → WebCam1 / WebCam2 / IP Cam 선택 후 [실행]), 폰 탐색기, 다른 PC(서버), 다른 PC(클라이언트) |
 | F9 | Help | About(프로그램 이름/버전/개발자), ReadMe.MD(기본 브라우저로 열기), 홈페이지(주소 표시), 최신 버전 다운로드(GitHub zip 다운로드 링크 열기), 음력 API 키값 등록 |
 
 - 시계 모양에 따라 F3 / F4 중 해당하지 않는 메뉴는 회색으로 비활성화되고 단축키로도 열리지 않습니다. [타이틀 & 디지탈] / [디지탈] 모양에서는 F4 가, [아나로그] 모양에서는 F3 가 비활성입니다.
-- 종료는 확인창(30초, Yes/No) 후 앱을 종료합니다. 무응답이면 계속 동작합니다.
+- 종료는 확인창(30초, Yes/No) 후 앱을 종료합니다. 무응답이면 계속 동작합니다. 텔레그램의 `/stop`, `/restart` 는 텔레그램에서 Yes 를 누른 뒤이므로 이 확인창 없이 바로 종료/재시작합니다.
 
 ### 앱 동작 설정
 
 - **시계 보이기**: 해제하면 창을 숨기고 시스템 트레이 아이콘만 남습니다. 트레이 아이콘을 누르면 다시 보이고, 우클릭하면 `시계 보이기` / `프로그램 종료` 메뉴가 나옵니다. 이 값은 ini 의 `tray_start` 에도 반영됩니다 (숨긴 채 종료하면 다음에도 트레이로 시작).
 - **부팅(또는 로그온) 자동실행 on/off**: 기본은 off. 켜면 "부팅 (또는 로그온)하면서 자동 실행 합니까? (Yes/No)", 끄면 해제 확인창을 거친 뒤 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 에 등록/삭제합니다.
-- **동반 실행 앱 등록**: BAT / CMD / EXE / LNK 를 최대 5개까지 등록하면 앱을 시작할 때 `start ""` 로 순서대로 함께 실행합니다 (`companion_app1` ~ `5`). 이미 등록된 값은 전체 경로로 미리 보여주며, `찾기` 버튼은 시작 메뉴 폴더(모든 사용자 / 내 계정)를 기본으로 엽니다. `관리자 권한 요청 무시 (RunAsInvoker)` 를 체크하면 권한 확인창 없이 일반 권한으로 실행합니다 (`companion_run_as_invoker`).
+- **동반 실행 앱 등록**: BAT / CMD / EXE / LNK 를 최대 5개까지 등록하면 앱을 시작할 때 `start ""` 로 순서대로 함께 실행합니다 (`companion_app1` ~ `5`). 이미 등록된 값은 전체 경로로 미리 보여주며, `찾기` 버튼은 시작 메뉴 폴더(모든 사용자 / 내 계정)를 기본으로 엽니다. `관리자 권한 요청 무시 (RunAsInvoker)` 를 체크하면 권한 확인창 없이 일반 권한으로 실행합니다 (`companion_run_as_invoker`). **`screen_telegram.exe` 는 등록하지 마세요** (통합되었으므로 함께 실행하면 텔레그램 getUpdates 409 충돌).
 - **booting_alert**: ini 의 `booting_alert=TRUE` 이면 앱을 시작할 때마다 앱 폴더의 `booting_alert\booting_Alert_RUN.BAT` 를 창 없이 실행합니다.
 - **위치 이동 간격 변경**: 0(이동 안 함) / 5초 / 10초 / 30초 / 1분 / 5분 / 10분 / 30분. 아나로그 모양에서도 동작하며, 아나로그 전체화면 중에는 이동하지 않습니다.
 - **tray_start**: `tray_start=TRUE` 이면 시작할 때 화면에 보이지 않고 바로 트레이로 가며, "gsHomeManager 를 트레이로 보냅니다" 팝업을 5초 동안 표시합니다. 그 외에는 항상 화면에 보이는 상태로 시작합니다.
@@ -135,12 +157,12 @@ WiFiScan 메뉴의 두 항목으로, 알람과 같은 방식(사용 / 시각 설
 
 ### HomeBack 프로그램 / NotHome 프로그램
 
-WiFiScan 메뉴의 두 항목으로, '다른 앱 호출'과 같은 방식(사용 / BAT·CMD·EXE 파일 선택 / 메모 / 지우기 / 테스트)이며 시각 설정만 없습니다. `trigger.txt` 에 `/HomeBack` 또는 `/NotHome` 을 쓸 때마다 해당 프로그램을 실행하고, 메모가 있으면 모니터 중앙에 30초 표시합니다. 앱이 시작될 때 현재 상태를 한 번 전송하므로 그때도 실행됩니다. ini 키는 `[WiFiScan]` 의 `HomeBackProgOn/File/Memo`, `NotHomeProgOn/File/Memo` 입니다.
+WiFiScan 메뉴의 두 항목으로, '다른 앱 호출'과 같은 방식(사용 / BAT·CMD·EXE 파일 선택 / 메모 / 지우기 / 테스트)이며 시각 설정만 없습니다. `/HomeBack` 또는 `/NotHome` 판정이 날 때마다 해당 프로그램을 실행하고, 메모가 있으면 모니터 중앙에 30초 표시합니다. 앱이 시작될 때 현재 상태를 한 번 전달하므로 그때도 실행됩니다. ini 키는 `[WiFiScan]` 의 `HomeBackProgOn/File/Memo`, `NotHomeProgOn/File/Memo` 입니다.
 
-### 상태줄과 trigger.txt 팝업
+### 상태줄과 명령 전달 팝업
 
-- 메인 윈도우 맨 아래 줄에 `HH:MM:SS  scan On - 사유` / `scan Off - 사유` 형식으로 마지막 상태를 표시합니다 (프로그램 시작, 대화상자, 예약 시각, END 파일). [아나로그] 모양에서는 상태줄이 없습니다.
-- `trigger.txt` (`/HomeBack`, `/NotHome`) 를 갱신할 때마다 모니터 중앙에 5초 동안 팝업을 띄웁니다 (클릭하면 닫힘).
+- 메인 윈도우 맨 아래 줄에 `HH:MM:SS  scan On - 사유` / `scan Off - 사유` 형식으로 마지막 상태를 표시합니다 (프로그램 시작, 대화상자, 예약 시각). [아나로그] 모양에서는 상태줄이 없습니다.
+- `/HomeBack`, `/NotHome` 을 Telegram 모듈에 전달할 때마다 모니터 중앙에 5초 동안 `텔레그램 명령 전달: ...` 팝업을 띄웁니다 (클릭하면 닫힘).
 
 ## WiFiScan
 
@@ -154,26 +176,226 @@ WiFiScan 메뉴의 두 항목으로, '다른 앱 호출'과 같은 방식(사용
 - 대화상자 중하단: IP 주소, 컴퓨터 이름, MAC 주소, 네트워크 어댑터 제조사, 사용자 텍스트 목록과 진행 상황 (빨강=OFF, 노랑=확인 중, 초록=ON)
 - 목록 맨 앞 체크박스: 체크한 행의 MAC 이 해당 입력 칸(블루투스 행 = 블루투스 MAC, Wi-Fi 행 = LAN 카드 MAC)에 들어가며, **저장/scan재시작** 때 ini 에 기록됩니다. 입력 칸과 같은 MAC 의 행은 자동으로 체크됩니다. 블루투스 행의 IP Address 칸에는 `<blue tooth>` 로 표시되고, 모든 칸이 빈 행은 표시하지 않습니다.
 - 대화상자를 닫아도 scan 은 계속 진행됩니다 (멈추려면 scan Off).
-- 생성 파일은 기존 WiFiScan 과 동일: `WiFiScan_result.txt`, `WiFiScan_watch.log`, `oui.txt`(제조사 조회), `..\screen_telegram\trigger.txt`, `..\screen_telegram\wifiscanTriger.txt`
+- 생성 파일은 기존 WiFiScan 과 동일: `WiFiScan_result.txt`, `WiFiScan_watch.log`, `oui.txt`(제조사 조회)
+- 집에 있는지(HomeBack) / 없는지(NotHome) 판정은 `trigger.txt` 파일이 아니라 같은 프로세스의 Telegram 모듈로 직접 전달됩니다 (아래 Telegram 의 로컬 트리거). 예전의 `trigger.txt`, `wifiscanTriger.txt` 는 더 이상 쓰지 않습니다.
 - 기존 WiFiScan.exe 는 중복되므로 함께 실행하지 마세요.
 
-## IP cam / 폰 연결
+## Telegram
+
+주기적으로 모니터(와 웹캠)의 화면을 캡처해 텔레그램으로 보내고, 텔레그램 봇 명령으로 PC 를 제어합니다. 앱이 시작되면 전용 스레드로 시작하며, 설정은 `gsHomeManager.ini` 의 **`[Telegram]`** 섹션에서 읽습니다.
+
+### 설정 시작하기
+
+- `[Telegram]` 섹션이 없으면 첫 실행 때 자동으로 만듭니다. 예전 `screen_telegram.ini` 가 exe 폴더나 `..\screen_telegram\` 에 있으면 그 내용을 그대로 가져오고(원본은 건드리지 않음), 없으면 빈 토큰과 기본값 견본을 씁니다.
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 를 채우고 앱을 다시 시작하면 동작합니다. 둘 중 하나라도 없으면 텔레그램 기능만 사용하지 않고 나머지(시계, WiFiScan 등)는 정상 동작합니다.
+- ini 는 시작할 때만 읽습니다. 텔레그램 `/INTERVAL=nnn`, `/ini` 는 이 섹션을 고칩니다 (다른 섹션과 주석, 줄바꿈은 그대로 유지).
+- 보안: ini 에 봇 토큰이 평문으로 들어 있으므로 공유/업로드 금지 (노출 시 BotFather 에서 `/revoke`). GitHub 에 올리는 ini 에는 견본 값만 넣을 것.
+
+### 동작
+
+- 이미지는 JPEG(품질 85)로 전송. 긴 변이 2560px 를 넘는 화면(4K 등)은 전송용만 2560px 로 줄여 보내고 `image` 폴더 저장본은 원본 그대로. 텔레그램 연결(WinHTTP 세션)은 재사용하며 명령 폴링은 10초 롱폴링. 전송 실패(네트워크/5xx/429) 시 최대 3회 시도
+- 이미지가 10MB 를 넘으면 품질/해상도를 단계적으로 낮춰 전송. 가로+세로 10000px 초과 또는 비율 20:1 초과이면 원본을 문서(sendDocument)로 전송
+- 모니터 번호는 "주 모니터=1, 나머지는 왼쪽->오른쪽" 순이며, Windows 디스플레이 설정의 번호와 다를 수 있음
+- 카메라가 여러 개면 `CAMERA_INDEX` 로 선택 (목록은 최초 캡처 시 `log.txt` 에 출력)
+- 잠금 화면/로그온 전에는 화면 캡처를 건너뜀 (카메라는 계속 시도). 서비스(세션 0)로는 화면 캡처 불가. 사용자 로그온 후 시작프로그램/작업 스케줄러(로그온 시)로 실행
+- 고DPI 환경에서도 실제 해상도로 캡처합니다 (이 모듈의 스레드만 DPI 인식으로 설정하므로 시계 창 크기에는 영향 없음)
+- 전송 전에 모든 이미지를 exe 폴더의 `image` 폴더에 저장 (파일명: `YYYYMMDD_HHMMSS_Monitor1.jpg`, `..._Camera.jpg`)
+  - 기본은 자동 삭제 없음 (30초 간격, 모니터+카메라면 하루 약 3GB). `KEEP_DAYS=N`(N일 지난 이미지 삭제), `KEEP_MAX_FILES=N`(최대 N개, 오래된 것부터 삭제)로 자동 정리. 이 프로그램이 만든 파일명(`YYYYMMDD_HHMMSS_*.jpg/png`)만 삭제함
+- `CAMERA_KEEP_OPEN=TRUE` 이면 카메라를 계속 열어 둠 (지연/LED 깜빡임 감소, 대신 다른 앱이 카메라를 쓸 수 없음. 기본 FALSE)
+- `SAVE_ONLY=TRUE` 이면 이미지를 텔레그램으로 보내지 않고 `image` 폴더에 저장만 함. 명령 수신은 계속 동작하며 `/shot` 만 전송 (TOKEN/CHAT_ID 가 없으면 이 모듈 자체가 꺼짐)
+- `MAX_LOOP=N` 이면 N회 캡처/전송 후 Telegram 모듈이 끝남 (0 또는 생략 시 무제한. 시계 등 나머지 앱은 계속 동작). 침입 탐지가 켜져 있으면 모듈이 계속 동작
+- 시작 인사말: 준비가 끝나면 텔레그램으로 인사말(간격/카메라/침입 탐지 상태 포함)을 한 번 전송. `TELEGRAM_GREETING=FALSE` 로 끌 수 있음
+- 상단 고정 메시지: 채팅창 상단에 현재 침입 탐지 상태 하나만 고정해 보여 줌 (켜짐 "❤️ /detectOn", 꺼짐 "💙 /detectOff", 카메라가 없거나 `CAMERA=FALSE` 이면 "❤️ 카메라가 작동하지 않습니다"). 상태가 바뀔 때마다 같은 메시지를 고쳐 쓰며, 메시지 id 는 `pinned.id` 에 저장 (지우거나 풀었으면 다음 갱신 때 다시 만듦). 시작할 때 처음 상태는 최근 로컬 트리거(`/NotHome`=켜짐, `/HomeBack`=꺼짐)가 있으면 그것을, 없으면 실제 상태를 따름
+
+### 텔레그램 명령
+
+`TELEGRAM_COMMANDS=TRUE`(기본) 일 때 봇에게 보낼 수 있는 명령입니다 (대소문자 구분 없음).
+
+| 명령 | 동작 |
+|---|---|
+| `/shot` | 화면 + 카메라 즉시 캡처·전송 |
+| `/screen` | 화면만 즉시 캡처·전송 |
+| `/photo` | 카메라만 즉시 캡처·전송 |
+| `/pause`, `/resume` | 이미지 전송 중단(저장은 계속) / 재개 |
+| `/status` | 상태 |
+| `/detectOn`, `/detectOff` | 침입 탐지 켜기 / 끄기 |
+| `/INTERVAL=nnn` | 캡처·전송 간격을 nnn초로 변경 (5~86400, 즉시 적용되고 ini 의 `TELEGRAM_INTERVAL` 도 갱신). `/INTERVAL` 만 보내면 현재 값 표시 |
+| `/version` | 프로그램 버전과 빌드 시각 |
+| `/log [n\|all]` | 실행 로그(`log.txt`) 전송. 인자 없으면 최근 50줄, `/log n` 은 최근 n줄(1~2000), `/log all` 은 전체. 4096자를 넘거나 `all` 이면 .txt 문서로 전송. `log.old.txt` 는 보지 않음 |
+| `/CMD 명령` | `/CMD` 뒤 문자열 전체를 PC 의 `cmd.exe /c` 에서 실행하고 결과(표준 출력+오류)를 `cmd_YYYYMMDD_HHMMSS.txt` 로 전송 |
+| `/download` | PC 화면에 파일 선택 창을 띄워 고른 파일들을 전송 |
+| `/ini 키=값` | `[Telegram]` 섹션 끝에 새 키 추가 |
+| `/github` | PC 기본 브라우저로 GitHub 의 README 페이지 열기 (주소는 소스의 `kGithubUrl`) |
+| `/HomeBack` | 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 후 자동으로 `/detectOff` + `/pause` |
+| `/NotHome` | 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 후 자동으로 `/detectOn` + `/resume` |
+| `/restart` | Yes/No 확인 후 **프로그램 전체**를 종료하고 같은 exe 를 다시 실행 |
+| `/stop` | Yes/No 확인 후 **프로그램 전체**(시계, WiFiScan 감시 포함)를 종료 |
+| `/help` 또는 `//` | 도움말 |
+
+- `/stop`, `/restart` 는 "종료하시겠습니까?(y/n)" 메시지에 Yes/No 버튼이 붙어 옴. Yes 를 눌러야 실행, No 는 취소. 버튼은 명령과 같은 chat/허용 사용자만 누를 수 있고, 5분이 지났거나 이미 처리한 메시지, 프로그램 재시작 전의 메시지 버튼은 무효. `/restart` 는 종료 처리가 끝나기를 최대 12초 기다린 뒤 새 프로세스를 띄웁니다.
+- `TELEGRAM_CHAT_ID` 로 설정한 chat 의 명령만 처리. 명령은 별도 스레드가 받으므로 캡처/전송 중에도 `/pause` `/resume` `/status` `/stop` 은 수 초 내 반응 (`/shot` 은 진행 중인 캡처가 끝난 뒤 실행)
+- `TELEGRAM_CHAT_ID` 가 그룹(음수)이면 `TELEGRAM_ALLOWED_USER_IDS=111,222` (명령 허용 사용자 ID)를 반드시 설정해야 명령이 동작. 개인 chat 이면 생략 가능
+- 같은 봇 토큰을 다른 프로그램이 getUpdates/webhook 으로 쓰면 409 충돌이 나므로, 이 앱 전용 봇을 쓰는 것을 권장
+
+**/ini 키=값** (예: `/ini INTRUSION_COOLDOWN=120`, `[키=값]` 처럼 대괄호로 감싸도 됨)
+- 같은 키(대소문자 무시)가 `[Telegram]` 섹션에 이미 있으면 경고만 보내고 삽입하지 않음. 값을 바꾸려면 ini 를 직접 수정 (캡처 간격은 `/INTERVAL=nnn`)
+- `;KEY=값` 처럼 주석 처리된 줄은 없는 키로 봄. 키 이름은 영문/숫자/_ (64자 이내, 대문자로 저장), 값은 한 줄 400자 이내
+- 프로그램이 해석하지 않는 키이면 추가는 하되 오타 주의 메시지를 함께 보냄
+- ini 는 시작할 때만 읽으므로 추가한 값은 앱을 다시 시작해야 적용됨. 로그에는 키 이름만 남기고 값은 남기지 않음
+
+**/CMD 명령**
+- 명령 뒤 문자열(앞뒤 공백만 제거)이 그대로 `cmd.exe /c` 에 전달됨. 명령이 비어 있으면 사용법만 알려 줌. 예: `/CMD dir /b`, `/CMD ipconfig /all`, `/CMD type log.txt | findstr UPDATE`
+- 캡션에 실행한 명령, 종료 코드, 소요 시간, 출력 크기를 표시. 출력이 없으면 "(출력 없음)" 메시지만 전송
+- 실행 창은 숨김, 표준 입력은 NUL. 시작 폴더는 프로그램의 현재 폴더. 제한 시간 60초(넘으면 하위 프로세스까지 강제 종료하고 그때까지의 출력 전송), 출력 20MB 초과분은 잘림
+- 실행하는 동안 명령 수신 스레드가 대기하므로 다른 텔레그램 명령(`/stop` 포함)은 끝난 뒤 처리됨 (최대 60초)
+- 한글 출력: 출력이 UTF-8 이 아니면 콘솔 코드 페이지(한국어 Windows 는 CP949)에서 UTF-8 로 변환해 전송
+- 보안 주의: 허용된 chat/사용자가 PC 에서 임의의 명령을 실행할 수 있는 기능. 텔레그램 계정과 그룹 chat 의 허용 사용자 목록을 안전하게 관리할 것. 실행한 명령(200자까지)과 종료 코드는 `log.txt` 에 기록. 사용자 로그온 세션의 권한으로 동작 (관리자 권한이 필요한 명령은 앱을 관리자로 실행해야 함)
+
+**/download**
+- PC 앞에 있는 사람이 파일을 고르는 방식. 창은 항상 맨 위에 뜨고, 5분 안에 고르지 않거나 취소하면 "취소/시간 초과" 메시지만 보냄
+- 파일 1개당 49MB 까지(원본 그대로 sendDocument). 빈 파일, 49MB 초과, 열 수 없는 파일은 건너뛰고 완료 메시지에 파일별 사유를 표시. 전송된 파일명은 `log.txt` 에 기록
+- 창이 떠 있는 동안 명령 수신 스레드가 대기하므로 다른 명령은 창을 닫은 뒤 처리됨 (최대 5분). 잠금 화면/로그오프 상태에서는 5분 뒤 자동 취소됨
+
+**텔레그램 명령 메뉴**: 시작할 때 `setMyCommands` 로 봇 채팅 입력창의 "메뉴" 버튼(`/` 명령 목록)에 명령과 설명을 등록합니다. 메뉴 이름은 소문자만 허용되어 `/shot /screen /photo /pause /resume /status /detecton /detectoff /interval /ini /log /cmd /download /github /homeback /nothome /version /restart /stop /help` 로 등록되며 명령은 대소문자를 구분하지 않으므로 동일하게 동작합니다. 인자가 필요한 `/ini` `/cmd` 는 인자 없이 눌리면 사용법만 안내합니다. 시작할 때마다 등록하므로 BotFather 에서 직접 만든 목록은 덮어써집니다 (직접 관리하려면 `TELEGRAM_MENU=FALSE`). 새 목록이 앱에 바로 안 보이면 채팅방을 나갔다 다시 들어오거나 텔레그램 앱을 다시 시작하세요.
+
+### 로컬 트리거 (WiFiScan 감시 → Telegram)
+
+`LOCAL_TRIGGER=TRUE`(기본) 이면 같은 프로세스의 WiFiScan 감시(HomeWatcher)가 넘기는 `/HomeBack`, `/NotHome` 을 1초 안에 받아 해당 명령을 처리합니다. 예전에는 `trigger.txt` 파일로 다른 프로세스가 전달했지만 이제는 프로세스 안의 큐로 전달하므로 파일을 쓰지 않습니다.
+
+- 텔레그램을 거치지 않는 이유: 봇이 sendMessage 로 보낸 "/HomeBack" 글은 봇 자신이 getUpdates 로 받지 못해 처리되지 않기 때문
+- 허용 명령은 `/HomeBack`, `/NotHome` 두 개뿐이며, 300초가 지난 요청은 버립니다. 앱이 시작되기 전에 이미 넘겨진 첫 판정(부팅 직후)도 300초 안이면 처리합니다.
+- 처리 결과(인사말, 침입 탐지 켜기/끄기 안내)는 평소처럼 텔레그램으로 전송. 명령 처리는 명령 수신 스레드와 순서대로 진행되므로 `/CMD`, `/download` 창 처리 중이면 끝난 뒤 실행
+
+### 침입 탐지 (CAMERA=TRUE 필요)
+
+ini 스위치가 없고 텔레그램 명령 `/detectOn`(켜기) `/detectOff`(끄기)로 제어합니다. 켜면 카메라를 상시 열어 `INTRUSION_CHECK_MS`(기본 1000ms)마다 프레임을 검사하고, 끄면 카메라를 해제합니다.
+
+- `AUTO_DETECT=TRUE` 이면 시작 때 `/detectOn` 을 자동 수행 (인사말에도 "침입 탐지: 켜짐"). FALSE/없음이면 exe 폴더의 `detect.state` 파일(ON/OFF)에 저장된 마지막 상태를 따름. 파일이 없으면 꺼짐
+- 움직임이 확정되면 "[침입탐지 : yyyy년 mm월 dd일 HH시 mm분 ss초]" 메시지를 보낸 뒤 카메라 이미지만 전송 (모니터 화면 캡처는 하지 않음. `SAVE_ONLY`, `/pause` 와 무관하게 무조건 전송). 파일명은 `YYYYMMDD_HHMMSS_Intrusion_Camera.jpg`
+- 방식: 그레이스케일+블러 → 이동평균 배경 차분 → 픽셀 임계값(`INTRUSION_PIXEL_THRESHOLD`, 기본 25) + 변화 면적(`INTRUSION_AREA_PERCENT`, 기본 1.0%) → 연속 프레임 확인(`INTRUSION_CONFIRM_FRAMES`, 기본 2) → 쿨다운(`INTRUSION_COOLDOWN`, 기본 60초). 조명 켬/끔·자동 노출 변화(화면 60% 이상 변화)와 시작 직후 안정화 구간은 탐지하지 않음
+- 완전히 별도의 스레드로 동작: 주기 캡처, `/pause`, `/shot`, 전송 재시도 등과 무관하게 계속 프레임을 검사하고, 침입 확정 시 그 스레드가 직접 메시지 + 카메라 이미지(탐지된 바로 그 프레임) 저장·전송을 수행
+- 탐지 중에는 카메라를 이 스레드가 전담(주기 캡처와 `/photo` 는 이 스레드의 최신 프레임을 사용)하므로 LED 가 항상 켜져 있고 다른 앱(화상회의 등)이 카메라를 쓸 수 없음
+- `MAX_LOOP` 횟수를 채운 시점에 침입 탐지가 켜져 있으면 모듈이 끝나지 않고 계속 동작
+- 오탐이 많으면 `AREA_PERCENT`/`PIXEL_THRESHOLD` 를 올리고, 놓치면 낮춤
+
+### 파일 수신 (폰 → PC)
+
+텔레그램 봇 채팅에 파일(문서/사진/동영상/오디오/음성)을 첨부해 보내면 PC 의 `upload` 폴더(`UPLOAD_DIR`)에 자동 저장하고 "저장 완료: 경로 (크기)" 를 알려 줍니다. 별도 명령은 없습니다.
+
+- 명령과 같은 chat/허용 사용자가 보낸 파일만 받음. `TELEGRAM_COMMANDS=FALSE` 이면 받지 않음. 앱이 꺼져 있는 동안 보낸 파일은 시작할 때 건너뜀
+- 파일 1개당 20MB 까지 (텔레그램 봇 API 한도). 넘으면 "너무 커서 받을 수 없음" 메시지. 사진은 텔레그램이 압축한 것이 오므로 원본이 필요하면 폰에서 "파일로 보내기"로 첨부
+- 파일명은 정리해서 저장: 경로 제거, 금지 문자(`<>:"/\|?*`) → `_`, CON/NUL 같은 예약어 회피, 150자 제한. 같은 이름이 있으면 `이름_1.확장자`, `이름_2.확장자` ... 로 저장하고 덮어쓰지 않음. 이름이 없는 사진 등은 `YYYYMMDD_HHMMSS_file_N.jpg` 형태. 저장 폴더는 한 단계만 자동 생성하므로 `UPLOAD_DIR` 의 상위 폴더는 미리 있어야 함
+- 저장만 하고 실행하지 않음 (단 .mp4/.mp3 는 아래 설명대로 재생)
+- 받은 파일이 이미지(jpg/png/bmp/gif/tif)이면 저장 직후 PC 화면에 이미지 1장당 별개의 창을 띄움 (`UPLOAD_SHOW_IMAGE=FALSE` 로 끌 수 있음). 화면의 80% 안에 맞춰 열리며 크기 조절 가능(비율 유지), Esc 또는 닫기 버튼으로 닫음. GDI+ 로 직접 그리며 EXIF 회전은 반영, 움직이는 GIF 는 첫 장면만, webp/heic 등은 저장만 하고 창은 띄우지 않음 (`log.txt` 에 기록). 프로그램을 종료하면 창도 함께 닫힘
+- 받은 파일이 .mp4 또는 .mp3 이면 저장 직후 PC 의 기본 플레이어로 실행 (`UPLOAD_PLAY_MEDIA=FALSE` 로 끌 수 있음. 예전 이름 `UPLOAD_PLAY_VIDEO` 도 같은 뜻). 여러 개를 받으면 각각 실행. 그 밖의 파일(exe, bat 등)은 저장만 함. 음성 메시지(.ogg)는 실행 안 함
+
+### PREVIOUS_SESSION_CLEAR=TRUE
+
+시작 직후(ini 를 읽은 뒤, 캡처/명령 수신 전)에 이전 세션의 흔적을 지웁니다. 기본 FALSE.
+
+- 삭제 대상: exe 폴더의 `log.txt` 와 `image` 폴더 안의 모든 파일 (이 프로그램이 만든 이미지가 아니어도 삭제. 하위 폴더는 건드리지 않음). `log.old.txt` 는 삭제하지 않음
+- 삭제는 복구할 수 없음. TRUE 이면 재시작할 때마다 이미지가 전부 사라지므로 보관이 필요하면 FALSE 로 둘 것
+- 삭제 뒤 `log.txt` 에 "프로그램 시작 (이전 세션 정리 후)" 와 삭제 결과(log.txt 삭제 여부, 지운 이미지 수, 실패 수)를 기록. `log.txt` 가 다른 프로그램에 열려 있어 지울 수 없으면 내용만 비움
+- 시작 때 한 번만 수행. `/ini` 로 추가해도 다음 시작부터 적용
+
+### `[Telegram]` 설정 키
+
+줄 맨 앞 `;` 또는 `#` 은 주석, 값 뒤 "공백 + `;` 또는 `#`" 도 주석입니다. 기본값은 괄호 안입니다.
+
+| 키 | 설명 (기본값) |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | BotFather 의 봇 토큰. 공유/업로드 금지 |
+| `TELEGRAM_CHAT_ID` | 수신 chat id. 음수(그룹)이면 `TELEGRAM_ALLOWED_USER_IDS` 필수 |
+| `TELEGRAM_ALLOWED_USER_IDS` | 명령 허용 사용자 ID 목록 (`111,222`). 개인 chat 이면 생략 |
+| `TELEGRAM_INTERVAL` | 캡처/전송 간격(초). `/INTERVAL=nnn` 으로 변경하면 이 값도 갱신 (60) |
+| `MONITOR1`, `MONITOR2`, ... | 모니터별 캡처 여부 (미기재 시 TRUE) |
+| `CAMERA` | 웹캠 캡처. 침입 탐지에도 필요 (FALSE) |
+| `CAMERA_INDEX` | 카메라 번호(0부터) (0) |
+| `CAMERA_KEEP_OPEN` | 카메라 계속 열어 둠 (FALSE) |
+| `SAVE_ONLY` | TRUE 이면 저장만, `/shot` 만 전송 (FALSE) |
+| `MAX_LOOP` | 캡처/전송 횟수 후 중단 (0 = 무제한) |
+| `TELEGRAM_COMMANDS` | 텔레그램 명령 수신 (TRUE) |
+| `TELEGRAM_MENU` | 시작할 때 텔레그램 명령 메뉴 등록 (TRUE) |
+| `TELEGRAM_GREETING` | 시작 인사말 전송 (TRUE) |
+| `KEEP_DAYS` | N일 지난 이미지 삭제 (7, 0 = 삭제 안 함) |
+| `KEEP_MAX_FILES` | 이미지 최대 개수 (5000, 0 = 제한 없음) |
+| `PREVIOUS_SESSION_CLEAR` | 시작할 때 `log.txt` 와 `image` 폴더 파일 전부 삭제 (FALSE) |
+| `UPLOAD_DIR` | 폰 → PC 수신 파일 저장 폴더. 상대 경로는 exe 폴더 기준 (upload) |
+| `UPLOAD_SHOW_IMAGE` | 받은 이미지를 장당 별개의 창으로 표시 (TRUE) |
+| `UPLOAD_PLAY_MEDIA` | 받은 .mp4/.mp3 를 기본 플레이어로 실행 (TRUE) |
+| `LOCAL_TRIGGER` | WiFiScan 감시의 `/HomeBack` `/NotHome` 받기 (TRUE) |
+| `AUTO_DETECT` | 시작 때 침입 탐지 자동 켬 (FALSE, 그러면 `detect.state` 를 따름) |
+| `INTRUSION_PIXEL_THRESHOLD` | 픽셀 밝기 변화 임계값 1~255 (25) |
+| `INTRUSION_AREA_PERCENT` | 변화 면적 % (1.0) |
+| `INTRUSION_CONFIRM_FRAMES` | 연속 확인 프레임 수 (2) |
+| `INTRUSION_COOLDOWN` | 재탐지까지 대기 초 (60) |
+| `INTRUSION_CHECK_MS` | 프레임 검사 간격 ms, 200~10000 (1000) |
+
+### 실행 로그 (`log.txt`)
+
+Telegram 모듈은 exe 폴더의 `log.txt` 에 직접 기록합니다 (콘솔 없는 `-mwindows` 빌드에서도 남음). 형식 `[날짜 시각.밀리초] [T스레드번호] 메시지`. 시작 시 버전/PID/폴더, 종료 시 종료 코드를 기록합니다. 5MB 를 넘으면 `log.old.txt` 로 넘기고 새로 시작합니다. 로그에는 봇 토큰과 `/ini` 로 넣은 값은 남기지 않습니다.
+
+처리되지 않은 예외/크래시는 앱 전체(시계, WiFiScan 포함)에 대해 원인 코드와 주소를 `log.txt` 에 남기고 종료합니다.
+
+## 카메라 영상 / IP cam / 폰 연결
+
+메뉴 **F8) IP cam / 폰 연결 > 카메라 영상** 으로 영상 창을 엽니다. 누를 때마다 새 창이 열리므로(중복 실행 가능) 웹캠과 IP 카메라를 각각 다른 창에서 동시에 재생할 수 있습니다. 각 창은 카메라 선택, 실행/종료, 사진/동영상/연속 사진, 상태줄이 서로 독립입니다. 창을 열어도 영상은 바로 재생하지 않으며, 카메라를 고르고 **실행** 을 눌러야 재생합니다.
+
+- **카메라 선택 (라디오 버튼)**: `WebCam1` = Windows 가 찾은 첫 번째 웹캠(장치 #0), `WebCam2` = 두 번째 웹캠(장치 #1), `IP Cam` = 폰 카메라 앱(기본 선택). 장치 이름은 `ipcam.log` 에 남습니다.
+- **실행**: 선택한 카메라 영상을 재생합니다. 이미 재생 중이면 멈추고 선택한 카메라로 다시 시작합니다 (카메라 전환). 녹화 중이었다면 먼저 저장합니다.
+- **종료**: 영상 재생만 멈추고 화면을 지웁니다 (창은 열려 있으므로 다른 카메라를 골라 다시 실행 가능). 창 자체는 `Esc` 또는 X 로 닫으며 앱은 계속 실행됩니다.
+- 같은 웹캠(예: WebCam1)을 두 창에서 동시에 실행할 수는 없습니다 (뒤에 실행한 창은 열기에 실패해 2초마다 재시도). 창이 여러 개일 때 같은 초에 저장하는 파일은 `_1`, `_2` ... 를 붙여 덮어쓰지 않습니다.
+- 웹캠이 없거나(예: 카메라가 1개뿐인데 WebCam2 선택) 다른 곳에서 쓰는 중이면 화면에 사유를 표시하고 2초마다 자동으로 다시 시도합니다. IP Cam 은 등록된 주소가 없으면 안내 문구만 표시합니다 (웹캠은 IP cam 등록 없이 사용 가능).
+- Windows 웹캠은 한 번에 한 곳에서만 열 수 있는 경우가 많으므로, **웹캠 영상을 재생하는 동안에는 텔레그램 카메라 캡처/침입 탐지(`/detectOn`)가 같은 카메라를 열지 못할 수 있고, 침입 탐지 중에는 WebCam 영상이 열리지 않을 수 있습니다.** 이 경우 한쪽을 먼저 끄세요.
 
 폰의 카메라 앱(**DroidCam** 포트 4747, **IP Webcam** 포트 8080)이 내보내는 MJPEG 영상(`GET /video`)을 보여 줍니다. 폰과 PC 가 같은 Wi-Fi 에 있어야 하고, 폰 앱의 서버를 먼저 시작하세요.
 
-- **IP cam 등록**: 대화상자에 IP address 와 port 번호를 입력하면 `gsHomeManager.ini` 의 `[IPCam]` (`Host`, `Port`) 에 저장됩니다. IP address 칸에 `192.168.0.70:4747` 처럼 써도 됩니다.
-- **IP cam 영상**: 영상 창을 엽니다 (등록된 주소가 없으면 먼저 등록 대화상자). 창 크기에 맞춰 비율을 유지해 표시하고, 제목줄에 fps 를 표시하며, 연결이 끊기면 2초 간격으로 자동 재접속합니다. `Esc` 또는 창 닫기(X) 는 영상 창만 닫고 앱은 계속 실행됩니다.
+- **IP cam 등록**: 대화상자에 IP address 와 port 번호를 입력하면 `gsHomeManager.ini` 의 `[IPCam]` (`Host`, `Port`) 에 저장됩니다. IP address 칸에 `192.168.0.70:4747` 처럼 써도 됩니다. 카메라 영상 창이 열려 있는 중에 등록하면 다음 `실행` 부터 새 주소를 씁니다.
+- **카메라 영상**: 영상 창을 엽니다. 창 크기에 맞춰 비율을 유지해 표시하고, 제목줄에 카메라 이름과 fps 를 표시합니다 (멈춘 상태는 `Camera  -  stopped`). IP Cam / 웹캠 모두 연결이 끊기면 2초 간격으로 자동 재접속합니다. 잘못된 IP 로 연결을 시도하는 중에도 `종료` 가 바로 동작합니다.
   등록 대화상자 아래쪽에 DroidCam 설치 안내와 Google Play 주소가 있으며, 주소를 누르면 시스템 기본 브라우저로 열립니다.
 
-  영상 창 위쪽 버튼:
+  영상 창 맨 아래 상태줄: 저장/녹화/연속 사진/오류 안내를 `HH:MM:SS  내용` 형식으로 표시합니다 (영상 위에 겹쳐 그리지 않으며, 다음 안내가 올 때까지 유지).
+
+  영상 창 맨 위 줄: 라디오 버튼 `WebCam1` `WebCam2` `IP Cam` + 버튼 `실행` `종료`.
+
+  영상 창 둘째 줄 버튼 (재생 중일 때만 `사진 저장` / `동영상 촬영` 사용 가능):
   - **우로 90도 회전 / 좌로 90도 회전**: 표시를 시계/반시계 방향으로 90도씩 회전합니다 (저장되는 사진·동영상에도 적용).
   - **사진 저장**: 현재 프레임을 JPEG 로 저장합니다.
-  - **동영상 촬영**: 처음 누르면 녹화 시작, 다시 누르면 녹화 종료 및 저장 (AVI / MJPG, 외부 라이브러리 없음). 녹화 중에는 제목줄에 `REC mm:ss` 가 표시되고 회전 버튼은 잠깁니다. 파일 크기가 약 1.9GB 에 이르면 자동 종료됩니다.
+  - **동영상 촬영**: 처음 누르면 녹화 시작, 다시 누르면 녹화 종료 및 저장 (AVI / MJPG, 외부 라이브러리 없음). 녹화 중에는 제목줄에 `REC mm:ss` 가 표시되고 회전 버튼은 잠깁니다. 파일 크기가 약 1.9GB 에 이르면 자동 종료됩니다. 웹캠 영상은 녹화하는 동안만 JPEG 로 인코딩해 담습니다.
   - **저장 폴더 열기**: 저장 폴더(`IPCam\`)를 탐색기로 엽니다.
-  - 저장 위치: exe 와 같은 폴더의 `IPCam\` (`ipcam_YYYYMMDD_HHMMSS.jpg / .avi`). 결과는 영상 아래쪽에 6초간 표시되고 `ipcam.log` 에도 기록됩니다.
+  - 저장 위치: exe 와 같은 폴더의 `IPCam\` (`ipcam_YYYYMMDD_HHMMSS.jpg / .avi`). 결과는 영상 창 맨 아래 상태줄에 표시되고 `ipcam.log` 에도 기록됩니다.
+
+  영상 창 셋째 줄 (연속 사진, 재생 중일 때만 개시 가능):
+  - **연속 사진 간격 목록(드롭다운)**: 1 / 2 / 3 / 5(기본) / 10 / 15 / 30 / 60 / 120 / 180 / 300 / 600 / 900 / 1800 / 3600 초. 연속 사진이 진행 중에는 바꿀 수 없습니다.
+  - **연속 사진 개시**: 누르면 첫 장을 바로 저장하고 이후 목록의 간격마다 `사진 저장` 과 같은 방식(회전 반영, `IPCam\`)으로 저장합니다. `연속 사진 종료` 를 누를 때까지 반복합니다.
+  - **연속 사진 종료**: 연속 사진을 멈춥니다 (영상 재생은 계속). 카메라 `종료` / `실행`(카메라 전환) 을 눌러도 함께 멈춥니다.
+  - **연속 10회**: 개시와 같지만 10장을 저장하면 자동으로 멈춥니다. 아직 영상이 안 들어와 저장하지 못한 시도는 장수에 넣지 않습니다.
 - **폰 탐색기**: 폰의 FTP 서버(CX파일 탐색기 등)에 탐색기로 접속합니다. 대화상자에 IP address / port / 사용자 이름 / 비밀번호를 입력하고 `실행` 을 누르면 `explorer.exe ftp://사용자 이름:비밀번호@IP:port` 를 실행합니다. 먼저 스마트폰에서 `CX파일 탐색기` 를 실행하고 [네트워크] → [네트워크 액세스] → [시작] 을 누르세요 (대화상자 상단 안내, Google Play 검색 링크 포함). IP address / port / 사용자 이름만 `[PhoneFtp]` 에 저장하며 **비밀번호는 저장하지도 로그에 남기지도 않습니다**.
-- 로그: exe 와 같은 폴더의 `ipcam.log` (예전 ipcam 과 같은 형식, 영상 창을 열 때마다 새로 작성).
-- 제한: 소리/녹화/HTTP 인증은 지원하지 않으며, 영상 경로는 `/video` 로 고정입니다.
+- 로그: exe 와 같은 폴더의 `ipcam.log` (첫 영상 창을 열 때 새로 작성하고, 창이 여러 개면 같은 파일에 이어서 기록하며 마지막 창이 닫힐 때 닫음. 웹캠 장치 이름/해상도 포함).
+- 제한: 소리/HTTP 인증은 지원하지 않으며, IP Cam 영상 경로는 `/video` 로 고정입니다. 웹캠은 장치 순서(WebCam1/2)로만 고르며 해상도/프레임 속도는 카메라 기본값입니다.
+
+## 다른 PC 원격 제어
+
+예전 `rdp_server.exe` / `rdp_client.exe` (rdp_mini)를 이 앱에 합친 기능입니다. 서버 PC(조작당하는 PC)의 모든 모니터 화면을 JPEG 로 받아 모니터마다 창 하나씩 보여 주고, 클라이언트 창 위의 마우스 이동/클릭/휠을 서버 PC 에 전달합니다 (키보드 입력은 전달하지 않음). 프로토콜은 예전과 같아서 옛 exe 와도 서로 연결됩니다. **암호화(TLS)가 없으므로 신뢰하는 내부망에서만 사용하세요.**
+
+두 PC 에서 모두 이 앱을 실행하고, 조작당할 PC 에서는 **다른 PC(서버)**, 조작할 PC 에서는 **다른 PC(클라이언트)** 를 엽니다. 예전 `rdp_server.ini` / `rdp_client.ini` 가 exe 폴더에 있고 `gsHomeManager.ini` 에 해당 섹션이 아직 없으면 처음 한 번 값을 가져옵니다 (원본 파일은 그대로 둠). 이후 옛 파일은 필요 없습니다.
+
+### F8) 다른 PC(서버)
+
+- 대화상자 위쪽에 **내 IP 주소**(이 PC 의 IPv4 전부)와 **현재 상태**(중지됨 / 대기 중 / 연결 요청 확인 중 / 연결됨 + 보낸 화면 수)가 0.5초마다 갱신되어 표시됩니다. 클라이언트에 입력할 IP 주소는 여기서 확인하세요.
+- 입력 칸: `port 번호`, `비밀번호`(보이기 체크로 확인), `허용 IP`(`any` = 제한 없음, 아니면 그 IP 에서 오는 접속만 허용), `연결 요청 확인`(처음 한 번만 / 묻지 않고 자동 수락 / 접속할 때마다), `프로그램을 시작할 때 서버를 자동으로 시작`, `연결되면 화상 키보드(OSK) 실행`(클라이언트 연결이 수락된 직후 `C:\Windows\System32\osk.exe` 를 실행).
+- 버튼: **저장**(ini 에 저장하고 닫음), **시작**(저장 후 서버 시작. 이미 실행 중이면 **재시작**), **서버 종료**(서버를 멈춤), **닫기**(저장 안 함). 서버는 전용 스레드로 동작하므로 대화상자를 닫아도 계속 동작하고, 프로그램을 종료하면 함께 중지됩니다.
+- 클라이언트가 접속해 비밀번호가 맞으면 서버 PC 에 `원격 연결 요청: IP` Yes/No 창이 맨 위에 뜹니다. Yes 이면 연결을 수락하고 화면 전송을 시작합니다. `처음 한 번만`(기본)이면 같은 클라이언트 IP 는 서버를 다시 시작할 때까지 다시 묻지 않습니다.
+- 비밀번호가 틀리면 1초 뒤에 거부합니다 (대입 공격 지연). 접속만 하고 인증 메시지를 보내지 않는 상대는 5초 뒤에 끊습니다. 한 번에 클라이언트 한 명만 연결됩니다.
+- 비밀번호는 `gsHomeManager.ini` 에 평문으로 저장됩니다 (로그에는 남기지 않음). ini 를 공유/업로드하지 마세요. 비밀번호 앞뒤 공백과 양끝 따옴표는 ini 에서 사라지므로 사용할 수 없고, 최대 60자입니다.
+- port 가 이미 사용 중이면 시작할 때 경고창에 사유가 표시됩니다. Windows 방화벽이 막으면 해당 port 의 들어오는 연결을 허용해야 합니다.
+
+### F8) 다른 PC(클라이언트)
+
+- 입력 칸: `서버 IP address`, `port 번호`, `비밀번호`. **저장**은 ini 에 저장하고 닫으며, **연결**은 저장한 뒤 서버에 연결을 요청합니다.
+- **연결**을 누르면 대화상자 안에 진행 막대와 남은 시간이 표시됩니다 (서버 접속 10초 → 서버 사용자의 승인 대기 60초). 이 동안 입력/연결/저장은 막히고 **닫기**가 **취소**로 바뀌며, 누르면 연결을 취소하고 대화상자를 닫습니다. 서버가 없거나 응답이 없거나 비밀번호가 틀리거나 서버 사용자가 No 를 누르면 사유를 오류 창으로 알려 주고 대화상자는 그대로 열려 있어 다시 시도할 수 있습니다. 연결에 성공하면 대화상자가 닫히고 원격 제어 창이 열립니다.
+- 연결되면 서버 모니터마다 창 하나가 열립니다 (`원격 제어 - 모니터 N (WxH)`). 창 크기를 바꾸면 화면이 늘어나거나 줄어들고, 마우스 좌표는 창 크기에 비례해 전달됩니다. **창 하나를 닫거나 서버가 연결을 끊으면 모든 원격 제어 창이 닫힙니다.** 원격 제어는 한 번에 하나만 연결할 수 있습니다.
+- 클라이언트 창은 앱의 다른 기능과 독립된 스레드에서 동작하므로 시계/WiFiScan/텔레그램에 영향을 주지 않습니다.
 
 ## 설정 파일 (`gsHomeManager.ini`)
 
@@ -189,24 +411,33 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 | `[Global]` | `BaseCity`, `Cities` |
 | `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작) |
 | `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
-| `[IPCam]` | `Host` (IP address), `Port` (기본 4747) |
+| `[IPCam]` | `Host` (IP address), `Port` (기본 4747). 카메라 영상 창의 IP Cam 용 (WebCam1/2 는 설정 없음) |
 | `[PhoneFtp]` | `Host`, `Port`, `User` (폰 탐색기. 비밀번호는 저장하지 않음) |
+| `[RdpServer]` | `port`(7071), `password`(평문), `allowed_ip`(`any`), `accept`(`once` / `auto` / `always`), `autostart`(0/1), `osk`(0/1) (다른 PC(서버)) |
+| `[RdpClient]` | `ip`, `port`(7071), `password`(평문) (다른 PC(클라이언트)) |
+| `[Telegram]` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, ... (위 `[Telegram]` 설정 키 표 참고) |
 | `[Window]` | `X`, `Y` (마지막 위치. 아나로그/디지탈 모양에 상관없이 [타이틀 & 디지탈] 모양의 창 좌표로 저장) |
 
-## 로그 (`gsHomeManager.log`)
+## 로그
 
-exe 와 같은 폴더에 UTF-8 로그를 남깁니다. 한 줄에 한 동작이며 `[YYYY-MM-DD HH:MM:SS.mmm] 내용` 형식입니다.
-
-- 기록 대상: 앱 시작/종료와 설정 로드, 중복 실행 차단, 모든 메뉴 명령, 시계 모양 변경, 아나로그 전체화면/크기 변경, 알람 시각 도달/파일 실행/플레이어 자동 닫기, 프로그램 실행, 시스템 재시작 확인창과 결과, 종료 확인창과 결과, 메모 표시, 창 그룹 이동, 시계 보이기/숨기기와 트레이, 도시 창 추가/닫힘, 글꼴/바탕색 변경, 폰 탐색기 실행(비밀번호 제외), Windows 종료/로그오프 요청
-- 기록할 때만 파일을 열고 바로 닫으므로 상주 메모리/핸들이 없습니다.
-- 1MB 를 넘으면 `gsHomeManager.log.old` 로 넘기고 새로 시작합니다.
+- `gsHomeManager.log`: exe 와 같은 폴더에 UTF-8 로그를 남깁니다. 한 줄에 한 동작이며 `[YYYY-MM-DD HH:MM:SS.mmm] 내용` 형식입니다.
+  - 기록 대상: 원격 제어(서버 시작/중지, 연결 요청과 허용/거부, 클라이언트 연결 시도/종료. 비밀번호 제외), 앱 시작/종료와 설정 로드, 중복 실행 차단, 모든 메뉴 명령, 시계 모양 변경, 아나로그 전체화면/크기 변경, 알람 시각 도달/파일 실행/플레이어 자동 닫기, 프로그램 실행, 시스템 재시작 확인창과 결과, 종료 확인창과 결과, 메모 표시, 창 그룹 이동, 시계 보이기/숨기기와 트레이, 도시 창 추가/닫힘, 글꼴/바탕색 변경, 폰 탐색기 실행(비밀번호 제외), Windows 종료/로그오프 요청, 텔레그램 `/stop` `/restart` 에 의한 종료/재시작
+  - 기록할 때만 파일을 열고 바로 닫으므로 상주 메모리/핸들이 없습니다.
+  - 1MB 를 넘으면 `gsHomeManager.log.old` 로 넘기고 새로 시작합니다.
+- `log.txt`: Telegram 모듈의 로그 (위 Telegram 참고)
+- `ipcam.log`: 카메라 영상 창 로그 (IP Cam / 웹캠)
 
 ## 참고
 
 - 모든 가상 데스크탑 적용은 비공개 셸 COM 인터페이스(`IVirtualDesktopPinnedApps`)를 사용하므로 Windows 버전에 따라 동작하지 않을 수 있습니다.
 - 도시별 시간대는 레지스트리의 시간대 정보를 사용합니다.
 - 아나로그 모양에서 마우스 휠이 동작하지 않으면 시계 창을 한 번 클릭해 포커스를 준 뒤 시도하세요 (Windows 의 '마우스로 가리킨 비활성 창 스크롤' 설정에 따라 다릅니다).
+- 같은 봇 토큰을 쓰는 다른 프로그램(옛 `screen_telegram.exe` 등)과 동시에 실행하지 마세요 (getUpdates 409 충돌).
+
+## 저작권
+
+김갑수. 이 프로그램은 기업이나 단체가 아닌 일반 개인에 한하여, 비상업적 목적으로 자유롭게 사용 할 수 있습니다. 기업이나 단체 등 개인이 아닌 사용자는 개발자 김갑수와 개별 협의하여야 합니다.
 
 ## 요구 사항
 
-Windows 11, 블루투스 어댑터(블루투스 scan 사용 시), MinGW-w64 g++ (빌드 시)
+Windows 11, 블루투스 어댑터(블루투스 scan 사용 시), 웹캠(카메라 캡처/침입 탐지 사용 시), MinGW-w64 g++ (빌드 시)

@@ -4,8 +4,8 @@
 #define gsHomeManager_VERSION_H
 
 #define APP_NAME            "gsHomeManager"
-#define APP_VERSION_NUM     1,0,0,2
-#define APP_VERSION_STR     "1.0.0.2"
+#define APP_VERSION_NUM     1,0,1,0
+#define APP_VERSION_STR     "1.0.1.0"
 
 #define APP_COMPANY         "김갑수"
 #define APP_COPYRIGHT       "김갑수) 이 프로그램은 기업이나 단체가 아닌 일반 개인에 한하여, 비상업적 목적으로 자유롭게 사용 할 수 있습니다."
