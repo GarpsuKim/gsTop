@@ -86,7 +86,7 @@ g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManage
 | F3 | 디지탈 시계 디자인 | 바탕색 변경(시계 바탕색과 모니터 바탕색을 동일하게 / 바탕색 선택), 투명도 변경, 시분초 표시 형식, 년월일 표시 형식, 시분초 글꼴, 년월일 글꼴, 년월일 보이기, 음력 보이기 |
 | F4 | 아나로그 시계 디자인 | 전체화면 on/off, 네온사인 on/off, 초침 생략 on/off, 배경색 일치 on/off, 테마 11종 |
 | F5 | Global | 도시 선택(중복 선택 불가). 도시 창을 닫으면 그 도시 시계만 종료 |
-| F6 | 알람 / 다른 앱 호출 | 알람1 ~ 알람10, 시스템 재시작, 다른 앱 호출 (아래 참고) |
+| F6 | 작동시간 및 알람 설정 | 알람1 ~ 알람10, 시스템 재시작, 다른 앱 호출, 침입 탐지 시간 (아래 참고) |
 | F7 | WiFiScan | WifiScan모니터링(설정/진행 상황 대화상자), Wifi공유기 자동감시 On / Off, HomeBack 프로그램, NotHome 프로그램 (아래 참고) |
 | F8 | IP cam / 폰 연결 | IP cam 등록(IP address / port 를 ini 에 저장), 카메라 영상(영상 창 열기 → WebCam1 / WebCam2 / IP Cam 선택 후 [실행]), 폰 탐색기, 다른 PC(서버), 다른 PC(클라이언트) |
 | F9 | Help | About(프로그램 이름/버전/개발자), ReadMe.MD(기본 브라우저로 열기), 홈페이지(주소 표시), 최신 버전 다운로드(GitHub zip 다운로드 링크 열기), 음력 API 키값 등록 |
@@ -125,21 +125,22 @@ F4) 아나로그 시계 디자인 메뉴 (모두 ini `[Analog]` 에 저장):
 
 ### 알람
 
-알람1 ~ 알람10 의 서브메뉴 항목:
+알람1 ~ 알람10 은 서브메뉴 없이 일반 메뉴 항목입니다(이름 + 시각 + 파일명, 사용 중이면 앞에 체크). 어느 항목을 눌러도 하나의 **알람 설정 대화상자**가 열리며, 탭 1 ~ 탭 10 이 알람1 ~ 알람10 입니다 (누른 알람의 탭이 먼저 열림). 탭의 항목:
 
-- **사용**: 매일 반복
-- **시각 설정**: 시:분:초 (초 단위까지 지정, 5초 이내 지연은 놓치지 않음)
-- **동영상/음악 파일 선택**: 알람 시각에 시스템 기본 플레이어로 실행
-- **메모 설정**: 알람 시각에 모니터 중앙에 30초 동안 표시 (최대 100자, 파일 없이 메모만 써도 됨)
-- **플레이어 자동 닫기**: 끔 / 재생이 끝나면 / 지정 시간 후
-- **닫기 시간 설정**: 닫기까지의 시간 (0 = 닫지 않음)
-- **알람 지우기**
-- **알람 테스트**: 선택된 파일을 1회만 실행 (설정 변경 없음)
+- **사용**: 매일 반복 (파일도 메모도 없으면 저장할 때 안내)
+- **시각**: 시:분:초 (초 단위까지 지정, 5초 이내 지연은 놓치지 않음)
+- **파일 선택 / 파일 지우기**: 알람 시각에 시스템 기본 플레이어로 실행할 동영상/음악
+- **메모**: 알람 시각에 모니터 중앙에 30초 동안 표시 (최대 100자, 파일 없이 메모만 써도 됨)
+- **플레이어 자동 닫기**: 끔 / 재생이 끝나면 / 지정 시간 후, 그리고 **닫기 시간** (0 = 닫지 않음)
+- **이 알람 지우기**, **알람 테스트**(현재 입력값으로 1회 실행, 설정 변경 없음)
+
+`저장` 을 누르면 열 개 탭의 변경 내용이 한꺼번에 ini 에 저장되고, `닫기` 는 저장하지 않습니다.
 
 알람 메뉴 맨 아래의 두 항목:
 
 - **시스템 재시작**: 메뉴 이름에 현재 시각이 표시되며(사용 중이면 앞에 체크), 누르면 시각과 `사용` 체크박스를 한 대화상자에서 설정합니다. 시각이 되면 확인창(300초)을 띄우고, Yes 또는 무응답이면 재시작(`shutdown /r /f /t 0`), No 이면 재시작하지 않습니다.
-- **다른 앱 호출**: 사용 / 시각 설정 / BAT·CMD·EXE 파일 선택 / 메모 설정 / 알람 지우기 / 알람 테스트. 시각이 되면 선택한 파일을 실행하고, 메모가 있으면 모니터 중앙에 30초 표시합니다.
+- **다른 앱 호출**: 서브메뉴 없이 누르면 하나의 대화상자가 열립니다(사용 / 시각 / BAT·CMD·EXE 파일 / 메모 / 알람 지우기 / 알람 테스트, `저장` 으로 반영). 시각이 되면 선택한 파일을 실행하고, 메모가 있으면 모니터 중앙에 30초 표시합니다.
+- **침입 탐지 시간**: 하나의 대화상자에서 `침입 탐지 사용`, `항상`, `매일 개시 시각`, `매일 종료 시각` 을 설정합니다(사용 중이면 메뉴 앞에 체크). `항상` 이 켜져 있으면 프로그램을 시작할 때(그리고 저장할 때) 텔레그램 `/detectOn` 을 실행하고, 꺼져 있으면 매일 개시 시각에 `/detectOn`, 종료 시각에 `/detectOff` 를 실행합니다(종료가 개시보다 이르면 자정을 넘김). 시간대 안에서 프로그램을 시작하거나 설정을 저장해도 바로 `/detectOn` 을 실행합니다. 명령은 같은 프로세스의 텔레그램 모듈에 직접 전달되므로 `[Telegram]` 의 토큰/chat id 와 카메라(CAMERA=TRUE)가 필요합니다. ini 키는 `[Alarm]` 의 `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (기본: 사용 안 함, 항상, 22:00:00, 06:00:00) 입니다.
 
 자동 닫기는 파일 재생 길이(+3초)를 셸 속성으로 읽어 계산하며, 읽지 못하면 지정 시간을 사용합니다. 실행 후 8초 안에 새로 생긴 플레이어 창을 찾아 `WM_CLOSE` 를 보내는 방식이므로 다음 제약이 있습니다.
 
@@ -410,7 +411,7 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 | `[Analog]` | `Theme`(0~10), `Neon`, `Full`, `MatchBg`, `Size`(60 ~ 모니터 높이, 기본 200), `HideSecond` |
 | `[Lunar]` | `ApiUrl`, `ApiKey` (음력 조회용 공공API 주소/인증키. 둘 다 있어야 '음력 보이기' 사용 가능) |
 | `[Global]` | `BaseCity`, `Cities` |
-| `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작) |
+| `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작), `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (침입 탐지 시간) |
 | `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
 | `[IPCam]` | `Host` (IP address), `Port` (기본 4747). 카메라 영상 창의 IP Cam 용 (WebCam1/2 는 설정 없음) |
 | `[PhoneFtp]` | `Host`, `Port`, `User` (폰 탐색기. 비밀번호는 저장하지 않음) |
