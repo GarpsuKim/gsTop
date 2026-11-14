@@ -1,7 +1,7 @@
 // gsHomeManager - 텍스트 시계 + 집 안팎 감시(블루투스/Wi-Fi 스캔) - Windows 11 GUI (WinMain), 클래스 구조, 전부 UTF-8
-// (gsClock 과 WiFiScan 을 하나로 합친 앱)
+// (gsClock 과 WiFiScan 을 하나로 합친 앱. screen_telegram 도 이 파일에 합쳤다: namespace tg)
 // rc/manifest 불필요. 문자열은 UTF-8 char 로만 다루고, 화면 출력 직전에만 UTF-8 -> UTF-16 변환(char16_t 버퍼)
-// 빌드: g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManager.cpp gsHomeManager_res.o -lcomdlg32 -lole32 -lcomctl32 -liphlpapi -lws2_32 -lbthprops -lgdiplus -lgdi32   (_build.bat)
+// 빌드: g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManager.cpp gsHomeManager_res.o -lcomdlg32 -lole32 -loleaut32 -lcomctl32 -liphlpapi -lws2_32 -lbthprops -lgdiplus -lgdi32 -lwinhttp -lmfuuid   (_build.bat)
 //
 // 구조
 //   Utf8            : UTF-8 변환 도우미
@@ -12,7 +12,12 @@
 //   Settings        : gsHomeManager.ini 읽기/쓰기 (타이머, 스타일, 옵션, 기준 도시, 창 위치, WiFiScan)
 //   TimeDialog      : 알람 시각(시:분:초) 입력 대화상자 (코드로 만든 대화상자 + 시간 선택 컨트롤)
 //   WiFiScan        : (WiFiScan.cpp 에서 가져옴) StrUtil / AppDir / Logger / NameResolver / OuiDb / Subnet / Arp / PrevResult /
-//                     ScanView / Bluetooth / ResultFile / WifiScanner / EndFile / TriggerFile / HomeWatcher / ScanEngine / ScanDialog
+//                     ScanView / Bluetooth / ResultFile / WifiScanner / TriggerFile / HomeWatcher / ScanEngine / ScanDialog
+//   namespace tg    : (screen_telegram.cpp 에서 가져옴) 주기 화면/웹캠 캡처 -> 텔레그램 전송, 봇 명령 수신, 침입 탐지(카메라 모션), 폰 <-> PC 파일 전송.
+//                     Logger / StrUtil / SysUtil / LocalTrigger / StopSignal / Config / ImageEncoder / TelegramClient / CommandListener /
+//                     MonitorCapture / CameraCapture / MotionDetector / ImageWindow / ScreenTelegramApp. 전용 스레드로 돌고 설정은 ini [Telegram]
+//   namespace rdp   : (rdp_server.cpp / rdp_client.cpp 에서 가져옴) 다른 PC 원격 제어. Server(화면 JPEG 전송 + 마우스 입력 주입) / Client(화면 보기 + 마우스 전달)
+//                     + RdpServerDialog / RdpClientDialog (메뉴 F8). 전용 스레드로 돌고 설정은 ini [RdpServer] / [RdpClient]
 //   ClockWindow     : 시계 창 1개. 본 창(메뉴 있음) + Global 도시 창(소유 창, 본 창 아래에 계속 추가)
 //   WinMain         : 조립
 // WinLibs(GCC 16, -Os, 정적 링크)에서 std::string 이동 생성자가 libstdc++.a 에 없어 링크 오류가 나는 것을 피한다:
@@ -40,8 +45,14 @@
 #include <shlobj.h>
 #include <tlhelp32.h>
 #include "version.h"                     // APP_NAME / APP_VERSION_STR (빌드할 때 불러옴. exe 속성의 버전 정보와 같은 값)
-#include <wininet.h>                     // 선언만 사용 (wininet.dll 은 동적 로딩이라 링크 옵션 불필요)
+#include <winhttp.h>                     // Telegram 모듈의 WinHTTP (-lwinhttp). wininet.h 와는 타입이 충돌해 함께 include 할 수 없다 (HttpGet 의 WinINet 은 동적 로딩 + 상수 직접 정의)
 #include <propsys.h>
+#include <objidl.h>                         // 여기부터 screen_telegram 에서 쓰는 헤더 (Media Foundation 카메라)
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <mferror.h>
+#undef FCC                                  // mfapi.h 의 FCC 매크로가 ipcam 녹화기의 FCC() 멤버 함수와 충돌
 #include <stdlib.h>
 #include <stdarg.h>
 #include <cstdio>                        // 여기부터 WiFiScan 에서 쓰는 표준 라이브러리
@@ -63,6 +74,9 @@
 #include <sstream>
 #include <functional>
 #include <cstdarg>
+#include <cwctype>
+#include <exception>
+#include <utility>
 using std::min; using std::max;           // gdiplus.h 가 min/max 를 그냥 쓴다 (NOMINMAX 와 함께 필요)
 #include <gdiplus.h>                      // IP cam (ipcam.cpp 통합)
 
@@ -145,6 +159,9 @@ public:
     SingleInstance& operator=(const SingleInstance&) = delete;
 
     bool IsFirst() const { return first_; }
+
+    // 뮤텍스를 미리 풀어 준다 (텔레그램 /restart: 새 프로세스를 띄우기 전에 호출). 소멸자는 이미 풀렸으면 아무것도 하지 않는다.
+    void Release() { if (mutex_) { CloseHandle(mutex_); mutex_ = NULL; } }
 
     // 이미 실행 중인 같은 앱을 종료시키고 이 프로세스가 대신 실행되게 함.
     // 1) 기존 본 창에 종료 메시지를 보내 정상 종료(위치/도시 목록 저장, 트레이 아이콘 제거)를 기다리고,
@@ -434,16 +451,27 @@ public:
     char     pgFile[784] = "";          // 실행할 BAT/CMD/EXE 경로 (UTF-8)
     char     pgMemo[320] = "";          // 실행할 때 모니터 중앙에 30초 표시할 메모
     struct HomeProg { bool on = false; char file[784] = ""; char memo[320] = ""; };
-    HomeProg homeProg[2];               // [0] HomeBack 프로그램, [1] NotHome 프로그램 (trigger.txt 에 /HomeBack, /NotHome 을 쓸 때 실행)
+    HomeProg homeProg[2];               // [0] HomeBack 프로그램, [1] NotHome 프로그램 (/HomeBack, /NotHome 판정이 날 때 실행)
     bool     rbOn = false;              // 시스템 재시작 사용
     int      rbH = 0, rbM = 0, rbS = 0; // 시스템 재시작 시각
     // [IPCam] 폰 카메라 앱(DroidCam, IP Webcam 등)의 주소
-    char     ipHost[64] = "";           // IP address (없으면 IP cam 영상을 열기 전에 등록)
+    char     ipHost[64] = "";           // IP address (없으면 카메라 영상 창에서 IP Cam 을 실행하기 전에 등록)
     int      ipPort     = 4747;         // port 번호 (DroidCam 4747, IP Webcam 8080)
     // [PhoneFtp] 폰 탐색기: 폰의 FTP 서버(CX파일탐색기 등) 주소. 비밀번호는 저장하지 않음
     char     phHost[32] = "";           // IP address (a.b.c.d)
     int      phPort     = 2121;         // port 번호
     char     phUser[64] = "";           // 사용자명
+    // [RdpServer] 다른 PC(서버): 이 PC 를 원격으로 제어하게 함 (예전 rdp_server.ini 의 [server]). 비밀번호는 ini 에 평문으로 저장됨
+    int      rsPort       = 7071;       // port
+    char     rsPass[200]  = "";         // password
+    char     rsAllow[40]  = "any";      // allowed_ip: any = 모든 IP 허용
+    int      rsAccept     = 0;          // accept: 0 once(클라이언트 IP 마다 처음 한 번만 묻기) / 1 auto(묻지 않음) / 2 always(접속할 때마다 묻기)
+    bool     rsAuto       = false;      // autostart: 프로그램을 시작할 때 서버를 자동으로 시작
+    bool     rsOsk        = false;      // osk: 클라이언트가 연결되면 화상 키보드(osk.exe) 실행
+    // [RdpClient] 다른 PC(클라이언트) (예전 rdp_client.ini 의 [client])
+    char     rcIp[40]     = "";         // 서버 IP address
+    int      rcPort       = 7071;
+    char     rcPass[200]  = "";
     // [WiFiScan] 집 안팎 감시 (WiFiScan.cpp 가 screen_telegram.ini 에서 읽던 키를 여기서 읽음)
     bool     scanBt       = true;       // ScanBluetooth: 블루투스를 scan 대상으로
     bool     scanWifi     = true;       // ScanWifi: Wi-Fi(LAN)를 scan 대상으로
@@ -589,6 +617,22 @@ public:
     void SaveTrayStart(bool on) {
         trayStart = on;
         WritePrivateProfileStringA("Option", "tray_start", on ? "TRUE" : "FALSE", ini_);
+    }
+
+    // 다른 PC(서버) 저장: [RdpServer] port / password / allowed_ip / accept / autostart
+    void SaveRdpServer() {
+        WriteInt("RdpServer", "port", rsPort);
+        WritePrivateProfileStringA("RdpServer", "password", rsPass, ini_);
+        WritePrivateProfileStringA("RdpServer", "allowed_ip", rsAllow, ini_);
+        WritePrivateProfileStringA("RdpServer", "accept", rsAccept == 1 ? "auto" : rsAccept == 2 ? "always" : "once", ini_);
+        WriteInt("RdpServer", "autostart", rsAuto);
+        WriteInt("RdpServer", "osk", rsOsk);
+    }
+    // 다른 PC(클라이언트) 저장: [RdpClient] ip / port / password
+    void SaveRdpClient() {
+        WritePrivateProfileStringA("RdpClient", "ip", rcIp, ini_);
+        WriteInt("RdpClient", "port", rcPort);
+        WritePrivateProfileStringA("RdpClient", "password", rcPass, ini_);
     }
 
     // 폰 탐색기 저장: [PhoneFtp] Host / Port / User (비밀번호는 저장하지 않음)
@@ -798,13 +842,32 @@ private:
             "; ScanOnUse / ScanOffUse = 1(사용), 0(해제).  ScanOnTime / ScanOffTime = HH:MM:SS (24시간제, 이 PC 시각)\r\n"
             "; ScanOnFile / ScanOffFile = 그 시각에 시스템 기본 플레이어로 재생할 동영상/음악 파일 경로,  ScanOnMemo / ScanOffMemo = 모니터 중앙에 30초 표시할 메모\r\n"
             "; ScanOnClose / ScanOffClose = 플레이어 자동 닫기 (0=끔, 1=재생이 끝나면, 2=지정 시간 후),  ScanOnCloseSec / ScanOffCloseSec = 닫기까지 시간(초)\r\n"
-            "; --- HomeBack / NotHome 프로그램 (메뉴 WiFiScan > HomeBack 프로그램 / NotHome 프로그램). trigger.txt 에 /HomeBack, /NotHome 을 쓸 때마다 실행합니다.\r\n"
+            "; --- HomeBack / NotHome 프로그램 (메뉴 WiFiScan > HomeBack 프로그램 / NotHome 프로그램). /HomeBack, /NotHome 판정이 날 때마다 실행합니다.\r\n"
             "; HomeBackProgOn / NotHomeProgOn = 1(사용), 0(해제).  HomeBackProgFile / NotHomeProgFile = 실행할 BAT/CMD/EXE 경로,  HomeBackProgMemo / NotHomeProgMemo = 모니터 중앙에 30초 표시할 메모\r\n"
             "\r\n"
             "[IPCam]\r\n"
             "; 폰 카메라 앱(DroidCam, IP Webcam 등)의 IP address 와 port 번호. 메뉴 'IP cam > IP cam 등록' 으로 입력합니다. (DroidCam 4747, IP Webcam 8080)\r\n"
             "Host=\r\n"
             "Port=4747\r\n"
+            "\r\n"
+            "[RdpServer]\r\n"
+            "; 다른 PC(서버): 이 PC 를 원격으로 제어하게 합니다. 메뉴 F8) IP cam / 폰 연결 > 다른 PC(서버) 에서 바꾸고 시작/중지합니다.\r\n"
+            "; port = 접속 port,  password = 클라이언트가 입력할 비밀번호 (평문으로 저장되므로 이 ini 를 공유/업로드하지 마세요)\r\n"
+            "; allowed_ip = 이 IP 에서 오는 접속만 허용 (any = 제한 없음),  accept = once(클라이언트 IP 마다 처음 한 번만 허용 여부를 묻기) / auto(묻지 않음) / always(접속할 때마다 묻기)\r\n"
+            "; autostart = 1 이면 프로그램을 시작할 때 서버를 자동으로 시작 (비밀번호가 있어야 함)\r\n"
+            "port=7071\r\n"
+            "password=\r\n"
+            "allowed_ip=any\r\n"
+            "accept=once\r\n"
+            "autostart=0\r\n"
+            "; osk = 1 이면 클라이언트가 연결될 때 화상 키보드(osk.exe)를 실행\r\n"
+            "osk=0\r\n"
+            "\r\n"
+            "[RdpClient]\r\n"
+            "; 다른 PC(클라이언트): 다른 PC 를 원격으로 제어합니다. 메뉴 F8) IP cam / 폰 연결 > 다른 PC(클라이언트) 에서 바꾸고 [연결] 을 누릅니다.\r\n"
+            "ip=\r\n"
+            "port=7071\r\n"
+            "password=\r\n"
             "\r\n"
             "[Window]\r\n"
             "; 윈도우 왼쪽 위 화면 좌표 X, Y (px) 는 앱이 창을 옮기거나 종료할 때 자동 저장됩니다.\r\n"
@@ -985,6 +1048,61 @@ private:
         ReadStr("WiFiScan", "HomeIp", homeIp, sizeof(homeIp));
         scanSec    = ReadSec("WiFiScan", "WiFiScanWatchInterval", scanSec, 5);
         notHomeSec = ReadSec("WiFiScan", "NotHome", notHomeSec, 1);
+        LoadRdp();
+    }
+
+    bool HasKey(const char* sec, const char* key) {
+        char t[4];
+        GetPrivateProfileStringA(sec, key, "\x01", t, sizeof(t), ini_);
+        return t[0] != '\x01';
+    }
+
+    // 예전 rdp_server.ini / rdp_client.ini (exe 폴더) 의 값을 새 섹션으로 가져옴. 새 섹션에 첫 키가 이미 있으면 하지 않음 (원본 파일은 그대로 둠)
+    void ImportRdpIni(const char* oldName, const char* oldSec, const char* newSec, const char* const* keys, int n) {
+        if (HasKey(newSec, keys[0])) return;
+        char path[MAX_PATH + 16];
+        lstrcpynA(path, ini_, MAX_PATH);
+        char* sl = strrchr(path, '\\');
+        if (!sl || (sl - path) + 1 + lstrlenA(oldName) >= (int)sizeof(path)) return;
+        lstrcpyA(sl + 1, oldName);
+        if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) return;
+        for (int i = 0; i < n; i++) {
+            char v[400];
+            GetPrivateProfileStringA(oldSec, keys[i], "", v, sizeof(v), path);
+            if (v[0]) WritePrivateProfileStringA(newSec, keys[i], v, ini_);
+        }
+        Log::Put("%s 의 설정을 ini [%s] 로 가져옴 (원본은 그대로 둠)", oldName, newSec);       // 비밀번호는 기록하지 않음
+    }
+
+    // 다른 PC(서버 / 클라이언트). 비밀번호가 UTF-8 로 63바이트를 넘을 수 있어 ReadStr(64바이트) 대신 넉넉한 버퍼로 읽음
+    void LoadRdp() {
+        static const char* const SRV[] = {"port", "password", "allowed_ip", "accept"};
+        static const char* const CLI[] = {"ip", "port", "password"};
+        ImportRdpIni("rdp_server.ini", "server", "RdpServer", SRV, 4);
+        ImportRdpIni("rdp_client.ini", "client", "RdpClient", CLI, 3);
+        const bool hadSrv = HasKey("RdpServer", "autostart") && HasKey("RdpServer", "accept") && HasKey("RdpServer", "osk");
+        const bool hadCli = HasKey("RdpClient", "ip") && HasKey("RdpClient", "password");
+        auto S = [&](const char* sec, const char* key, char* buf, int cap) {      // 값이 있으면 buf 에 (ANSI 로 저장된 한글은 UTF-8 로 바꿈)
+            char t[400];
+            GetPrivateProfileStringA(sec, key, "", t, sizeof(t), ini_);
+            Utf8::Normalize(t, sizeof(t));
+            if (t[0]) lstrcpynA(buf, t, cap);
+        };
+        rsPort = (int)GetPrivateProfileIntA("RdpServer", "port", rsPort, ini_);
+        if (rsPort < 1 || rsPort > 65535) rsPort = 7071;
+        S("RdpServer", "password", rsPass, sizeof(rsPass));
+        S("RdpServer", "allowed_ip", rsAllow, sizeof(rsAllow));
+        char m[16];
+        GetPrivateProfileStringA("RdpServer", "accept", "once", m, sizeof(m), ini_);
+        rsAccept = !lstrcmpiA(m, "auto") ? 1 : !lstrcmpiA(m, "always") ? 2 : 0;
+        rsAuto = GetPrivateProfileIntA("RdpServer", "autostart", 0, ini_) != 0;
+        rsOsk = GetPrivateProfileIntA("RdpServer", "osk", 0, ini_) != 0;
+        S("RdpClient", "ip", rcIp, sizeof(rcIp));
+        rcPort = (int)GetPrivateProfileIntA("RdpClient", "port", rcPort, ini_);
+        if (rcPort < 1 || rcPort > 65535) rcPort = 7071;
+        S("RdpClient", "password", rcPass, sizeof(rcPass));
+        if (!hadSrv) SaveRdpServer();                                             // 없는 키는 기본값을 ini 에 써 넣음
+        if (!hadCli) SaveRdpClient();
     }
 
     // 초 단위 값: 0 이면 기본값, lo 보다 작으면 lo (WiFiScan.cpp 와 같은 규칙: 주기 0 -> 15, 최소 5 / 외출 0 -> 60)
@@ -1090,33 +1208,37 @@ private:
 // 알람 시각(시:분:초) 선택 대화상자 (시간 선택 컨트롤, 화살표 키/스핀으로 조절)
 class TimeDialog {
 public:
-    static bool Show(HINSTANCE hi, HWND owner, const char* title, int& h, int& m, int& s) {
+    // use != NULL 이면 '사용' 체크박스를 함께 보여 주고 값을 입출력
+    static bool Show(HINSTANCE hi, HWND owner, const char* title, int& h, int& m, int& s, bool* use = NULL) {
         INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_DATE_CLASSES};
         InitCommonControlsEx(&ic);
 
         DlgBuilder b;
         b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
         b.D(0);
-        b.W(3); b.W(0); b.W(0); b.W(150); b.W(62);          // 항목 수, x, y, cx, cy (대화상자 단위)
+        b.W(use ? 4 : 3); b.W(0); b.W(0); b.W(150); b.W(use ? 78 : 62);     // 항목 수, x, y, cx, cy (대화상자 단위)
         b.W(0); b.W(0);                                     // 메뉴 없음, 기본 클래스
         b.S(title);
         b.W(9); b.S("Segoe UI");                            // DS_SETFONT: 글꼴 크기, 이름
         b.Control(WS_CHILD | WS_VISIBLE | WS_TABSTOP | DTS_TIMEFORMAT | DTS_UPDOWN,
                   15, 12, 120, 14, IDC_TIME, "SysDateTimePick32", "");
-        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 25, 38, 45, 14, IDOK, "확인");
-        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,    80, 38, 45, 14, IDCANCEL, "취소");
+        if (use) b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 15, 34, 120, 12, IDC_USE, "사용");
+        const int by = use ? 54 : 38;
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 25, by, 45, 14, IDOK, "확인");
+        b.Button(WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,    80, by, 45, 14, IDCANCEL, "취소");
 
-        int t[3] = {h, m, s};
+        int t[4] = {h, m, s, use && *use ? 1 : 0};
         INT_PTR ok = DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)t);
         if (ok != 1) return false;
         h = t[0];
         m = t[1];
         s = t[2];
+        if (use) *use = t[3] != 0;
         return true;
     }
 
 private:
-    enum { IDC_TIME = 100 };
+    enum { IDC_TIME = 100, IDC_USE = 101 };
 
     static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
         switch (msg) {
@@ -1130,6 +1252,7 @@ private:
             st.wSecond = (WORD)t[2];
             SendDlgItemMessageW(d, IDC_TIME, DTM_SETFORMATW, 0, (LPARAM)u"HH:mm:ss");
             SendDlgItemMessageW(d, IDC_TIME, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st);
+            CheckDlgButton(d, IDC_USE, t[3] ? BST_CHECKED : BST_UNCHECKED);      // 사용 체크박스가 없으면 아무 일도 안 함
             return TRUE;
         }
         case WM_COMMAND:
@@ -1140,6 +1263,7 @@ private:
                 t[0] = st.wHour;
                 t[1] = st.wMinute;
                 t[2] = st.wSecond;
+                t[3] = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED ? 1 : 0;
                 EndDialog(d, 1);
                 return TRUE;
             }
@@ -1747,6 +1871,8 @@ private:
         typedef BOOL (WINAPI *FnRead)(HINTERNET, LPVOID, DWORD, LPDWORD);
         typedef BOOL (WINAPI *FnClose)(HINTERNET);
         typedef BOOL (WINAPI *FnSetOpt)(HINTERNET, DWORD, LPVOID, DWORD);
+        const DWORD kOpenPreconfig = 0, kOptConnectTimeout = 2, kOptReceiveTimeout = 6;          // INTERNET_OPEN_TYPE_PRECONFIG, INTERNET_OPTION_CONNECT_TIMEOUT / RECEIVE_TIMEOUT
+        const DWORD kFlagReload = 0x80000000, kFlagNoCacheWrite = 0x04000000;                    // INTERNET_FLAG_RELOAD, INTERNET_FLAG_NO_CACHE_WRITE (wininet.h 를 include 하지 않으므로 직접 정의)
         HMODULE m = LoadLibraryA("wininet.dll");
         if (!m) return false;
         FnOpen     fOpen    = (FnOpen)GetProcAddress(m, "InternetOpenA");
@@ -1756,14 +1882,14 @@ private:
         FnSetOpt   fSetOpt  = (FnSetOpt)GetProcAddress(m, "InternetSetOptionA");
         bool ok = false;
         if (fOpen && fOpenUrl && fRead && fClose) {
-            HINTERNET net = fOpen("gsHomeManager/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+            HINTERNET net = fOpen("gsHomeManager/1.0", kOpenPreconfig, NULL, NULL, 0);
             if (net) {
                 DWORD to = 8000;                                  // 접속/수신 제한 시간 8초
                 if (fSetOpt) {
-                    fSetOpt(net, INTERNET_OPTION_CONNECT_TIMEOUT, &to, sizeof(to));
-                    fSetOpt(net, INTERNET_OPTION_RECEIVE_TIMEOUT, &to, sizeof(to));
+                    fSetOpt(net, kOptConnectTimeout, &to, sizeof(to));
+                    fSetOpt(net, kOptReceiveTimeout, &to, sizeof(to));
                 }
-                HINTERNET u = fOpenUrl(net, url, NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+                HINTERNET u = fOpenUrl(net, url, NULL, 0, kFlagReload | kFlagNoCacheWrite, 0);
                 if (u) {
                     int len = 0;
                     DWORD n = 0;
@@ -1813,8 +1939,8 @@ private:
 
 // ================================================================ WiFiScan
 // WiFiScan.cpp (블루투스/Wi-Fi 스캔 + 집 안팎 감시)를 합친 부분.
-//  - 만드는/읽는 파일은 WiFiScan.cpp 와 같다: WiFiScan_result.txt, WiFiScan_watch.log, oui.txt (exe 와 같은 폴더),
-//    ..\screen_telegram\trigger.txt (명령 전달), ..\screen_telegram\wifiscanTriger.txt (END 를 쓰면 scan Off)
+//  - 만드는/읽는 파일은 WiFiScan.cpp 와 같다: WiFiScan_result.txt, WiFiScan_watch.log, oui.txt (exe 와 같은 폴더).
+//  - /HomeBack, /NotHome 은 trigger.txt 파일 대신 같은 프로세스의 Telegram 모듈(namespace tg)에 직접 넘긴다 (TriggerFile -> tg::PostTrigger).
 //  - ini 키(HomeBluetooth, HomeMac, HomeIp, WiFiScanWatchInterval, NotHome)는 screen_telegram.ini 가 아니라
 //    gsHomeManager.ini 의 [WiFiScan] 에서 읽는다.
 //  - scan 은 작업 스레드(ScanEngine)에서 돌고, 진행 상황(ScanView)을 WiFiScan 대화상자(ScanDialog)가 읽어서 보여 준다.
@@ -1888,9 +2014,6 @@ public:
     static std::string logFile()    { return dir() + "WiFiScan_watch.log"; }
     static std::string resultFile() { return dir() + "WiFiScan_result.txt"; }
     static std::string ouiFile()    { return dir() + "oui.txt"; }
-    static std::string telegramDir() { return dir() + "..\\screen_telegram\\"; }
-    static std::string triggerFile() { return telegramDir() + "trigger.txt"; }
-    static std::string endFile()    { return telegramDir() + "wifiscanTriger.txt"; }
 };
 
 // ======================================================================
@@ -2528,28 +2651,13 @@ private:
 };
 
 // ======================================================================
-// 종료 파일 (wifiscanTriger.txt) : scan 을 시작할 때 무조건 지우고, 그 뒤 내용이 END 이면 scan Off (텔레그램 /stop)
+// 명령 전달 (HomeWatcher -> Telegram 모듈): 같은 프로세스 안에서 tg::PostTrigger 로 넘긴다
 // ======================================================================
-class EndFile {
-public:
-    static void remove() { DeleteFileA(AppDir::endFile().c_str()); }
-    static bool requested() {
-        std::ifstream f(AppDir::endFile(), std::ios::binary);
-        if (!f) return false;
-        std::string l; std::getline(f, l);
-        if (l.compare(0, 3, "\xEF\xBB\xBF") == 0) l.erase(0, 3);
-        return StrUtil::upper(StrUtil::trim(l)) == "END";
-    }
-};
-
-// ======================================================================
-// 명령 전달 파일 (trigger.txt): screen_telegram.exe 가 1초마다 읽어 처리한다
-// ======================================================================
-// 작업 스레드 -> 본 창(UI 스레드) 알림: 하단 상태줄 문구, 모니터 중앙 팝업 (trigger.txt 갱신 등)
+// 작업 스레드 -> 본 창(UI 스레드) 알림: 하단 상태줄 문구, 모니터 중앙 팝업 (텔레그램 명령 전달 등), 앱 종료 요청
 class ScanEvents {
 public:
     enum { MSG = WM_APP + 4 };
-    struct Item { int kind; std::string text; };      // kind: 0=상태줄, 1=팝업(5초), 2=HomeBack 프로그램 실행, 3=NotHome 프로그램 실행
+    struct Item { int kind; std::string text; };      // kind: 0=상태줄, 1=팝업(5초), 2=HomeBack 프로그램 실행, 3=NotHome 프로그램 실행, 4=앱 종료
     static void SetWindow(HWND h) {
         bool any;
         { std::lock_guard<std::mutex> g(mu_); wnd_ = h; any = !q_.empty(); }
@@ -2564,6 +2672,7 @@ public:
     }
     static void Popup(const std::string& text) { push(Item{1, text}); }
     static void Program(int home) { push(Item{home ? 3 : 2, std::string()}); }   // home: 0=HomeBack, 1=NotHome
+    static void Quit() { push(Item{4, std::string()}); }                         // 텔레그램 /stop, /restart: 본 창이 앱을 종료함 (확인창 없이)
     static std::vector<Item> Take() {
         std::lock_guard<std::mutex> g(mu_);
         std::vector<Item> v;
@@ -2586,30 +2695,19 @@ private:
     static inline HWND wnd_ = NULL;
 };
 
+namespace tg { void PostTrigger(const std::string& cmd); }      // Telegram 모듈 (아래쪽 namespace tg)
+
 class TriggerFile {
 public:
-    explicit TriggerFile(std::string path) : path_(std::move(path)) {}
-    const std::string& path() const { return path_; }
-    // 임시 파일에 쓴 뒤 이름 바꾸기 -> 반쯤 쓰인 파일을 읽지 않음
+    // /HomeBack, /NotHome 을 같은 프로세스의 Telegram 모듈에 넘긴다.
+    // (예전에는 screen_telegram 폴더의 trigger.txt 에 써서 다른 프로세스(screen_telegram.exe)가 1초마다 읽었다)
     void send(const std::string& cmd) const {
-        const std::string tmp = path_ + ".tmp";
-        bool ok = false;
-        {
-            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-            if (f) { f << cmd << "\r\n"; f.flush(); ok = f.good(); }
-        }
-        if (ok) ok = MoveFileExA(tmp.c_str(), path_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-        DWORD err = ok ? 0 : GetLastError();
-        if (!ok) DeleteFileA(tmp.c_str());
-        Logger::log(std::string("트리거 파일 ") + (ok ? "기록 성공" : "기록 실패 (오류 " + std::to_string(err) + ", screen_telegram 폴더 확인)") + ": " + cmd);
-        if (ok) {
-            ScanEvents::Popup("trigger.txt 갱신: " + cmd);
-            if (cmd == "/HomeBack") ScanEvents::Program(0);
-            else if (cmd == "/NotHome") ScanEvents::Program(1);
-        }      // 모니터 중앙에 5초 팝업 (본 창이 표시)
+        tg::PostTrigger(cmd);
+        Logger::log("텔레그램 모듈에 명령 전달: " + cmd);
+        ScanEvents::Popup("텔레그램 명령 전달: " + cmd);        // 모니터 중앙에 5초 팝업 (본 창이 표시)
+        if (cmd == "/HomeBack") ScanEvents::Program(0);
+        else if (cmd == "/NotHome") ScanEvents::Program(1);
     }
-private:
-    std::string path_;
 };
 
 
@@ -2635,55 +2733,51 @@ private:
 // 집 안팎 감시
 //   판정 순서: 1) 블루투스(HomeBluetooth) 로 확인  2) 확인되지 않으면 Wi-Fi 스캔(HomeMac) 으로 확인
 //   집에 있음으로 바뀌면 -> /HomeBack, NotHome 초 연속 둘 다 미확인 -> /NotHome (WiFiScan_watch.log)
-//   전달 방식: screen_telegram 폴더의 trigger.txt 에 명령 한 줄을 쓴다 (screen_telegram.exe 가 1초마다 읽어 처리)
+//   전달 방식: 같은 프로세스의 Telegram 모듈(namespace tg)에 직접 넘긴다 (tg::PostTrigger)
 // ======================================================================
 class HomeWatcher {
 public:
     HomeWatcher(Subnet sn, ScanCfgBox& cfg, ScanView& view, const Cancel& cancel)
-        : sn_(sn), cfg_(cfg), view_(view), cancel_(cancel), trigger_(AppDir::triggerFile()) {}
+        : sn_(sn), cfg_(cfg), view_(view), cancel_(cancel) {}
 
-    // 반환: true = wifiscanTriger.txt 의 END 로 끝남, false = 취소됨 (scan Off / 재시작 / 앱 종료)
-    bool run() {
+    // 취소될 때까지 감시한다 (scan Off / 재시작 / 앱 종료 때 끝남)
+    void run() {
         apply(cfg_.get());
-        Logger::log("설정: gsHomeManager.ini [WiFiScan] / 트리거 파일: " + trigger_.path());
+        Logger::log("설정: gsHomeManager.ini [WiFiScan] / /HomeBack, /NotHome 은 같은 프로세스의 Telegram 모듈로 전달");
         Logger::log("감시 시작: 블루투스 " + (haveBt() ? btMac_ : std::string("(없음)")) + " -> Wi-Fi " + (haveWifi() ? mac_ : std::string("(없음)")) +
                     " (간격 " + std::to_string(interval_) + "초, 외출 판정 " + std::to_string(awaySec_) + "초)");
         for (;;) try {
-            if (cancel_()) return false;
-            if (EndFile::requested()) return endNow();
+            if (cancel_()) return;
             if (apply(cfg_.get()))
                 Logger::log("설정 변경: 블루투스 " + (haveBt() ? btMac_ : std::string("(없음)")) + " / Wi-Fi " + (haveWifi() ? mac_ : std::string("(없음)")) +
                             " (간격 " + std::to_string(interval_) + "초, 외출 판정 " + std::to_string(awaySec_) + "초)");
             if (!haveBt() && !haveWifi()) {            // 확인할 대상이 없어도 멈추지 않고, 설정이 저장되면 자동으로 시작
                 if (!warned_) { Logger::log("HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중"); warned_ = true; }
                 view_.setPhase("감시 대기 중: 블루투스 / LAN 카드 MAC 주소를 입력하고 저장하세요");
-                if (sleepOrStop(interval_)) return end_;
+                if (sleepOrStop(interval_)) return;
                 continue;
             }
             warned_ = false;
             if (state_ == -1) view_.setPhase("감시 중 - 블루투스 / Wi-Fi 확인 중...");
             std::string via;
             const bool present = checkBluetooth(via) || checkWifi(via);   // 1) 블루투스 우선  2) 확인되지 않으면 Wi-Fi
-            if (cancel_()) return false;
+            if (cancel_()) return;
             update(present, via);
-            if (sleepOrStop(interval_)) return end_;
+            if (sleepOrStop(interval_)) return;
         } catch (const std::exception& e) {
             Logger::log(std::string("오류: ") + e.what());
-            if (sleepOrStop(interval_)) return end_;
+            if (sleepOrStop(interval_)) return;
         }
     }
 
 private:
-    bool endNow() { Logger::log("wifiscanTriger.txt = END: scan 을 끕니다"); end_ = true; return true; }
-
-    // interval 초 동안 쉬면서 취소 / 종료 파일(1초마다)을 본다. 멈춰야 하면 true
+    // interval 초 동안 쉬면서 취소를 본다. 멈춰야 하면 true
     bool sleepOrStop(int seconds) {
         for (int i = 0; i < seconds * 10; i++) {
             if (cancel_()) return true;
-            if (i % 10 == 0 && EndFile::requested()) return endNow();
             Sleep(100);
         }
-        return cancel_() || (EndFile::requested() && endNow());
+        return cancel_();
     }
 
     // 설정(ini/대화상자 값)을 읽어 반영. 바뀐 것이 있으면 true
@@ -2757,7 +2851,7 @@ private:
     std::string mac_, btMac_, lastBtInfo_, lastWifiInfo_;
     ULONGLONG btAddr_ = 0;
     uint32_t homeIp_ = 0, ip_ = 0;
-    bool useBt_ = false, useWifi_ = false, warned_ = false, end_ = false;
+    bool useBt_ = false, useWifi_ = false, warned_ = false;
     int interval_ = 15, awaySec_ = 60, state_ = -1;           // state_: -1 미정, 1 HOME, 0 AWAY
     time_t lastSeen_ = 0;
 };
@@ -2831,11 +2925,10 @@ private:
     static void SleepMs(int ms, const Cancel& cancel) { for (int t = 0; t < ms && !cancel(); t += 100) Sleep(100); }
 
     void Work(ScanView& view, const Cancel& cancel) {
-        EndFile::remove();                                    // 시작할 때 종료 파일은 무조건 지운다 (예전 END 로 바로 멈추지 않도록)
         WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
         struct WsaGuard { ~WsaGuard() { WSACleanup(); } } wsaGuard;
         const ScanCfg c = cfg_.get();
-        Logger::log("WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시 (종료: " + AppDir::endFile() + " 에 END)");
+        Logger::log("WiFiScan 시작: 1) 블루투스 스캔 2) Wi-Fi 스캔 3) 감시");
 
         // 부팅 직후에는 네트워크가 아직 준비되지 않았을 수 있으므로 최대 60초 기다린다 (없으면 블루투스만으로 진행, 감시 중 다시 찾음)
         Subnet sn;
@@ -2889,8 +2982,7 @@ private:
         // 3) 감시
         view.setPhase("감시 시작");
         HomeWatcher w(sn, cfg_, view, cancel);
-        const bool end = w.run();
-        if (end && !cancel()) { on_ = false; view.freeze("scan Off (wifiscanTriger.txt 의 END)"); ScanEvents::Status("scan Off - END 파일"); }
+        w.run();
     }
 
     ScanCfgBox cfg_;
@@ -3418,6 +3510,12 @@ public:
         return InterlockedIncrement(&total_);
     }
     void SetStatus(const std::string& s) { ScopedLock lk(cs_); status_ = s; }
+    // 현재 프레임을 지우고 안내 문구만 보이게 함 (카메라를 바꾸거나 종료할 때)
+    void Clear(const std::string& s) {
+        { ScopedLock lk(cs_); delete bmp_; bmp_ = nullptr; status_ = s; }
+        InterlockedExchange(&frames_, 0);
+        InterlockedExchange(&total_, 0);
+    }
     int  TakeFps()  { return (int)InterlockedExchange(&frames_, 0); }
     LONG Total() const { return total_; }
 
@@ -3445,7 +3543,12 @@ public:
             RECT r = rc;
             SetTextColor(dc, RGB(200, 200, 200));
             SetBkMode(dc, TRANSPARENT);
-            DrawTextA(dc, status_.c_str(), -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            char16_t u[300];                                                    // 안내 문구는 UTF-8 (한글 가능)
+            if (Utf8::ToUtf16(status_.c_str(), -1, u, 300)) {
+                HGDIOBJ of = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+                DrawTextW(dc, (LPCWSTR)u, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                SelectObject(dc, of);
+            }
         }
     }
 private:
@@ -3530,7 +3633,24 @@ private:
             DWORD to = 5000;
             setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
             IPLOG("connecting to %s:%s ...", ip, cfg_.port.c_str());
-            if (connect(s, p->ai_addr, (int)p->ai_addrlen) == 0) { IPLOG("connected"); break; }
+            // 비차단 connect: 최대 5초, 100ms 마다 종료 요청 확인 (잘못된 IP 에서도 [종료] 가 바로 먹도록)
+            u_long nb = 1;
+            ioctlsocket(s, FIONBIO, &nb);
+            bool ok = (connect(s, p->ai_addr, (int)p->ai_addrlen) == 0);
+            if (!ok && WSAGetLastError() == WSAEWOULDBLOCK) {
+                for (int i = 0; i < 50 && !Stopping(); i++) {
+                    fd_set wf, ef;
+                    FD_ZERO(&wf); FD_ZERO(&ef);
+                    FD_SET(s, &wf); FD_SET(s, &ef);
+                    timeval tv = {0, 100000};
+                    int sr = select(0, nullptr, &wf, &ef, &tv);
+                    if (sr > 0) { ok = FD_ISSET(s, &wf) != 0; break; }
+                    if (sr < 0) break;
+                }
+            }
+            nb = 0;
+            ioctlsocket(s, FIONBIO, &nb);
+            if (ok) { IPLOG("connected"); break; }
             IPLOG("connect() failed wsaerr=%d", WSAGetLastError());
             closesocket(s);
             s = INVALID_SOCKET;
@@ -3605,6 +3725,236 @@ private:
     SOCKET sock_ = INVALID_SOCKET;
 };
 
+// ============================================================ WebcamClient
+// PC 에 연결된 웹캠(WebCam1 = 장치 #0, WebCam2 = 장치 #1, Media Foundation 열거 순서)을 수신 스레드에서 읽어 FrameStore 에 올린다.
+// Telegram 의 CameraCapture 와 같은 방식(MF 함수는 실행 중에 동적 로딩 -> N/KN 에디션에서도 앱은 시작됨)이지만 독립 객체이다.
+// 침입 탐지(/detectOn) 등 다른 곳이 카메라를 쓰는 중이면 열기에 실패하므로 2초마다 다시 시도한다.
+class WebcamClient {
+public:
+    using FrameCallback = std::function<void()>;
+    using BitmapSink = std::function<void(Gdiplus::Bitmap*)>;       // 녹화용: 디코딩된 프레임 (Publish 전에 호출)
+
+    WebcamClient(int index, FrameStore& store, FrameCallback onFrame, BitmapSink sink = nullptr)
+        : index_(index), store_(store), onFrame_(std::move(onFrame)), sink_(std::move(sink)) {
+        stopEvt_ = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    }
+    ~WebcamClient() { Stop(); if (stopEvt_) CloseHandle(stopEvt_); }
+    WebcamClient(const WebcamClient&) = delete;
+    WebcamClient& operator=(const WebcamClient&) = delete;
+
+    void Start() {
+        if (thread_) return;
+        ResetEvent(stopEvt_);
+        thread_ = CreateThread(nullptr, 0, &WebcamClient::ThreadProc, this, 0, nullptr);
+        if (!thread_) IPLOG("CreateThread failed err=%lu", GetLastError());
+    }
+    void Stop() {
+        if (!thread_) return;
+        SetEvent(stopEvt_);
+        if (WaitForSingleObject(thread_, 5000) == WAIT_TIMEOUT) IPLOG("WebcamThread did not stop within 5s");
+        CloseHandle(thread_);
+        thread_ = nullptr;
+    }
+
+private:
+    typedef HRESULT(WINAPI* PFN_MFStartup)(ULONG, DWORD);
+    typedef HRESULT(WINAPI* PFN_MFShutdown)(void);
+    typedef HRESULT(WINAPI* PFN_MFCreateAttributes)(IMFAttributes**, UINT32);
+    typedef HRESULT(WINAPI* PFN_MFEnumDeviceSources)(IMFAttributes*, IMFActivate***, UINT32*);
+    typedef HRESULT(WINAPI* PFN_MFCreateMediaType)(IMFMediaType**);
+    typedef HRESULT(WINAPI* PFN_MFCreateSourceReaderFromMediaSource)(IMFMediaSource*, IMFAttributes*, IMFSourceReader**);
+
+    static DWORD WINAPI ThreadProc(LPVOID p) { static_cast<WebcamClient*>(p)->Run(); return 0; }
+
+    bool Stopping() const { return WaitForSingleObject(stopEvt_, 0) == WAIT_OBJECT_0; }
+    bool SleepOrStop(DWORD ms) const { return WaitForSingleObject(stopEvt_, ms) == WAIT_OBJECT_0; }
+
+    void Run() {
+        IPLOG("WebcamThread started (device #%d)", index_);
+        const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+        if (LoadApi() && SUCCEEDED(pMFStartup_(MF_VERSION, 0))) {
+            while (!Stopping()) {
+                std::string err;
+                if (!OpenReader(err)) {
+                    store_.SetStatus(err + " - retrying...");
+                    IPLOG("open failed: %s", err.c_str());
+                    if (SleepOrStop(2000)) break;
+                    continue;
+                }
+                ReadLoop();
+                CloseReader();
+                if (Stopping()) break;
+                store_.SetStatus("Camera disconnected - retrying...");
+                if (SleepOrStop(2000)) break;
+            }
+            CloseReader();
+            pMFShutdown_();
+        } else {
+            store_.SetStatus("Media Foundation is not available");
+            IPLOG("Media Foundation load/startup failed");
+        }
+        if (com) CoUninitialize();
+        IPLOG("WebcamThread exit");
+    }
+
+    bool LoadApi() {
+        HMODULE hPlat = LoadLibraryW(L"mfplat.dll");
+        HMODULE hMf = LoadLibraryW(L"mf.dll");
+        HMODULE hRw = LoadLibraryW(L"mfreadwrite.dll");
+        if (!hPlat || !hMf || !hRw) return false;
+        pMFStartup_ = (PFN_MFStartup)GetProcAddress(hPlat, "MFStartup");
+        pMFShutdown_ = (PFN_MFShutdown)GetProcAddress(hPlat, "MFShutdown");
+        pMFCreateAttributes_ = (PFN_MFCreateAttributes)GetProcAddress(hPlat, "MFCreateAttributes");
+        pMFCreateMediaType_ = (PFN_MFCreateMediaType)GetProcAddress(hPlat, "MFCreateMediaType");
+        pMFEnumDeviceSources_ = (PFN_MFEnumDeviceSources)GetProcAddress(hMf, "MFEnumDeviceSources");
+        pMFCreateReader_ = (PFN_MFCreateSourceReaderFromMediaSource)GetProcAddress(hRw, "MFCreateSourceReaderFromMediaSource");
+        return pMFStartup_ && pMFShutdown_ && pMFCreateAttributes_ && pMFCreateMediaType_ && pMFEnumDeviceSources_ && pMFCreateReader_;
+    }
+
+    void CloseReader() {
+        if (reader_) { reader_->Release(); reader_ = nullptr; }
+        if (source_) { source_->Shutdown(); source_->Release(); source_ = nullptr; }
+    }
+
+    // index_ 번째 웹캠을 열어 reader_ 를 RGB32 출력으로 준비한다. 실패하면 err 에 사유 (열린 것은 모두 정리).
+    bool OpenReader(std::string& err) {
+        IMFAttributes* pAttr = nullptr;
+        IMFActivate** devs = nullptr;
+        UINT32 count = 0;
+        IMFAttributes* pRdAttr = nullptr;
+        IMFMediaType* pType = nullptr;
+
+        HRESULT hr = pMFCreateAttributes_(&pAttr, 1);
+        if (SUCCEEDED(hr)) hr = pAttr->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+        if (SUCCEEDED(hr)) hr = pMFEnumDeviceSources_(pAttr, &devs, &count);
+        if (SUCCEEDED(hr) && (UINT32)index_ >= count) {
+            char b[64];
+            snprintf(b, sizeof b, "WebCam%d not found (%u camera%s)", index_ + 1, (unsigned)count, count == 1 ? "" : "s");
+            err = b;
+            hr = E_FAIL;
+        }
+        if (SUCCEEDED(hr)) {
+            WCHAR* nm = nullptr;
+            UINT32 len = 0;
+            if (SUCCEEDED(devs[index_]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &nm, &len)) && nm) {
+                char u8[256];
+                WideCharToMultiByte(CP_UTF8, 0, nm, -1, u8, sizeof u8, nullptr, nullptr);
+                IPLOG("device #%d: %s (%u found)", index_, u8, (unsigned)count);
+                CoTaskMemFree(nm);
+            }
+            hr = devs[index_]->ActivateObject(IID_PPV_ARGS(&source_));
+        }
+        if (SUCCEEDED(hr)) hr = pMFCreateAttributes_(&pRdAttr, 1);
+        if (SUCCEEDED(hr)) hr = pRdAttr->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);   // MJPEG/YUY2/NV12 -> RGB32 자동 변환
+        if (SUCCEEDED(hr)) hr = pMFCreateReader_(source_, pRdAttr, &reader_);
+        if (SUCCEEDED(hr)) hr = pMFCreateMediaType_(&pType);
+        if (SUCCEEDED(hr)) hr = pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        if (SUCCEEDED(hr)) hr = pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+        if (SUCCEEDED(hr)) hr = reader_->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pType);
+
+        w_ = h_ = 0;
+        bottomUp_ = true;                                            // MF RGB 규약: stride 가 음수이면 bottom-up (속성 없을 때 기본)
+        if (SUCCEEDED(hr)) {
+            IMFMediaType* pCur = nullptr;
+            hr = reader_->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCur);
+            if (SUCCEEDED(hr)) {
+                MFGetAttributeSize(pCur, MF_MT_FRAME_SIZE, &w_, &h_);
+                UINT32 ds = 0;
+                if (SUCCEEDED(pCur->GetUINT32(MF_MT_DEFAULT_STRIDE, &ds))) bottomUp_ = ((LONG)ds < 0);
+                pCur->Release();
+            }
+        }
+        if (SUCCEEDED(hr) && (w_ == 0 || h_ == 0)) { err = "Camera frame size unknown"; hr = E_FAIL; }
+        if (FAILED(hr) && err.empty()) {
+            char b[96];
+            snprintf(b, sizeof b, "Camera open failed (0x%08lX, in use by another app?)", (unsigned long)hr);
+            err = b;
+        }
+
+        if (pType) pType->Release();
+        if (pRdAttr) pRdAttr->Release();
+        if (devs) {
+            for (UINT32 i = 0; i < count; ++i) devs[i]->Release();
+            CoTaskMemFree(devs);
+        }
+        if (pAttr) pAttr->Release();
+        if (FAILED(hr)) { CloseReader(); return false; }
+        IPLOG("camera opened: %ux%u bottomUp=%d", (unsigned)w_, (unsigned)h_, (int)bottomUp_);
+        return true;
+    }
+
+    // 프레임을 계속 읽어 올린다. 끊기거나 오류가 나면 반환 (바깥 루프가 다시 연다)
+    void ReadLoop() {
+        while (!Stopping()) {
+            DWORD flags = 0;
+            IMFSample* smp = nullptr;
+            HRESULT hr = reader_->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &flags, nullptr, &smp);
+            if (FAILED(hr)) { IPLOG("ReadSample failed hr=0x%08lX", (unsigned long)hr); return; }
+            if (flags & (MF_SOURCE_READERF_ERROR | MF_SOURCE_READERF_ENDOFSTREAM)) {
+                if (smp) smp->Release();
+                IPLOG("ReadSample flags=0x%lX -> reopen", (unsigned long)flags);
+                return;
+            }
+            if (!smp) continue;
+            Gdiplus::Bitmap* bmp = ToBitmap(smp);
+            smp->Release();
+            if (!bmp) continue;
+            if (sink_) sink_(bmp);
+            LONG tot = store_.Publish(bmp);
+            if (tot == 1) IPLOG("first frame: %ux%u", (unsigned)w_, (unsigned)h_);
+            else if (tot % 300 == 0) IPLOG("frames so far: %ld", tot);
+            if (onFrame_) onFrame_();
+        }
+    }
+
+    // MF RGB32(BGRX) 샘플 -> 32bppPARGB 비트맵 (알파는 불투명으로 채움, bottom-up 이면 행을 뒤집어 복사)
+    Gdiplus::Bitmap* ToBitmap(IMFSample* smp) {
+        IMFMediaBuffer* buf = nullptr;
+        if (FAILED(smp->ConvertToContiguousBuffer(&buf)) || !buf) return nullptr;
+        Gdiplus::Bitmap* out = nullptr;
+        BYTE* data = nullptr;
+        DWORD maxLen = 0, curLen = 0;
+        if (SUCCEEDED(buf->Lock(&data, &maxLen, &curLen))) {
+            LONG stride = (LONG)(curLen / h_);
+            if (stride < (LONG)w_ * 4) stride = (LONG)w_ * 4;
+            if ((size_t)stride * h_ <= curLen) {                     // 버퍼가 프레임보다 작으면 범위 밖 읽기 방지
+                out = new Gdiplus::Bitmap((INT)w_, (INT)h_, PixelFormat32bppPARGB);
+                Gdiplus::BitmapData bd;
+                Gdiplus::Rect rc(0, 0, (INT)w_, (INT)h_);
+                if (out->LockBits(&rc, Gdiplus::ImageLockModeWrite, PixelFormat32bppPARGB, &bd) == Gdiplus::Ok) {
+                    for (UINT y = 0; y < h_; y++) {
+                        const BYTE* s = data + (size_t)(bottomUp_ ? (h_ - 1 - y) : y) * stride;
+                        BYTE* d = (BYTE*)bd.Scan0 + (ptrdiff_t)y * bd.Stride;
+                        memcpy(d, s, (size_t)w_ * 4);
+                        for (UINT x = 3; x < w_ * 4; x += 4) d[x] = 0xFF;
+                    }
+                    out->UnlockBits(&bd);
+                } else { delete out; out = nullptr; }
+            }
+            buf->Unlock();
+        }
+        buf->Release();
+        return out;
+    }
+
+    int index_;
+    FrameStore& store_;
+    FrameCallback onFrame_;
+    BitmapSink sink_;
+    HANDLE thread_ = nullptr;
+    HANDLE stopEvt_ = nullptr;
+    IMFMediaSource* source_ = nullptr;
+    IMFSourceReader* reader_ = nullptr;
+    UINT32 w_ = 0, h_ = 0;
+    bool bottomUp_ = true;
+    PFN_MFStartup pMFStartup_ = nullptr;
+    PFN_MFShutdown pMFShutdown_ = nullptr;
+    PFN_MFCreateAttributes pMFCreateAttributes_ = nullptr;
+    PFN_MFCreateMediaType pMFCreateMediaType_ = nullptr;
+    PFN_MFEnumDeviceSources pMFEnumDeviceSources_ = nullptr;
+    PFN_MFCreateSourceReaderFromMediaSource pMFCreateReader_ = nullptr;
+};
+
 // ============================================================ Jpeg 인코딩 / 회전 도우미
 // 비트맵을 (시계 방향) 90도 단위로 돌려 JPEG 바이트로 만든다. rot: 0~3
 static bool JpegClsid(CLSID* out) {
@@ -3665,6 +4015,19 @@ static std::string SaveDir() {
     return dir;
 }
 
+// 같은 이름의 파일이 이미 있으면 _1, _2 ... 를 붙여 덮어쓰지 않게 함 (영상 창이 여러 개일 때 같은 초에 저장해도 안전)
+static std::string UniquePath(const std::string& path) {
+    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) return path;
+    const size_t dot = path.find_last_of('.');
+    const std::string base = dot == std::string::npos ? path : path.substr(0, dot);
+    const std::string ext = dot == std::string::npos ? std::string() : path.substr(dot);
+    for (int i = 1; i < 1000; i++) {
+        std::string p = base + "_" + std::to_string(i) + ext;
+        if (GetFileAttributesA(p.c_str()) == INVALID_FILE_ATTRIBUTES) return p;
+    }
+    return path;
+}
+
 static std::string Stamp(const char* ext) {
     SYSTEMTIME t;
     GetLocalTime(&t);
@@ -3690,7 +4053,7 @@ public:
     bool Start(int rot, std::string& path) {
         ScopedLock lk(cs_);
         if (fp_) return false;
-        path = SaveDir() + Stamp(".avi");
+        path = UniquePath(SaveDir() + Stamp(".avi"));
         fp_ = fopen(path.c_str(), "wb");
         if (!fp_) { IPLOG("record: cannot open %s", path.c_str()); return false; }
         path_ = path;
@@ -3817,11 +4180,14 @@ private:
 };
 
 // ============================================================ ViewerWindow
-// 영상 창: 위쪽 버튼 줄(우로 90도 회전 / 좌로 90도 회전 / 사진 저장 / 동영상 촬영) + 영상.
+// 영상 창: 위쪽 첫 줄(라디오 WebCam1 / WebCam2 / IP Cam + 실행 / 종료 버튼), 둘째 줄(우로 90도 회전 / 좌로 90도 회전 / 사진 저장 / 동영상 촬영 / 저장 폴더 열기), 셋째 줄(연속 사진 간격 목록 + 연속 사진 개시 / 종료 / 연속 10회) + 영상.
+// [실행] = 선택한 카메라 영상 재생 (재생 중이면 다시 시작/전환), [종료] = 영상 재생만 멈춤 (창은 그대로).
 // 창이 닫히면 본 창(notify)에 MSG_CLOSED 를 보내 세션을 정리하게 한다 (앱은 계속 실행).
 class ViewerWindow {
 public:
     static const UINT MSG_CLOSED = WM_APP + 5;
+    using RunHandler = std::function<bool(int, std::string&)>;      // (카메라 0=WebCam1 1=WebCam2 2=IP Cam, 성공 시 제목용 이름 / 실패 시 사유)
+    using StopHandler = std::function<void()>;
 
     ViewerWindow(HINSTANCE inst, const Config& cfg, FrameStore& store, Recorder& rec, HWND notify)
         : inst_(inst), cfg_(cfg), store_(store), rec_(rec), notify_(notify) {}
@@ -3836,7 +4202,7 @@ public:
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         wc.hIcon = LoadIcon(inst_, MAKEINTRESOURCE(1));          // exe 아이콘
         if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) { IPLOG("RegisterClass failed err=%lu", GetLastError()); return false; }
-        hwnd_ = CreateWindowA("IPCam", "IP Webcam", WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
+        hwnd_ = CreateWindowA("IPCam", "Camera", WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
                               CW_USEDEFAULT, CW_USEDEFAULT, 960, 640, nullptr, nullptr, inst_, this);
         if (!hwnd_) { IPLOG("CreateWindow failed err=%lu", GetLastError()); return false; }
         SetTimer(hwnd_, 1, 1000, nullptr);
@@ -3846,12 +4212,15 @@ public:
 
     HWND Hwnd() const { return hwnd_; }
     void Destroy() { HWND h = hwnd_; if (h && IsWindow(h)) DestroyWindow(h); }
+    void SetHandlers(RunHandler run, StopHandler stop) { onRun_ = std::move(run); onStop_ = std::move(stop); }
 
     // Safe to call from any thread.
     void NotifyFrame() { HWND h = hwnd_; if (h) PostMessage(h, WM_APP, 0, 0); }
 
 private:
-    enum { ID_RIGHT = 1, ID_LEFT = 2, ID_PHOTO = 3, ID_REC = 4, ID_FOLDER = 5, STRIP_H = 38 };
+    enum { ID_RIGHT = 1, ID_LEFT = 2, ID_PHOTO = 3, ID_REC = 4, ID_FOLDER = 5,
+           ID_CAM0 = 11, ID_CAM1 = 12, ID_CAM2 = 13, ID_RUN = 14, ID_STOP = 15,
+           ID_INTERVAL = 16, ID_BURST = 17, ID_BURSTSTOP = 18, ID_BURST10 = 19, STRIP_H = 102, STATUS_H = 24 };
 
     static LRESULT CALLBACK StaticProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         ViewerWindow* self = nullptr;
@@ -3869,15 +4238,16 @@ private:
         switch (m) {
         case WM_CREATE:     MakeButtons(h); return 0;
         case WM_APP:        InvalidateRect(h, nullptr, FALSE); return 0;
-        case WM_TIMER:      OnTimer(); return 0;
+        case WM_TIMER:      if (w == 2) OnBurstTimer(); else OnTimer(); return 0;
         case WM_ERASEBKGND: return 1;
         case WM_PAINT:      OnPaint(); return 0;
-        case WM_COMMAND:    OnCommand(LOWORD(w)); SetFocus(h); return 0;       // 버튼을 눌러도 Esc 가 창에 전달되도록
+        case WM_COMMAND:    OnCommand(LOWORD(w)); if (LOWORD(w) != ID_INTERVAL) SetFocus(h); return 0;       // (목록은 포커스를 빼앗으면 펼침이 닫힘)       // 버튼을 눌러도 Esc 가 창에 전달되도록
         case WM_KEYDOWN:    if (w == VK_ESCAPE) DestroyWindow(h); return 0;
         case WM_CLOSE:      IPLOG("WM_CLOSE"); break;
         case WM_DESTROY:
             IPLOG("WM_DESTROY");
             KillTimer(h, 1);
+            KillTimer(h, 2);
             hwnd_ = nullptr;
             if (notify_) PostMessage(notify_, MSG_CLOSED, 0, 0);     // 앱은 종료하지 않고 본 창이 세션만 정리
             return 0;
@@ -3886,19 +4256,128 @@ private:
     }
 
     void MakeButtons(HWND h) {
-        struct B { int id; const char16_t* text; int w; };
-        static const B bs[5] = {{ID_RIGHT, u"우로 90도 회전", 112}, {ID_LEFT, u"좌로 90도 회전", 112},
-                                {ID_PHOTO, u"사진 저장", 92}, {ID_REC, u"동영상 촬영", 124}, {ID_FOLDER, u"저장 폴더 열기", 112}};
-        int x = 6;
-        for (int i = 0; i < 5; i++) {
-            HWND b = CreateWindowExW(0, L"BUTTON", (LPCWSTR)bs[i].text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                     x, 5, bs[i].w, 28, h, (HMENU)(INT_PTR)bs[i].id, inst_, nullptr);
-            SendMessage(b, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
-            x += bs[i].w + 6;
+        struct B { int id; const char16_t* text; int w; DWORD style; };
+        // 첫 줄: 카메라 선택(라디오 3개, 첫 번째에 WS_GROUP) + 실행 / 종료
+        static const B top[5] = {{ID_CAM0, u"WebCam1", 84, BS_AUTORADIOBUTTON | WS_GROUP}, {ID_CAM1, u"WebCam2", 84, BS_AUTORADIOBUTTON},
+                                 {ID_CAM2, u"IP Cam", 76, BS_AUTORADIOBUTTON}, {ID_RUN, u"실행", 80, BS_PUSHBUTTON | WS_GROUP}, {ID_STOP, u"종료", 80, BS_PUSHBUTTON}};
+        // 둘째 줄: 회전 / 사진 / 동영상 / 폴더
+        static const B bs[5] = {{ID_RIGHT, u"우로 90도 회전", 112, BS_PUSHBUTTON}, {ID_LEFT, u"좌로 90도 회전", 112, BS_PUSHBUTTON},
+                                {ID_PHOTO, u"사진 저장", 92, BS_PUSHBUTTON}, {ID_REC, u"동영상 촬영", 124, BS_PUSHBUTTON},
+                                {ID_FOLDER, u"저장 폴더 열기", 112, BS_PUSHBUTTON}};
+        for (int row = 0; row < 2; row++) {
+            const B* a = row ? bs : top;
+            int x = 6;
+            for (int i = 0; i < 5; i++) {
+                HWND b = CreateWindowExW(0, L"BUTTON", (LPCWSTR)a[i].text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | a[i].style,
+                                         x, 5 + row * 32, a[i].w, 28, h, (HMENU)(INT_PTR)a[i].id, inst_, nullptr);
+                SendMessage(b, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+                x += a[i].w + 6;
+            }
         }
+        SendDlgItemMessage(h, ID_CAM2, BM_SETCHECK, BST_CHECKED, 0);      // 기본은 IP Cam (예전 동작과 같게)
+        // 셋째 줄: 연속 사진 간격(초) 목록 + 개시 / 종료 / 연속 10회
+        HWND lb = CreateWindowExW(0, L"STATIC", (LPCWSTR)u"연속 사진 간격:", WS_CHILD | WS_VISIBLE, 6, 74 + 3, 100, 18, h, nullptr, inst_, nullptr);
+        SendMessage(lb, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+        HWND cb = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                                  110, 74, 84, 300, h, (HMENU)(INT_PTR)ID_INTERVAL, inst_, nullptr);
+        SendMessage(cb, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+        for (int i = 0; i < 15; i++) {
+            wchar_t t[16];
+            wsprintfW(t, L"%d초", IntervalSec(i));
+            SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)t);
+        }
+        SendMessage(cb, CB_SETCURSEL, 3, 0);                              // 기본 5초
+        static const B tb[3] = {{ID_BURST, u"연속 사진 개시", 124, BS_PUSHBUTTON}, {ID_BURSTSTOP, u"연속 사진 종료", 124, BS_PUSHBUTTON},
+                                {ID_BURST10, u"연속 10회", 100, BS_PUSHBUTTON}};
+        int x = 200;
+        for (int i = 0; i < 3; i++) {
+            HWND b = CreateWindowExW(0, L"BUTTON", (LPCWSTR)tb[i].text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | tb[i].style,
+                                     x, 74, tb[i].w, 28, h, (HMENU)(INT_PTR)tb[i].id, inst_, nullptr);
+            SendMessage(b, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+            x += tb[i].w + 6;
+        }
+        UpdateButtons();
     }
 
-    void SetMsg(const std::string& s) { msg_ = s; msgUntil_ = GetTickCount() + 6000; InvalidateRect(hwnd_, nullptr, FALSE); }
+    static int IntervalSec(int idx) {                                     // 목록 순서대로의 간격(초)
+        static const int v[15] = {1, 2, 3, 5, 10, 15, 30, 60, 120, 180, 300, 600, 900, 1800, 3600};
+        return v[(idx < 0 || idx > 14) ? 3 : idx];
+    }
+
+    // 연속 사진: mode 1 = 개시(종료를 누를 때까지), 2 = 연속 10회. 첫 장은 바로 저장하고 이후 목록의 간격마다 저장
+    void StartBurst(int mode) {
+        if (burst_ || !running_) return;
+        burstSec_ = IntervalSec((int)SendDlgItemMessage(hwnd_, ID_INTERVAL, CB_GETCURSEL, 0, 0));
+        burst_ = mode;
+        burstDone_ = 0;
+        IPLOG("burst start: mode=%d interval=%ds", mode, burstSec_);
+        BurstShot();
+        if (burst_) SetTimer(hwnd_, 2, (UINT)burstSec_ * 1000, nullptr);
+        UpdateButtons();
+    }
+
+    void BurstShot() {
+        if (SavePhoto()) burstDone_++;                                    // 아직 영상이 없어 저장 못 한 것은 횟수에 넣지 않음
+        if (burst_ == 2 && burstDone_ >= 10) StopBurst();
+    }
+
+    void OnBurstTimer() { if (burst_) BurstShot(); }
+
+    void StopBurst() {
+        if (!burst_) return;
+        KillTimer(hwnd_, 2);
+        char b[96];
+        snprintf(b, sizeof b, burst_ == 2 && burstDone_ >= 10 ? "연속 10회 저장 완료 (%d장)" : "연속 사진 종료: %d장 저장", burstDone_);
+        IPLOG("burst stop: %d saved", burstDone_);
+        burst_ = 0;
+        SetMsg(b);
+        UpdateButtons();
+    }
+
+    int SelectedCamera() const {
+        for (int i = 0; i < 3; i++)
+            if (SendDlgItemMessage(hwnd_, ID_CAM0 + i, BM_GETCHECK, 0, 0) == BST_CHECKED) return i;
+        return 2;
+    }
+
+    // [실행]: 녹화 중이면 먼저 저장하고, 선택한 카메라로 (다시) 시작
+    void RunCamera() {
+        StopBurst();
+        if (rec_.Active()) StopRecord();
+        std::string res;
+        const int src = SelectedCamera();
+        if (onRun_ && onRun_(src, res)) {
+            running_ = true;
+            label_ = res;
+            IPLOG("run: camera %d (%s)", src, res.c_str());
+        } else {
+            running_ = false;
+            SetMsg(res.empty() ? "카메라를 시작하지 못했습니다" : res);
+            IPLOG("run failed: camera %d (%s)", src, res.c_str());
+        }
+        UpdateButtons();
+        OnTimer();
+    }
+
+    // [종료]: 영상 재생만 멈춤 (녹화 중이면 저장). 창은 닫지 않음
+    void StopCamera() {
+        StopBurst();
+        if (rec_.Active()) StopRecord();
+        if (onStop_) onStop_();
+        running_ = false;
+        IPLOG("stop camera");
+        UpdateButtons();
+        OnTimer();
+    }
+
+    // 저장/녹화/오류 안내는 창 맨 아래 상태줄에 "HH:MM:SS  내용" 으로 표시 (다음 안내가 올 때까지 유지)
+    void SetMsg(const std::string& s) {
+        SYSTEMTIME t; GetLocalTime(&t);
+        char h[16];
+        snprintf(h, sizeof h, "%02d:%02d:%02d  ", t.wHour, t.wMinute, t.wSecond);
+        msg_ = h + s;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
 
     void OnCommand(int id) {
         switch (id) {
@@ -3907,6 +4386,11 @@ private:
         case ID_PHOTO: SavePhoto(); break;
         case ID_REC:   ToggleRecord(); break;
         case ID_FOLDER: OpenFolder(); break;
+        case ID_RUN:   RunCamera(); break;
+        case ID_STOP:  StopCamera(); break;
+        case ID_BURST:     StartBurst(1); break;
+        case ID_BURST10:   StartBurst(2); break;
+        case ID_BURSTSTOP: StopBurst(); break;
         }
     }
 
@@ -3915,20 +4399,21 @@ private:
         ShellExecuteA(NULL, "open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);       // SaveDir() 는 ANSI 경로 (한글 경로도 그대로 동작)
     }
 
-    void SavePhoto() {
+    bool SavePhoto() {
         Gdiplus::Bitmap* b = store_.CopyFrame();
         std::string jpg;
-        if (!b) { SetMsg("저장할 영상이 아직 없습니다"); return; }
+        if (!b) { SetMsg("저장할 영상이 아직 없습니다"); return false; }
         bool ok = EncodeJpeg(b, rot_, jpg);
         delete b;
-        if (!ok) { SetMsg("사진 저장 실패 (인코딩)"); IPLOG("photo: encode failed"); return; }
-        const std::string path = SaveDir() + Stamp(".jpg");
+        if (!ok) { SetMsg("사진 저장 실패 (인코딩)"); IPLOG("photo: encode failed"); return false; }
+        const std::string path = UniquePath(SaveDir() + Stamp(".jpg"));
         FILE* f = fopen(path.c_str(), "wb");
-        if (!f) { SetMsg("사진 저장 실패: " + path); IPLOG("photo: cannot open %s", path.c_str()); return; }
+        if (!f) { SetMsg("사진 저장 실패: " + path); IPLOG("photo: cannot open %s", path.c_str()); return false; }
         fwrite(jpg.data(), 1, jpg.size(), f);
         fclose(f);
         IPLOG("photo saved: %s (%u bytes)", path.c_str(), (unsigned)jpg.size());
         SetMsg("사진 저장: " + path);
+        return true;
     }
 
     void ToggleRecord() {
@@ -3954,12 +4439,21 @@ private:
         SetWindowTextW(GetDlgItem(hwnd_, ID_REC), rec ? (LPCWSTR)u"촬영 종료 (저장)" : (LPCWSTR)u"동영상 촬영");
         EnableWindow(GetDlgItem(hwnd_, ID_RIGHT), !rec);        // 녹화 중에는 회전 고정
         EnableWindow(GetDlgItem(hwnd_, ID_LEFT), !rec);
+        EnableWindow(GetDlgItem(hwnd_, ID_STOP), running_);     // 재생 중일 때만 [종료] / 사진 / 동영상
+        EnableWindow(GetDlgItem(hwnd_, ID_PHOTO), running_);
+        EnableWindow(GetDlgItem(hwnd_, ID_REC), running_ || rec);
+        const bool bs = burst_ != 0;                            // 연속 사진: 진행 중에는 개시/10회/간격 고정, 종료만 가능
+        EnableWindow(GetDlgItem(hwnd_, ID_BURST), running_ && !bs);
+        EnableWindow(GetDlgItem(hwnd_, ID_BURST10), running_ && !bs);
+        EnableWindow(GetDlgItem(hwnd_, ID_BURSTSTOP), bs);
+        EnableWindow(GetDlgItem(hwnd_, ID_INTERVAL), !bs);
     }
 
     void OnTimer() {
         if (rec_.Full() && rec_.Active()) { StopRecord(); SetMsg("파일 크기 한도에 도달해 녹화를 종료했습니다"); }
         char t[256];
-        int n = snprintf(t, sizeof t, "IP Webcam %s:%s  -  %d fps", cfg_.host.c_str(), cfg_.port.c_str(), store_.TakeFps());
+        int n = running_ ? snprintf(t, sizeof t, "%s  -  %d fps", label_.c_str(), store_.TakeFps())
+                         : snprintf(t, sizeof t, "Camera  -  stopped");
         if (rec_.Active()) { int s = rec_.Seconds(); snprintf(t + n, sizeof t - n, "   REC %02d:%02d", s / 60, s % 60); }
         SetWindowTextA(hwnd_, t);
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -3975,15 +4469,19 @@ private:
         FillRect(mdc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
         RECT strip = {0, 0, rc.right, STRIP_H};
         FillRect(mdc, &strip, GetSysColorBrush(COLOR_BTNFACE));
-        RECT vr = {0, STRIP_H, rc.right, rc.bottom};
+        RECT vr = {0, STRIP_H, rc.right, rc.bottom - STATUS_H};
         if (vr.bottom > vr.top) store_.Paint(mdc, vr, rot_);
-        if (!msg_.empty() && (LONG)(msgUntil_ - GetTickCount()) > 0) {      // 저장/녹화 안내 (6초)
+        RECT sb = {0, rc.bottom - STATUS_H, rc.right, rc.bottom};          // 상태줄 (메시지 표시)
+        if (sb.top > STRIP_H) {
+            FillRect(mdc, &sb, GetSysColorBrush(COLOR_BTNFACE));
+            RECT ln = {0, sb.top, rc.right, sb.top + 1};
+            FillRect(mdc, &ln, GetSysColorBrush(COLOR_3DSHADOW));
             char16_t u[600];
-            if (Utf8::ToUtf16(msg_.c_str(), -1, u, 600)) {
+            if (!msg_.empty() && Utf8::ToUtf16(msg_.c_str(), -1, u, 600)) {
                 SetBkMode(mdc, TRANSPARENT);
-                SetTextColor(mdc, RGB(255, 230, 80));
+                SetTextColor(mdc, GetSysColor(COLOR_BTNTEXT));
                 HGDIOBJ of = SelectObject(mdc, GetStockObject(DEFAULT_GUI_FONT));
-                RECT tr = {8, rc.bottom - 24, rc.right - 8, rc.bottom - 4};
+                RECT tr = {8, sb.top + 1, rc.right - 8, rc.bottom};
                 DrawTextW(mdc, (LPCWSTR)u, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_PATH_ELLIPSIS);
                 SelectObject(mdc, of);
             }
@@ -4001,41 +4499,91 @@ private:
     Recorder& rec_;
     HWND notify_;
     int rot_ = 0;                      // 시계 방향 90도 단위 (0~3)
+    int burst_ = 0, burstDone_ = 0, burstSec_ = 5;     // 연속 사진: 0=안 함 1=개시 2=연속 10회, 저장한 장수, 간격(초)
+    bool running_ = false;             // 영상 재생 중 ([실행] 후 ~ [종료] 전)
+    std::string label_;                // 제목줄에 표시할 카메라 이름
+    RunHandler onRun_;
+    StopHandler onStop_;
     std::string msg_;
-    DWORD msgUntil_ = 0;
     volatile HWND hwnd_ = nullptr;
 };
 
 // ============================================================ Session
-// 'IP cam 영상' 한 번의 실행: 로그 열기 -> Winsock/GDI+ -> 영상 창 -> 수신 스레드. 소멸 순서는 생성의 반대 (수신 스레드 -> 창 -> 프레임 -> GDI+ -> Winsock -> 로그)
+// '카메라 영상' 한 번의 실행: 로그 열기 -> Winsock/GDI+ -> 영상 창. 창이 열려도 영상은 바로 재생하지 않고, 창의 [실행] 버튼을 누르면
+// 선택한 카메라(WebCam1 / WebCam2 / IP Cam)의 수신 스레드를 시작한다 ([종료] 는 그 스레드만 정지).
+// 소멸 순서는 생성의 반대 (수신 스레드 -> 창 -> 프레임 -> GDI+ -> Winsock -> 로그)
 class Session {
 public:
     static const UINT MSG_CLOSED = ViewerWindow::MSG_CLOSED;
 
     Session(HINSTANCE inst, HWND notify, const std::string& host, const std::string& port)
-        : cfg_(Make(host, port)), window_(inst, cfg_, store_, rec_, notify),
-          client_(cfg_, store_, [this] { window_.NotifyFrame(); },
-                  [this](const char* d, size_t n, Gdiplus::Bitmap* b) { rec_.Add(d, n, b); }) {}
-    ~Session() { window_.Destroy(); client_.Stop(); }
+        : host_(host), port_(port), cfg_(Make(host, port)), window_(inst, cfg_, store_, rec_, notify) {
+        window_.SetHandlers([this](int src, std::string& res) { return Run(src, res); }, [this] { Halt(); });
+    }
+    ~Session() { window_.Destroy(); StopCam(); }
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
 
     bool Open() {
-        IPLOG("target=%s:%s%s", cfg_.host.c_str(), cfg_.port.c_str(), cfg_.path.c_str());
+        IPLOG("ip target=%s:%s%s", host_.c_str(), port_.c_str(), cfg_.path.c_str());
         if (!ws_.Ok())  return Fail("WSAStartup failed");
         if (!gdi_.Ok()) return Fail("GdiplusStartup failed");
+        store_.SetStatus(kIdle);
         if (!window_.Create()) return Fail("Window creation failed (see ipcam.log)");
-        client_.Start();
         SetForegroundWindow(window_.Hwnd());
         return true;
     }
     HWND Hwnd() const { return window_.Hwnd(); }
+    void SetIp(const std::string& host, const std::string& port) { host_ = host; port_ = port; }   // 'IP cam 등록' 으로 바뀐 주소 (다음 [실행] 부터 적용)
 
 private:
+    static constexpr const char* kIdle = "카메라를 선택하고 [실행] 을 누르세요";
+
+    void StopCam() {
+        if (ip_)  { ip_->Stop();  ip_.reset(); }
+        if (cam_) { cam_->Stop(); cam_.reset(); }
+    }
+
+    // [종료]: 수신 스레드 정지 + 화면 지움
+    void Halt() {
+        StopCam();
+        store_.Clear(kIdle);
+    }
+
+    // [실행]: 이전 카메라를 멈추고 src (0=WebCam1, 1=WebCam2, 2=IP Cam) 를 시작. 성공하면 res = 제목줄 이름, 실패하면 res = 사유
+    bool Run(int src, std::string& res) {
+        StopCam();
+        if (src == 2) {
+            if (host_.empty()) {
+                store_.Clear(kIdle);
+                res = "IP cam 주소가 없습니다. 메뉴 'IP cam 등록' 으로 먼저 등록하세요";
+                return false;
+            }
+            store_.Clear("Connecting...");
+            ip_.reset(new MjpegClient(Make(host_, port_), store_, [this] { window_.NotifyFrame(); },
+                                      [this](const char* d, size_t n, Gdiplus::Bitmap* b) { rec_.Add(d, n, b); }));
+            ip_->Start();
+            res = "IP Cam " + host_ + ":" + port_;
+        } else {
+            store_.Clear("Opening camera...");
+            cam_.reset(new WebcamClient(src, store_, [this] { window_.NotifyFrame(); },
+                                        [this](Gdiplus::Bitmap* b) {             // 녹화 중일 때만 JPEG 로 인코딩해 AVI 에 담음
+                                            if (!rec_.Active()) return;
+                                            std::string j;
+                                            if (EncodeJpeg(b, 0, j)) rec_.Add(j.data(), j.size(), b);
+                                        }));
+            cam_->Start();
+            res = src == 0 ? "WebCam1" : "WebCam2";
+        }
+        return true;
+    }
+
     // 로그 파일: exe 와 같은 폴더의 ipcam.log (이름은 예전 그대로), 시작할 때마다 새로 작성. 크래시 시 예외 코드를 기록
     struct LogScope {
         LONG (WINAPI *prev)(EXCEPTION_POINTERS*) = nullptr;
+        static inline int refs = 0;                       // 열려 있는 영상 창(세션) 수. 첫 세션이 로그를 열고 마지막 세션이 닫음 (UI 스레드에서만 증감)
         LogScope() {
+            if (refs++ > 0) { IPLOG("---- another camera window opened (%d)", refs); return; }
             char exe[MAX_PATH] = "";
             std::string path = "ipcam.log";
             if (GetModuleFileNameA(nullptr, exe, MAX_PATH)) {
@@ -4052,6 +4600,7 @@ private:
             IPLOG("pid=%lu", GetCurrentProcessId());
         }
         ~LogScope() {
+            if (--refs > 0) { IPLOG("---- a camera window closed (%d left)", refs); return; }
             IPLOG("==== ipcam exit ====");
             SetUnhandledExceptionFilter(prev);
             Logger::Instance().Close();
@@ -4077,13 +4626,15 @@ private:
     }
 
     LogScope        log_;                 // 가장 먼저 만들어지고 가장 나중에 없어짐
+    std::string     host_, port_;         // IP Cam 주소 (등록값)
     Config          cfg_;
     WinsockSession  ws_;
     GdiplusSession  gdi_;
     FrameStore      store_;
     Recorder        rec_;                 // 동영상 촬영 (창/수신 스레드보다 나중에 없어짐 -> 파일을 마무리)
     ViewerWindow    window_;
-    MjpegClient     client_;
+    std::unique_ptr<MjpegClient>  ip_;    // IP Cam 수신 스레드 ([실행] 때 만들고 [종료] 때 없앰)
+    std::unique_ptr<WebcamClient> cam_;   // WebCam1 / WebCam2 수신 스레드
 };
 
 }  // namespace ipcam
@@ -4480,6 +5031,5608 @@ private:
 };
 
 
+// ================================================================ Telegram
+// screen_telegram.cpp 를 합친 부분 (namespace tg). 주기적으로 모니터별 화면(및 설정 시 웹캠)을 캡처하여 텔레그램으로 전송하고,
+// 텔레그램 봇 명령으로 PC 를 제어한다. 별도 스레드로 동작하며(Start/RequestStop/WaitStopped), 시계 창/WiFiScan 과는 독립적이다.
+//  - 설정은 screen_telegram.ini 가 아니라 gsHomeManager.ini 의 [Telegram] 섹션에서 읽는다. 섹션이 없으면 첫 실행 때 만든다
+//    (예전 screen_telegram.ini 가 있으면 내용을 가져옴). 만드는 파일은 예전과 같다: log.txt, image\\, upload\\, detect.state, pinned.id (exe 폴더).
+//  - WiFiScan 감시의 /HomeBack, /NotHome 은 trigger.txt 파일 대신 LocalTrigger 큐로 받는다 (tg::PostTrigger).
+//  - 텔레그램 /stop, /restart 는 이 모듈만이 아니라 프로그램 전체(본 창 종료 -> WinMain)를 종료/재시작한다 (ScanEvents::Quit).
+//  - 처리되지 않은 예외는 log.txt 에 남기고 종료한다 (InstallCrashHandlers).
+//  - 고DPI 캡처를 위해 이 모듈의 스레드만 DPI 인식으로 만든다 (프로세스 전체는 그대로).
+// ----------------------------------------------------------------
+// gsHomeManager.ini [Telegram] 섹션의 설정: (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없으면 텔레그램 기능을 사용하지 않음)
+//   TELEGRAM_BOT_TOKEN=xxxxxxxxxx
+//   TELEGRAM_CHAT_ID=yyyyyyy
+//   TELEGRAM_INTERVAL=60
+//   MONITOR1=TRUE          (모니터1 캡처 여부, 미기재 시 기본 TRUE)
+//   MONITOR2=TRUE
+//   MONITOR3=FALSE
+//   CAMERA=TRUE            (웹캠 캡처 여부, 기본 FALSE)
+//   CAMERA_INDEX=0         (사용할 카메라 번호, 0부터. 기본 0. 목록은 로그에 출력)
+//   MAX_LOOP=9             (캡처/전송 반복 횟수. 이 횟수만큼 실행 후 종료. 0 또는 미기재 시 무제한)
+//   SAVE_ONLY=TRUE         (TRUE 이면 이미지를 텔레그램으로 보내지 않고 image 폴더에 저장만. 기본 FALSE.
+//                           명령 수신(/shot 등)은 계속 동작하며 /shot 만 전송한다.
+//                           TOKEN/CHAT_ID 가 없으면 명령 수신 없이 저장만 한다)
+//   TELEGRAM_COMMANDS=TRUE (TRUE 이면 텔레그램 봇 명령 수신: /shot /pause /resume /status /detectOn /detectOff /stop /help (// 는 /help 와 동일). 기본 TRUE.
+//                           /stop 은 바로 종료하지 않고 Yes/No 버튼으로 확인한다 (Yes 이면 시계와 WiFiScan 감시까지 프로그램 전체를 종료. /restart 도 전체 재시작).
+//                           TELEGRAM_CHAT_ID 에서 온 명령만 처리. SAVE_ONLY=TRUE 여도 동작)
+//   TELEGRAM_ALLOWED_USER_IDS=111,222  (명령을 내릴 수 있는 텔레그램 사용자 ID 목록. 미기재 시 개인 chat 만 허용.
+//                           TELEGRAM_CHAT_ID 가 그룹(음수)이면 이 목록이 없을 때 명령을 모두 거부한다)
+//   KEEP_DAYS=7            (image 폴더에서 N일 지난 이미지 자동 삭제. 0 또는 미기재 시 삭제 안 함)
+//   KEEP_MAX_FILES=5000    (image 폴더 이미지 최대 개수. 초과분은 오래된 것부터 삭제. 0 또는 미기재 시 제한 없음)
+//   PREVIOUS_SESSION_CLEAR=TRUE  (TRUE 이면 프로그램 시작할 때 log.txt 와 image 폴더의 모든 파일을 삭제. 기본 FALSE)
+//   LOCAL_TRIGGER=TRUE (같은 프로세스의 WiFiScan 감시(HomeWatcher)가 넘기는 "/HomeBack" 또는 "/NotHome" 을 1초 안에 받아 그 명령을 처리. 기본 TRUE.
+//                       이 두 명령만 허용하고 300초 지난 요청은 무시. 시작 전에 이미 넘겨진 것도 300초 안이면 처리한다 -
+//                       부팅 직후 WiFiScan 감시가 먼저 낸 첫 판정을 놓치지 않도록. 예전의 trigger.txt 파일은 쓰지 않는다)
+//   TELEGRAM_MENU=TRUE (시작할 때 setMyCommands 로 텔레그램 입력창의 "메뉴"(/ 명령 목록)를 등록. 기본 TRUE. BotFather 에서 직접 만든 목록을 쓰려면 FALSE)
+//   TELEGRAM_GREETING=TRUE (시작 준비가 끝나면 텔레그램으로 인사말을 한 번 보냄. 기본 TRUE)
+//   AUTO_DETECT=TRUE       (프로그램 시작 때 텔레그램 /detectOn 과 동일하게 침입 탐지를 자동으로 켠다. 기본 FALSE.
+//                           FALSE 이면 detect.state 에 저장된 마지막 상태(켜짐/꺼짐)를 따른다. CAMERA=TRUE 필요)
+//   (텔레그램 /CMD 명령 은 /CMD 뒤의 문자열 전체를 PC 의 cmd.exe 에서 실행하고 출력(stdout+stderr)을 .txt 문서로 전송한다.
+//    실행 시간 제한 60초(초과 시 하위 프로세스까지 종료), 출력 20MB 초과분은 잘림, 표준 입력은 NUL.)
+//   UPLOAD_DIR=upload              (폰 -> PC 파일 수신 저장 폴더. 상대 경로는 exe 폴더 기준, 기본 upload. 폴더는 한 단계만 자동 생성)
+//   UPLOAD_SHOW_IMAGE=TRUE         (폰에서 받은 이미지를 PC 화면에 장당 별개의 창으로 띄움. 기본 TRUE. jpg/png/bmp/gif/tif)
+//   UPLOAD_PLAY_MEDIA=TRUE         (폰에서 받은 .mp4 / .mp3 파일을 저장 직후 PC 의 기본 플레이어로 실행. 기본 TRUE. 예전 이름 UPLOAD_PLAY_VIDEO 도 인정)
+//   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
+//    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
+//   (텔레그램 /github 는 PC 의 기본 브라우저로 GitHub 의 ReadMe 페이지(kGithubUrl)를 연다.)
+//   (텔레그램 /HomeBack 은 귀가 인사 "[집에 돌아 오신 것을 환영합니다. 푹 쉬세요]" 를 보낸다. 인사 뒤에 /detectOff 와 /pause 를 자동 처리한다.)
+//   (텔레그램 /NotHome 은 외출 인사 "안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다." 를 보낸다. 인사 뒤에 /detectOn 과 /resume 을 자동 처리한다.)
+//   (텔레그램 /download 는 PC 에 파일 탐색기(열기 창)를 띄워 사용자가 고른 여러 파일을 텔레그램으로 보낸다.
+//    창은 5분 안에 고르지 않으면 취소되고, 파일 1개당 49MB 까지, 빈 파일은 제외한다.)
+//   (텔레그램 /version 은 버전을, /ini 키=값 은 INI 끝에 새 키를 추가한다. 이미 있는 키는 경고만 하고 바꾸지 않으며,
+//    추가한 값은 프로그램을 다시 시작해야 적용된다.)
+//   (캡처/전송 간격 TELEGRAM_INTERVAL 은 텔레그램 명령 /INTERVAL=nnn (5~86400초) 로 바꿀 수 있다.
+//    바로 적용되고 이 INI 의 TELEGRAM_INTERVAL 값도 갱신된다. /INTERVAL 만 보내면 현재 값을 알려 준다.)
+//   (침입 탐지 켜기/끄기는 텔레그램 명령 /detectOn /detectOff 로 한다.
+//    카메라 침입 탐지(별도 스레드로 독립 동작): 모션 감지 시 "[침입탐지 : yyyy년 mm월 dd일 HH시 mm분 ss초]" 메시지를 보내고
+//    카메라 이미지만 전송 (모니터 화면은 제외. SAVE_ONLY, /pause 와 무관하게 무조건 전송). CAMERA=TRUE 필요,
+//    켜져 있는 동안 카메라를 상시 열어 두므로 다른 앱은 카메라를 쓸 수 없음.
+//    켜짐/꺼짐 상태는 exe 폴더의 detect.state 파일에 저장되어 재시작 후에도 유지된다. 파일이 없으면 꺼짐)
+//   INTRUSION_PIXEL_THRESHOLD=25   (픽셀 밝기 변화 임계값 1~255, 기본 25)
+//   INTRUSION_AREA_PERCENT=1.0     (변화 픽셀이 화면의 몇 % 이상이면 움직임으로 판단, 기본 1.0)
+//   INTRUSION_CONFIRM_FRAMES=2     (연속 몇 프레임 움직임이 있어야 침입으로 확정, 기본 2)
+//   INTRUSION_COOLDOWN=60          (한 번 탐지 후 재탐지까지 최소 대기 초, 기본 60)
+//   INTRUSION_CHECK_MS=1000        (카메라 프레임 검사 간격 ms, 200~10000, 기본 1000)
+//   CAMERA_KEEP_OPEN=FALSE (TRUE 이면 카메라를 계속 열어 둠: 지연/LED 깜빡임은 줄지만 다른 앱이 카메라를 못 씀. 기본 FALSE)
+//
+//
+// ---- 클래스 구성 ----
+//   Logger          시각이 붙은 로그 출력 (log.txt)
+//   StrUtil         문자열 유틸 (trim, bool 파싱, UTF-8 <-> UTF-16)
+//   SysUtil         시스템 유틸 (파일 존재, exe 폴더, 호스트명, 시각 문자열, INI [Telegram] 섹션 읽기/쓰기)
+//   LocalTrigger    WiFiScan 감시 -> 텔레그램 모듈 명령 큐 (/HomeBack, /NotHome)
+//   StopSignal      종료 요청 이벤트
+//   ComScope        COM 초기화/해제 (RAII)
+//   ScopedBitmap    HBITMAP 소유권 관리 (RAII)
+//   Config          gsHomeManager.ini [Telegram] 설정
+//   ImageEncoder    GDI+ 세션 + PNG/JPEG 인코딩
+//   TelegramClient  텔레그램 sendPhoto / sendMessage / getUpdates (WinHTTP, 연결 재사용) + 재시도
+//   CommandListener 텔레그램 봇 명령 수신 (getUpdates, 허용된 chat 만)
+//   ImageWindow     폰에서 받은 이미지를 보여 주는 창 (이미지 1장 = 창 1개 = 스레드 1개)
+//   Shot            캡처 결과 1장 (라벨 + 비트맵)
+//   ICaptureSource  캡처 소스 인터페이스
+//   MonitorCapture  모니터 화면 캡처 (ICaptureSource)
+//   CameraCapture   웹캠 캡처, Media Foundation (ICaptureSource)
+//   MotionDetector  카메라 침입(움직임) 탐지
+//   ScreenTelegramApp  전체 흐름 (설정 로드 -> 주기 반복 캡처 -> image 폴더 저장 -> 전송, 명령/트리거/침입 탐지 스레드)
+//
+// 주의: mfplat.dll / mfreadwrite.dll (카메라용) 은 빌드 시점에 링크하지 않고,
+// 실행 중 LoadLibrary 로 동적으로 찾는다. 해당 DLL이 없는 환경(Windows N/KN 등)
+// 에서도 exe 자체는 정상적으로 시작되며, 카메라 기능만 자동으로 비활성화된다.
+// -lmfuuid 는 GUID 상수만 담긴 순수 정적 라이브러리이므로 DLL 의존성이 없다. (빌드: -lwinhttp -lmfuuid -loleaut32 필요)
+namespace tg {
+
+// 복사 금지 선언용 매크로
+#define NO_COPY(T)               \
+    T(const T&) = delete;        \
+    T& operator=(const T&) = delete
+
+// CRITICAL_SECTION 을 잡았다가 스코프를 벗어나면 풀어 주는 RAII 락
+struct CsLock {
+    CRITICAL_SECTION* cs;
+    explicit CsLock(CRITICAL_SECTION* c) : cs(c) { EnterCriticalSection(cs); }
+    ~CsLock() { LeaveCriticalSection(cs); }
+    CsLock(const CsLock&) = delete;
+    CsLock& operator=(const CsLock&) = delete;
+};
+
+// ================================================================ Logger
+class Logger {
+public:
+    // exe 폴더의 log.txt 에 한 줄씩 덧붙인다 (UTF-8, CRLF). 콘솔이 없는 -mwindows 빌드에서도 기록된다.
+    //   형식: [2026-11-04 10:40:12.345] [T1234] 메시지      (T 뒤는 스레드 ID: 메인/명령/침입 탐지 스레드 구분용)
+    // 여러 스레드가 동시에 호출해도 안전하다. 호출할 때마다 파일을 열고 닫으므로 BAT 이 같은 파일에 쓰거나
+    // 사용자가 메모장으로 열어 둔 상태에서도 동작하고, 비정상 종료 직전의 기록도 남는다.
+    // 파일이 5MB 를 넘으면 log.old.txt 로 넘기고 새로 시작한다. 파일에 쓰지 못하면 OutputDebugString 으로만 출력한다.
+    static void log(const char* fmt, ...)
+    {
+        char msg[2048];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(msg, sizeof(msg), fmt, ap);
+        va_end(ap);
+        write(msg, false);
+    }
+
+    // 치명적 오류용: 다른 스레드가 로그 잠금을 쥔 채 죽었어도 멈추지 않도록 잠금을 기다리지 않고 기록한다.
+    static void logCrash(const char* fmt, ...)
+    {
+        char msg[2048];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(msg, sizeof(msg), fmt, ap);
+        va_end(ap);
+        write(msg, true);
+    }
+
+    // log.txt 를 지운다 (PREVIOUS_SESSION_CLEAR 용). 로그 잠금을 잡고 삭제하며, 삭제가 막히면(다른 프로그램이 열어 둠) 내용만 비운다.
+    // log.old.txt 는 건드리지 않는다. 지웠으면 true.
+    static bool clearFile()
+    {
+        CsLock lock(&guard().cs);
+        if (DeleteFileW(logPath(false).c_str())) return true;
+        if (GetLastError() == ERROR_FILE_NOT_FOUND) return true;
+        HANDLE h = CreateFileW(logPath(false).c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return false;
+        CloseHandle(h);
+        return true;
+    }
+
+    // /log 명령용: log.txt 의 마지막 n 줄을 UTF-8 문자열로 돌려준다 (파일이 없으면 빈 문자열).
+    // 로그를 쓰는 중에 호출해도 안전하게 읽는다(공유 읽기). log.old.txt 는 보지 않고 현재 log.txt 만 본다.
+    static std::string tailLines(int n)
+    {
+        const std::string content = readWhole(logPath(false));
+        if (content.empty() || n <= 0) return content;
+        std::vector<size_t> starts;
+        starts.push_back(0);
+        for (size_t i = 0; i + 1 < content.size(); ++i)
+            if (content[i] == '\n') starts.push_back(i + 1);
+        const size_t from = starts.size() > (size_t)n ? starts[starts.size() - (size_t)n] : 0;
+        return content.substr(from);
+    }
+
+private:
+    static std::string readWhole(const std::wstring& path)
+    {
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return std::string();
+        LARGE_INTEGER sz;
+        if (!GetFileSizeEx(h, &sz) || sz.QuadPart <= 0) { CloseHandle(h); return std::string(); }
+        std::string out;
+        out.resize((size_t)sz.QuadPart);
+        DWORD rd = 0;
+        BOOL ok = ReadFile(h, &out[0], (DWORD)out.size(), &rd, nullptr);
+        CloseHandle(h);
+        if (!ok) return std::string();
+        out.resize(rd);
+        return out;
+    }
+
+    static constexpr ULONGLONG kMaxBytes = 5ULL * 1024 * 1024;
+
+    struct Guard { // 정적 CRITICAL_SECTION (첫 호출 시 한 번만 초기화됨, C++11 스레드 안전)
+        CRITICAL_SECTION cs;
+        Guard() { InitializeCriticalSection(&cs); }
+    };
+
+    static Guard& guard()
+    {
+        static Guard g;
+        return g;
+    }
+
+    static const std::wstring& logPath(bool old)
+    {
+        static const std::wstring paths[2] = { makePath(L"log.txt"), makePath(L"log.old.txt") };
+        return paths[old ? 1 : 0];
+    }
+
+    static std::wstring makePath(const wchar_t* name)
+    {
+        wchar_t buf[MAX_PATH * 4];
+        DWORD n = GetModuleFileNameW(nullptr, buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
+        std::wstring dir(buf, n);
+        size_t slash = dir.find_last_of(L"\\/");
+        dir = slash == std::wstring::npos ? L"." : dir.substr(0, slash);
+        return dir + L"\\" + name;
+    }
+
+    static void write(const char* msg, bool crash)
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char head[64];
+        snprintf(head, sizeof(head), "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [T%lu] ",
+                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+                 (unsigned long)GetCurrentThreadId());
+
+        std::string line = head;
+        for (const char* c = msg; *c; ++c) // 한 항목은 항상 한 줄 (응답 본문의 줄바꿈 제거)
+            line += (*c == '\r' || *c == '\n') ? ' ' : *c;
+        line += "\r\n";
+
+        OutputDebugStringA(line.c_str()); // 디버거(DebugView 등)로도 볼 수 있음
+
+        Guard& g = guard();
+        bool locked = false;
+        if (crash) locked = TryEnterCriticalSection(&g.cs) != 0;
+        else { EnterCriticalSection(&g.cs); locked = true; }
+
+        appendToFile(line);
+
+        if (locked) LeaveCriticalSection(&g.cs);
+    }
+
+    static HANDLE openForAppend()
+    {
+        return CreateFileW(logPath(false).c_str(), FILE_APPEND_DATA,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+
+    static void appendToFile(const std::string& line)
+    {
+        HANDLE h = openForAppend();
+        if (h == INVALID_HANDLE_VALUE) return;
+        LARGE_INTEGER sz;
+        if (GetFileSizeEx(h, &sz) && (ULONGLONG)sz.QuadPart >= kMaxBytes) {
+            CloseHandle(h);
+            MoveFileExW(logPath(false).c_str(), logPath(true).c_str(), MOVEFILE_REPLACE_EXISTING);
+            h = openForAppend();
+            if (h == INVALID_HANDLE_VALUE) return;
+        }
+        DWORD wr = 0;
+        WriteFile(h, line.data(), (DWORD)line.size(), &wr, nullptr);
+        CloseHandle(h);
+    }
+};
+
+// ================================================================ StrUtil
+class StrUtil {
+public:
+    static std::string trim(const std::string& s)
+    {
+        size_t b = 0, e = s.size();
+        while (b < e && (unsigned char)s[b] <= ' ') ++b;
+        while (e > b && (unsigned char)s[e - 1] <= ' ') --e;
+        return s.substr(b, e - b);
+    }
+
+    static std::string upper(std::string s)
+    {
+        for (auto& c : s) c = (char)toupper((unsigned char)c);
+        return s;
+    }
+
+    static bool parseBool(const std::string& v, bool defVal)
+    {
+        std::string s = upper(v);
+        if (s == "TRUE" || s == "1" || s == "YES" || s == "Y" || s == "ON") return true;
+        if (s == "FALSE" || s == "0" || s == "NO" || s == "N" || s == "OFF") return false;
+        return defVal;
+    }
+
+    static std::wstring toWide(const std::string& s)
+    {
+        if (s.empty()) return L"";
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+        std::wstring w(n, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+        return w;
+    }
+
+    // len 문자 길이의 UTF-16 문자열(널 종료 불필요)을 UTF-8 로 변환. len=-1 이면 널 종료로 간주.
+    static std::string toUtf8(const wchar_t* w, int len = -1)
+    {
+        int m = WideCharToMultiByte(CP_UTF8, 0, w, len, nullptr, 0, nullptr, nullptr);
+        if (m <= 0) return std::string();
+        std::string s(m, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, w, len, &s[0], m, nullptr, nullptr);
+        if (len == -1 && !s.empty() && s.back() == '\0') s.pop_back();
+        return s;
+    }
+};
+
+// ================================================================ SysUtil
+class SysUtil {
+public:
+    static bool fileExists(const std::string& p)
+    {
+        DWORD a = GetFileAttributesW(StrUtil::toWide(p).c_str());
+        return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+    }
+
+    static std::string exeDir()
+    {
+        std::vector<wchar_t> buf(32768);
+        DWORD n = GetModuleFileNameW(nullptr, buf.data(), (DWORD)buf.size());
+        std::string p = StrUtil::toUtf8(buf.data(), (int)n);
+        size_t pos = p.find_last_of("\\/");
+        return pos == std::string::npos ? "." : p.substr(0, pos);
+    }
+
+    // 컴퓨터 이름을 UTF-8 로 반환 (한글 이름 대비)
+    static std::string hostName()
+    {
+        wchar_t w[MAX_COMPUTERNAME_LENGTH + 1];
+        DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
+        if (!GetComputerNameW(w, &n) || n == 0) return "PC";
+        std::string s = StrUtil::toUtf8(w, (int)n);
+        return s.empty() ? std::string("PC") : s;
+    }
+
+    // 파일명용 시각 (예: 20261102_142400)
+    static std::string fileStamp()
+    {
+        char tbuf[32];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(tbuf, sizeof(tbuf), "%Y%m%d_%H%M%S", &tmv);
+        return tbuf;
+    }
+
+    // 폴더가 없으면 생성. 이미 있거나 생성에 성공하면 true.
+    static bool ensureDir(const std::string& dir)
+    {
+        if (CreateDirectoryW(StrUtil::toWide(dir).c_str(), nullptr)) return true;
+        return GetLastError() == ERROR_ALREADY_EXISTS;
+    }
+
+    static bool writeFile(const std::string& path, const std::vector<BYTE>& data)
+    {
+        HANDLE h = CreateFileW(StrUtil::toWide(path).c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return false;
+        bool ok = true;
+        size_t off = 0;
+        while (off < data.size()) {
+            DWORD chunk = (DWORD)std::min<size_t>(data.size() - off, (size_t)1 << 24);
+            DWORD wr = 0;
+            if (!WriteFile(h, data.data() + off, chunk, &wr, nullptr) || wr == 0) { ok = false; break; }
+            off += wr;
+        }
+        CloseHandle(h);
+        return ok;
+    }
+
+    // INI 의 [name] 섹션 본문 범위 [b, e) 를 찾는다 (헤더 줄 다음 줄 ~ 다음 [섹션] 헤더 직전 / 파일 끝). name 은 대문자로 전달, 대소문자 무시.
+    // 섹션이 없으면 false.
+    static bool findSection(const std::string& content, const std::string& name, size_t& b, size_t& e)
+    {
+        bool inSec = false;
+        size_t pos = content.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0; // UTF-8 BOM
+        while (pos < content.size()) {
+            const size_t nl = content.find('\n', pos);
+            const size_t lineEnd = nl == std::string::npos ? content.size() : nl + 1;
+            const std::string t = StrUtil::trim(content.substr(pos, lineEnd - pos));
+            if (t.size() >= 2 && t.front() == '[' && t.back() == ']') {
+                if (inSec) { e = pos; return true; }
+                if (StrUtil::upper(StrUtil::trim(t.substr(1, t.size() - 2))) == name) { inSec = true; b = lineEnd; }
+            }
+            pos = lineEnd;
+        }
+        if (inSec) e = content.size();
+        return inSec;
+    }
+
+    enum class IniAdd { Added, Exists, Error };
+
+    // INI 의 [Telegram] 섹션에서 key(대문자로 전달, 비교는 대소문자 무시)를 처리한다.
+    //  replace=true : 있으면 값만 newVal 로 바꾸고(값 뒤 인라인 주석은 유지), 없으면 섹션 끝에 추가한다 -> Added (TELEGRAM_INTERVAL 갱신용)
+    //  replace=false: 이미 있으면 아무것도 바꾸지 않고 Exists, 없으면 섹션 끝에 추가한다 -> Added (/ini 용)
+    // 다른 줄, 줄바꿈(CRLF/LF), BOM 은 그대로 유지한다. [Telegram] 섹션이 없으면 파일 끝에 만든다.
+    // 임시 파일에 먼저 쓴 뒤 교체하므로 쓰다 실패해도 원본은 보존된다.
+    static IniAdd setIniKey(const std::string& path, const std::string& key, const std::string& newVal, bool replace)
+    {
+        std::string content;
+        if (!readFile(path, content)) return IniAdd::Error;
+        const std::string eol = (content.empty() || content.find("\r\n") != std::string::npos) ? "\r\n" : "\n";
+        size_t b = 0, e = 0;
+        if (!findSection(content, "TELEGRAM", b, e)) {
+            if (!content.empty() && content.back() != '\n') content += eol;
+            content += "[Telegram]" + eol;
+            b = e = content.size();
+        }
+        const std::string sec = content.substr(b, e - b);
+
+        std::string out;
+        out.reserve(sec.size() + 64);
+        bool found = false;
+        size_t pos = 0;
+        while (pos < sec.size()) {
+            const size_t nl = sec.find('\n', pos);
+            const size_t lineEnd = nl == std::string::npos ? sec.size() : nl + 1;
+            std::string line = sec.substr(pos, lineEnd - pos);
+            pos = lineEnd;
+
+            if (!found) {
+                size_t bodyLen = line.size();
+                while (bodyLen > 0 && (line[bodyLen - 1] == '\n' || line[bodyLen - 1] == '\r')) --bodyLen;
+                const std::string text = line.substr(0, bodyLen);
+                const std::string term = line.substr(bodyLen);
+
+                size_t s = 0;
+                while (s < text.size() && (unsigned char)text[s] <= ' ') ++s;
+                if (s < text.size() && text[s] != ';' && text[s] != '#' && text[s] != '[') {
+                    const size_t eq = text.find('=', s);
+                    if (eq != std::string::npos &&
+                        StrUtil::upper(StrUtil::trim(text.substr(s, eq - s))) == key) {
+                        if (!replace) return IniAdd::Exists;
+                        // 값 뒤 인라인 주석("공백 + ; 또는 #")은 유지 (Config::load 와 같은 규칙)
+                        size_t cmt = std::string::npos;
+                        for (size_t i = eq + 2; i < text.size(); ++i) {
+                            if ((text[i] == ';' || text[i] == '#') && (unsigned char)text[i - 1] <= ' ') {
+                                cmt = i;
+                                break;
+                            }
+                        }
+                        std::string tail;
+                        if (cmt != std::string::npos) {
+                            size_t ws = cmt;
+                            while (ws > eq + 1 && (unsigned char)text[ws - 1] <= ' ') --ws;
+                            tail = text.substr(ws);
+                        }
+                        line = text.substr(0, eq + 1) + newVal + tail + term;
+                        found = true;
+                    }
+                }
+            }
+            out += line;
+        }
+        if (!found) { // 섹션의 마지막 내용 줄 바로 뒤(뒤쪽 빈 줄 앞)에 추가
+            size_t keep = out.size();
+            while (keep > 0 && (unsigned char)out[keep - 1] <= ' ') --keep;
+            const size_t nl = out.find('\n', keep);
+            const size_t ins = nl == std::string::npos ? out.size() : nl + 1;
+            std::string head = out.substr(0, ins);
+            const std::string rest = out.substr(ins);
+            if (!head.empty() && head.back() != '\n') head += eol;
+            out = head + key + "=" + newVal + eol + rest;
+        }
+
+        return replaceFileAtomic(path, content.substr(0, b) + out + content.substr(e)) ? IniAdd::Added : IniAdd::Error;
+    }
+
+    // [Telegram] 섹션의 key(대문자) 값을 바꾼다 (없으면 추가). /INTERVAL=nnn 이 TELEGRAM_INTERVAL 을 저장할 때 사용.
+    static bool updateIniValue(const std::string& path, const std::string& key, const std::string& newVal)
+    {
+        return setIniKey(path, key, newVal, true) == IniAdd::Added;
+    }
+
+    // [Telegram] 섹션 끝에 "KEY=값" 줄을 추가한다. 같은 키가 이미 있으면 아무것도 바꾸지 않고 Exists 를 돌려준다. (/ini 용)
+    static IniAdd addIniKey(const std::string& path, const std::string& key, const std::string& val)
+    {
+        return setIniKey(path, key, val, false);
+    }
+
+    // 임시 파일에 먼저 쓴 뒤 교체한다. 쓰다 실패해도 원본은 보존된다.
+    static bool replaceFileAtomic(const std::string& path, const std::string& content)
+    {
+        const std::string tmp = path + ".tmp";
+        if (!writeFile(tmp, std::vector<BYTE>(content.begin(), content.end()))) {
+            DeleteFileW(StrUtil::toWide(tmp).c_str());
+            return false;
+        }
+        if (!MoveFileExW(StrUtil::toWide(tmp).c_str(), StrUtil::toWide(path).c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(StrUtil::toWide(tmp).c_str());
+            return false;
+        }
+        return true;
+    }
+
+    // 파일 전체를 읽는다 (경로는 UTF-8). 열 수 없으면 false.
+    static bool readFile(const std::string& path, std::string& out)
+    {
+        out.clear();
+        HANDLE h = CreateFileW(StrUtil::toWide(path).c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return false;
+        char buf[65536];
+        DWORD rd = 0;
+        while (ReadFile(h, buf, sizeof(buf), &rd, nullptr) && rd > 0) out.append(buf, rd);
+        CloseHandle(h);
+        return true;
+    }
+
+    // time_t -> "YYYYMMDD_HHMMSS"
+    static std::string stampOf(time_t t)
+    {
+        char tbuf[32];
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(tbuf, sizeof(tbuf), "%Y%m%d_%H%M%S", &tmv);
+        return tbuf;
+    }
+
+    // "YYYYMMDD_HHMMSS_태그.jpg|png" 형식의 이 프로그램이 만든 파일인지 확인 (다른 파일은 건드리지 않음)
+    static bool isOurImageName(const std::wstring& n)
+    {
+        if (n.size() < 20) return false;
+        for (int i = 0; i < 15; ++i) {
+            if (i == 8) { if (n[i] != L'_') return false; }
+            else if (!iswdigit(n[i])) return false;
+        }
+        if (n[15] != L'_') return false;
+        std::wstring ext = n.substr(n.size() - 4);
+        for (auto& c : ext) c = (wchar_t)towlower(c);
+        return ext == L".jpg" || ext == L".png";
+    }
+
+    // image 폴더 안의 모든 파일(하위 폴더는 제외)을 삭제하고 지운 개수를 돌려준다. failed 에 삭제 실패 개수. (PREVIOUS_SESSION_CLEAR 용)
+    static size_t clearFolderFiles(const std::string& dir, size_t& failed)
+    {
+        failed = 0;
+        const std::wstring wdir = StrUtil::toWide(dir);
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((wdir + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return 0; // 폴더가 없으면 지울 것도 없음
+        size_t deleted = 0;
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            const std::wstring path = wdir + L"\\" + fd.cFileName;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+            if (DeleteFileW(path.c_str())) ++deleted; else ++failed;
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+        return deleted;
+    }
+
+    // image 폴더 정리: keepDays 일보다 오래된 파일, 그리고 keepMax 개를 넘는 오래된 파일을 삭제.
+    // (파일명의 시각 순서로 오래됨을 판단한다. 둘 다 0 이면 아무것도 하지 않음)
+    static void cleanupImages(const std::string& dir, int keepDays, int keepMax)
+    {
+        if (keepDays <= 0 && keepMax <= 0) return;
+        const std::wstring wdir = StrUtil::toWide(dir);
+
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((wdir + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return;
+        std::vector<std::wstring> names;
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && isOurImageName(fd.cFileName))
+                names.push_back(fd.cFileName);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+        std::sort(names.begin(), names.end()); // 이름이 시각순이므로 오름차순 = 오래된 순
+
+        size_t first = 0; // names[0..first) 삭제 대상
+        if (keepDays > 0) {
+            const std::wstring cutoff =
+                StrUtil::toWide(stampOf(time(nullptr) - (time_t)keepDays * 86400));
+            while (first < names.size() && names[first].compare(0, 15, cutoff) < 0) ++first;
+        }
+        if (keepMax > 0 && names.size() - first > (size_t)keepMax)
+            first = names.size() - (size_t)keepMax;
+
+        size_t deleted = 0;
+        for (size_t i = 0; i < first; ++i)
+            if (DeleteFileW((wdir + L"\\" + names[i]).c_str())) ++deleted;
+        if (deleted > 0)
+            Logger::log("image 폴더 정리: 오래된 이미지 %zu개 삭제 (남은 %zu개)", deleted,
+                        names.size() - deleted);
+    }
+
+    static std::string timestamp()
+    {
+        char tbuf[32];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        return tbuf;
+    }
+};
+
+// ================================================================ 통합용 도우미
+// 설정 파일: exe 와 같은 폴더의 gsHomeManager.ini 의 [Telegram] 섹션
+static std::string iniFilePath()
+{
+    return SysUtil::exeDir() + "\\gsHomeManager.ini";
+}
+
+// 고DPI 환경에서도 실제 해상도로 캡처하도록 "이 스레드만" DPI 인식으로 만든다 (Windows 10 1607+).
+// 프로세스 전체를 바꾸면 시계 창의 크기/좌표 계산이 달라지므로 스레드 단위로만 적용한다.
+static void enableThreadDpiAwareness()
+{
+    typedef HANDLE(WINAPI * PFN_SetThreadDpiAwarenessContext)(HANDLE);
+    HMODULE u = GetModuleHandleW(L"user32.dll");
+    PFN_SetThreadDpiAwarenessContext f =
+        u ? (PFN_SetThreadDpiAwarenessContext)GetProcAddress(u, "SetThreadDpiAwarenessContext") : nullptr;
+    if (f) f((HANDLE)-4); // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+}
+
+// 같은 프로세스의 WiFiScan 감시(HomeWatcher)가 /HomeBack, /NotHome 을 넘기는 큐.
+// (예전에는 WiFiScan.exe 가 trigger.txt 에 쓰고 screen_telegram.exe 가 1초마다 읽었다. 텔레그램을 거치지 않는 이유:
+//  봇이 sendMessage 로 보낸 글은 봇 자신이 getUpdates 로 받지 못한다.)
+// 시작 직후 감시가 먼저 넘긴 첫 판정도 큐에 남아 있다가 처리된다 (오래된 것은 처리할 때 나이 검사로 버려진다).
+class LocalTrigger {
+public:
+    struct Item {
+        std::string cmd;   // 소문자, '/' 포함 (예: "/homeback")
+        ULONGLONG tick;    // 넣은 시각 (GetTickCount64)
+    };
+
+    static void post(const std::string& cmd)
+    {
+        std::string c = StrUtil::trim(cmd);
+        for (auto& ch : c) ch = (char)tolower((unsigned char)ch);
+        if (!c.empty() && c[0] != '/') c = "/" + c;
+        std::lock_guard<std::mutex> g(mu());
+        q().push_back(Item{c, GetTickCount64()});
+        if (q().size() > 20) q().erase(q().begin()); // 소비하는 쪽이 없어도 무한히 쌓이지 않게
+    }
+
+    // 가장 오래된 것부터 하나 꺼낸다. 없으면 false.
+    static bool take(Item& out)
+    {
+        std::lock_guard<std::mutex> g(mu());
+        if (q().empty()) return false;
+        out = q().front();
+        q().erase(q().begin());
+        return true;
+    }
+
+    // 지우지 않고 가장 최근 것을 본다. 없으면 false.
+    static bool latest(Item& out)
+    {
+        std::lock_guard<std::mutex> g(mu());
+        if (q().empty()) return false;
+        out = q().back();
+        return true;
+    }
+
+private:
+    static std::mutex& mu() { static std::mutex m; return m; }
+    static std::vector<Item>& q() { static std::vector<Item> v; return v; }
+};
+
+// ================================================================ StopSignal
+// 종료 요청 이벤트. Ctrl+C / 콘솔 닫기 / 로그오프 / 종료 시 설정된다.
+class StopSignal {
+public:
+    StopSignal() { event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr); }
+    ~StopSignal()
+    {
+        if (s_instance == this) {
+            SetConsoleCtrlHandler(handler, FALSE);
+            s_instance = nullptr;
+        }
+        if (event_) CloseHandle(event_);
+    }
+    NO_COPY(StopSignal);
+
+    void install()
+    {
+        s_instance = this;
+        SetConsoleCtrlHandler(handler, TRUE);
+    }
+
+    void request() { if (event_) SetEvent(event_); }
+
+    HANDLE handle() const { return event_; }
+
+    bool requested() const
+    {
+        return event_ && WaitForSingleObject(event_, 0) == WAIT_OBJECT_0;
+    }
+
+    // ms 동안 대기. 종료 요청이 오면 즉시 true 반환, 시간이 다 되면 false.
+    bool wait(DWORD ms) const
+    {
+        return event_ && WaitForSingleObject(event_, ms) == WAIT_OBJECT_0;
+    }
+
+private:
+    static BOOL WINAPI handler(DWORD)
+    {
+        if (s_instance) s_instance->request();
+        return TRUE;
+    }
+
+    HANDLE event_ = nullptr;
+    static StopSignal* s_instance;
+};
+StopSignal* StopSignal::s_instance = nullptr;
+
+// ================================================================ ComScope
+// STA 로 초기화: 일부 구형 웹캠 드라이버(DirectShow 래핑)는 MTA 에서
+// MFEnumDeviceSources 가 장치를 하나도 찾지 못하는 경우가 있음.
+class ComScope {
+public:
+    ComScope() : ok_(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
+    ~ComScope() { if (ok_) CoUninitialize(); }
+    NO_COPY(ComScope);
+
+private:
+    bool ok_;
+};
+
+// ================================================================ ScopedBitmap
+class ScopedBitmap {
+public:
+    ScopedBitmap() = default;
+    explicit ScopedBitmap(HBITMAP h) : h_(h) {}
+    ~ScopedBitmap() { reset(); }
+    NO_COPY(ScopedBitmap);
+
+    ScopedBitmap(ScopedBitmap&& o) noexcept : h_(o.h_) { o.h_ = nullptr; }
+    ScopedBitmap& operator=(ScopedBitmap&& o) noexcept
+    {
+        if (this != &o) {
+            reset();
+            h_ = o.h_;
+            o.h_ = nullptr;
+        }
+        return *this;
+    }
+
+    HBITMAP get() const { return h_; }
+    explicit operator bool() const { return h_ != nullptr; }
+
+    void reset()
+    {
+        if (h_) DeleteObject(h_);
+        h_ = nullptr;
+    }
+
+private:
+    HBITMAP h_ = nullptr;
+};
+
+// ================================================================ Config
+class Config {
+public:
+    std::string token;
+    std::string chatId;
+    volatile int interval = 60; // 명령 스레드(/INTERVAL=nnn)가 런타임에 바꾸고 메인 스레드가 읽음
+
+    // MONITOR1=TRUE / MONITOR2=TRUE / MONITOR3=FALSE ...
+    // 명시되지 않은 모니터는 기본값(true, 즉 캡처함)으로 처리된다.
+    std::map<int, bool> monitorEnabled;
+    bool cameraEnabled = false; // CAMERA=TRUE
+    int cameraIndex = 0;        // CAMERA_INDEX=0
+    int maxLoop = 0;            // MAX_LOOP=9 (0 = 무제한)
+    bool saveOnly = false;      // SAVE_ONLY=TRUE (전송 생략, 저장만)
+    bool commands = true;       // TELEGRAM_COMMANDS=TRUE (봇 명령 수신)
+    int keepDays = 0;           // KEEP_DAYS=7 (0 = 자동 삭제 안 함)
+    int keepMax = 0;            // KEEP_MAX_FILES=5000 (0 = 제한 없음)
+    bool previousSessionClear = false; // PREVIOUS_SESSION_CLEAR=TRUE (시작 때 log.txt 와 image 폴더 파일 전부 삭제)
+    bool cameraKeepOpen = false; // CAMERA_KEEP_OPEN=TRUE (카메라를 계속 열어 둠)
+    bool uploadPlayMedia = true; // UPLOAD_PLAY_MEDIA=TRUE (받은 .mp4/.mp3 를 PC 기본 플레이어로 실행)
+    bool uploadShowImage = true; // UPLOAD_SHOW_IMAGE=TRUE (받은 이미지를 장당 별개의 창으로 표시)
+    std::string uploadDir;       // UPLOAD_DIR=upload (폰 -> PC 파일 수신 폴더, 비어 있으면 exe 폴더\\upload)
+    std::vector<std::string> allowedUsers; // TELEGRAM_ALLOWED_USER_IDS=111,222
+
+    bool localTrigger = true;         // LOCAL_TRIGGER=TRUE (WiFiScan 감시의 /HomeBack /NotHome 받기)
+    bool menu = true;                 // TELEGRAM_MENU=TRUE (시작할 때 텔레그램 명령 메뉴 등록)
+    bool greeting = true;             // TELEGRAM_GREETING=TRUE (시작 인사말)
+
+    // 침입 탐지 (카메라 모션 감지) - 켜기/끄기는 텔레그램 /detectOn /detectOff
+    bool autoDetect = false;          // AUTO_DETECT=TRUE : 프로그램 시작 때 /detectOn 을 자동 수행
+    int intrusionPixelThr = 25;       // INTRUSION_PIXEL_THRESHOLD
+    double intrusionAreaPct = 1.0;    // INTRUSION_AREA_PERCENT
+    int intrusionConfirm = 2;         // INTRUSION_CONFIRM_FRAMES
+    int intrusionCooldown = 60;       // INTRUSION_COOLDOWN (초)
+    int intrusionCheckMs = 1000;      // INTRUSION_CHECK_MS
+
+    // 해당 모니터(1부터 시작하는 순번)가 캡처 대상인지 확인. 미지정 시 기본 true.
+    bool isMonitorEnabled(int oneBasedIndex) const
+    {
+        auto it = monitorEnabled.find(oneBasedIndex);
+        return it == monitorEnabled.end() ? true : it->second;
+    }
+
+    // gsHomeManager.ini 의 [Telegram] 섹션을 읽는다. 파일을 열 수 없으면 false. (섹션이 없으면 기본값 = 토큰 없음)
+    bool load(const std::string& path)
+    {
+        std::string content;
+        if (!SysUtil::readFile(path, content)) return false;
+        size_t secB = 0, secE = 0;
+        if (SysUtil::findSection(content, "TELEGRAM", secB, secE)) content = content.substr(secB, secE - secB); // gsHomeManager.ini 의 [Telegram] 섹션만 읽는다
+        else content.clear();
+        std::istringstream f(content);
+
+        std::string line;
+        bool first = true;
+        while (std::getline(f, line)) {
+            // UTF-8 BOM 제거
+            if (first) {
+                first = false;
+                if (line.size() >= 3 && (unsigned char)line[0] == 0xEF &&
+                    (unsigned char)line[1] == 0xBB && (unsigned char)line[2] == 0xBF)
+                    line.erase(0, 3);
+            }
+            line = StrUtil::trim(line);
+            if (line.empty() || line[0] == ';' || line[0] == '#' || line[0] == '[')
+                continue;
+
+            size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+
+            std::string key = StrUtil::trim(line.substr(0, eq));
+            std::string val = StrUtil::trim(line.substr(eq + 1));
+            // 값 뒤 인라인 주석 제거: "공백 + ; 또는 #" (예: CAMERA=TRUE ; 메모)
+            for (size_t i = 1; i < val.size(); ++i) {
+                if ((val[i] == ';' || val[i] == '#') && (unsigned char)val[i - 1] <= ' ') {
+                    val = StrUtil::trim(val.substr(0, i));
+                    break;
+                }
+            }
+            if (val.size() >= 2 && ((val.front() == '"' && val.back() == '"') ||
+                                    (val.front() == '\'' && val.back() == '\'')))
+                val = val.substr(1, val.size() - 2);
+
+            key = StrUtil::upper(key); // 대소문자 무시
+            apply(key, val);
+        }
+        return true;
+    }
+
+    // 이 프로그램이 해석하는 키인지 (대문자로 전달). /ini 로 추가한 키의 오타 점검용.
+    static bool isKnownKey(const std::string& key)
+    {
+        static const char* const names[] = {
+            "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_INTERVAL", "TELEGRAM_COMMANDS",
+            "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_GREETING", "TELEGRAM_MENU", "LOCAL_TRIGGER", "SAVE_ONLY", "MAX_LOOP",
+            "CAMERA", "CAMERA_INDEX", "CAMERA_KEEP_OPEN", "KEEP_DAYS", "KEEP_MAX_FILES", "PREVIOUS_SESSION_CLEAR",
+            "UPLOAD_DIR", "UPLOAD_SHOW_IMAGE", "UPLOAD_PLAY_MEDIA", "UPLOAD_PLAY_VIDEO", "AUTO_DETECT", "INTRUSION_PIXEL_THRESHOLD", "INTRUSION_AREA_PERCENT",
+            "INTRUSION_CONFIRM_FRAMES", "INTRUSION_COOLDOWN", "INTRUSION_CHECK_MS"
+        };
+        for (const char* n : names)
+            if (key == n) return true;
+        if (key.rfind("MONITOR", 0) == 0) { // MONITOR1, MONITOR2, ...
+            const std::string num = key.substr(7);
+            return !num.empty() && num.find_first_not_of("0123456789") == std::string::npos;
+        }
+        return false;
+    }
+
+private:
+    void apply(const std::string& key, const std::string& val)
+    {
+        if (key == "TELEGRAM_BOT_TOKEN") token = val;
+        else if (key == "TELEGRAM_CHAT_ID") chatId = val;
+        else if (key == "TELEGRAM_INTERVAL") {
+            int v = atoi(val.c_str());
+            if (v > 0) interval = v;
+        }
+        else if (key == "TELEGRAM_COMMANDS") {
+            commands = StrUtil::parseBool(val, true);
+        }
+        else if (key == "SAVE_ONLY") {
+            saveOnly = StrUtil::parseBool(val, false);
+        }
+        else if (key == "MAX_LOOP") {
+            int v = atoi(val.c_str());
+            if (v >= 0) maxLoop = v;
+        }
+        else if (key == "CAMERA_INDEX") {
+            int v = atoi(val.c_str());
+            if (v >= 0) cameraIndex = v;
+        }
+        else if (key == "CAMERA") {
+            cameraEnabled = StrUtil::parseBool(val, false);
+        }
+        else if (key == "KEEP_DAYS") {
+            int v = atoi(val.c_str());
+            if (v >= 0) keepDays = v;
+        }
+        else if (key == "PREVIOUS_SESSION_CLEAR") {
+            previousSessionClear = StrUtil::parseBool(val, false);
+        }
+        else if (key == "KEEP_MAX_FILES") {
+            int v = atoi(val.c_str());
+            if (v >= 0) keepMax = v;
+        }
+        else if (key == "CAMERA_KEEP_OPEN") {
+            cameraKeepOpen = StrUtil::parseBool(val, false);
+        }
+        else if (key == "UPLOAD_PLAY_MEDIA" || key == "UPLOAD_PLAY_VIDEO") {
+            uploadPlayMedia = StrUtil::parseBool(val, true);
+        }
+        else if (key == "UPLOAD_SHOW_IMAGE") {
+            uploadShowImage = StrUtil::parseBool(val, true);
+        }
+        else if (key == "UPLOAD_DIR") {
+            uploadDir = val;
+        }
+        else if (key == "TELEGRAM_ALLOWED_USER_IDS") {
+            allowedUsers.clear();
+            std::string cur;
+            for (size_t i = 0; i <= val.size(); ++i) {
+                char c = i < val.size() ? val[i] : ',';
+                if (c == ',' || c == ';' || c == ' ' || c == '\t') {
+                    if (!cur.empty()) allowedUsers.push_back(cur);
+                    cur.clear();
+                } else cur += c;
+            }
+        }
+        else if (key == "LOCAL_TRIGGER") {
+            localTrigger = StrUtil::parseBool(val, true);
+        }
+        else if (key == "TELEGRAM_MENU") {
+            menu = StrUtil::parseBool(val, true);
+        }
+        else if (key == "TELEGRAM_GREETING") {
+            greeting = StrUtil::parseBool(val, true);
+        }
+        else if (key == "AUTO_DETECT") {
+            autoDetect = StrUtil::parseBool(val, false);
+        }
+        else if (key == "INTRUSION_PIXEL_THRESHOLD") {
+            int v = atoi(val.c_str());
+            if (v >= 1 && v <= 255) intrusionPixelThr = v;
+        }
+        else if (key == "INTRUSION_AREA_PERCENT") {
+            double v = atof(val.c_str());
+            if (v >= 0.01 && v <= 100.0) intrusionAreaPct = v;
+        }
+        else if (key == "INTRUSION_CONFIRM_FRAMES") {
+            int v = atoi(val.c_str());
+            if (v >= 1 && v <= 10) intrusionConfirm = v;
+        }
+        else if (key == "INTRUSION_COOLDOWN") {
+            int v = atoi(val.c_str());
+            if (v >= 0 && v <= 3600) intrusionCooldown = v;
+        }
+        else if (key == "INTRUSION_CHECK_MS") {
+            int v = atoi(val.c_str());
+            if (v >= 200 && v <= 10000) intrusionCheckMs = v;
+        }
+        else if (key.rfind("MONITOR", 0) == 0) {
+            // MONITOR1, MONITOR2, MONITOR3, ... 형태 처리
+            std::string numPart = key.substr(7);
+            if (!numPart.empty() &&
+                numPart.find_first_not_of("0123456789") == std::string::npos) {
+                int idx = atoi(numPart.c_str());
+                if (idx >= 1) monitorEnabled[idx] = StrUtil::parseBool(val, true);
+            }
+        }
+    }
+};
+
+// ================================================================ ImageEncoder
+// GDI+ 세션을 소유하며 비트맵을 PNG/JPEG 바이트로 인코딩한다.
+class ImageEncoder {
+public:
+    ImageEncoder()
+    {
+        Gdiplus::GdiplusStartupInput gsi;
+        ok_ = (Gdiplus::GdiplusStartup(&token_, &gsi, nullptr) == Gdiplus::Ok);
+    }
+    ~ImageEncoder()
+    {
+        if (ok_) Gdiplus::GdiplusShutdown(token_);
+    }
+    NO_COPY(ImageEncoder);
+
+    bool ok() const { return ok_; }
+
+    bool encode(Gdiplus::Bitmap& bmp, bool jpeg, ULONG quality, std::vector<BYTE>& out) const
+    {
+        out.clear();
+        CLSID clsid;
+        if (!getEncoderClsid(jpeg ? L"image/jpeg" : L"image/png", &clsid))
+            return false;
+
+        bool ok = false;
+        IStream* stream = nullptr;
+        if (CreateStreamOnHGlobal(nullptr, TRUE, &stream) != S_OK) return false;
+
+        {
+            Gdiplus::Status st;
+            if (jpeg) {
+                Gdiplus::EncoderParameters ep;
+                ep.Count = 1;
+                ep.Parameter[0].Guid = Gdiplus::EncoderQuality;
+                ep.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+                ep.Parameter[0].NumberOfValues = 1;
+                ep.Parameter[0].Value = &quality;
+                st = bmp.Save(stream, &clsid, &ep);
+            } else {
+                st = bmp.Save(stream, &clsid, nullptr);
+            }
+
+            if (st == Gdiplus::Ok) {
+                STATSTG ss;
+                HGLOBAL hg = nullptr;
+                if (stream->Stat(&ss, STATFLAG_NONAME) == S_OK &&
+                    GetHGlobalFromStream(stream, &hg) == S_OK) {
+                    SIZE_T n = (SIZE_T)ss.cbSize.QuadPart;
+                    void* p = GlobalLock(hg);
+                    if (p) {
+                        out.assign((BYTE*)p, (BYTE*)p + n);
+                        GlobalUnlock(hg);
+                        ok = true;
+                    }
+                }
+            }
+        }
+        stream->Release();
+        return ok;
+    }
+
+    // 전송용 축소본: 긴 변이 maxDim 을 넘을 때만 축소해 JPEG 로 인코딩한다 (업로드 용량 절감).
+    // 축소할 필요가 없거나 실패하면 false 이며, 호출자는 encodeForTelegram() 결과를 그대로 쓴다.
+    bool encodeScaledJpeg(HBITMAP hBmp, UINT maxDim, ULONG quality,
+                          std::vector<BYTE>& out, UINT& nw, UINT& nh) const
+    {
+        out.clear();
+        Gdiplus::Bitmap src(hBmp, nullptr);
+        const UINT w = src.GetWidth(), h = src.GetHeight();
+        const UINT longSide = std::max(w, h);
+        if (w == 0 || h == 0 || longSide <= maxDim) return false;
+
+        const double s = (double)maxDim / (double)longSide;
+        nw = std::max<UINT>(1, (UINT)(w * s + 0.5));
+        nh = std::max<UINT>(1, (UINT)(h * s + 0.5));
+        Gdiplus::Bitmap dst(nw, nh, PixelFormat24bppRGB);
+        {
+            Gdiplus::Graphics g(&dst);
+            g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+            g.DrawImage(&src, 0, 0, (INT)nw, (INT)nh);
+        }
+        return encode(dst, true, quality, out);
+    }
+
+    // 텔레그램 전송용 인코딩.
+    //  - 기본은 JPEG(품질 85). 사진 한도(10MB)를 넘으면 품질/해상도를 단계적으로 낮춰 다시 인코딩.
+    //  - 가로+세로 > 10000px 이거나 가로세로 비율 > 20 이면 sendPhoto 가 거부하므로
+    //    원본 그대로 문서(sendDocument, 한도 50MB)로 보내도록 asDocument=true 로 알린다.
+    //  - 끝까지 한도를 못 맞추면 가장 좋은 품질의 JPEG 를 문서로 보낸다 (49MB 이하일 때).
+    bool encodeForTelegram(HBITMAP hBmp, std::vector<BYTE>& out, bool& jpeg, bool& asDocument) const
+    {
+        jpeg = true;
+        asDocument = false;
+        out.clear();
+
+        Gdiplus::Bitmap src(hBmp, nullptr);
+        const UINT w = src.GetWidth(), h = src.GetHeight();
+        if (w == 0 || h == 0) return false;
+
+        const size_t PHOTO_LIMIT = 9500000;   // sendPhoto 10MB 한도에 여유
+        const size_t DOC_LIMIT = 49000000;    // sendDocument 50MB 한도에 여유
+        const double ratio = (double)std::max(w, h) / (double)std::min(w, h);
+        if ((unsigned long long)w + h > 10000ULL || ratio > 20.0) asDocument = true;
+
+        CLSID jpegClsid;
+        if (!getEncoderClsid(L"image/jpeg", &jpegClsid)) {
+            // JPEG 인코더가 없는 비정상 환경: PNG 로 대체
+            jpeg = false;
+            if (!encode(src, false, 0, out)) return false;
+            if (out.size() > PHOTO_LIMIT) asDocument = true;
+            return out.size() <= DOC_LIMIT;
+        }
+
+        struct Step { ULONG quality; double scale; };
+        static const Step steps[] = {
+            {85, 1.0}, {70, 1.0}, {60, 0.75}, {50, 0.5}, {40, 0.35}
+        };
+        const size_t limit = asDocument ? DOC_LIMIT : PHOTO_LIMIT;
+
+        std::vector<BYTE> first; // 가장 좋은 품질(1단계) 결과 - 마지막 수단용
+        for (size_t i = 0; i < sizeof(steps) / sizeof(steps[0]); ++i) {
+            const Step& s = steps[i];
+            bool ok;
+            if (s.scale >= 1.0) {
+                ok = encode(src, true, s.quality, out);
+            } else {
+                UINT nw = std::max<UINT>(1, (UINT)(w * s.scale + 0.5));
+                UINT nh = std::max<UINT>(1, (UINT)(h * s.scale + 0.5));
+                Gdiplus::Bitmap dst(nw, nh, PixelFormat24bppRGB);
+                {
+                    Gdiplus::Graphics g(&dst);
+                    g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                    g.DrawImage(&src, 0, 0, (INT)nw, (INT)nh);
+                }
+                ok = encode(dst, true, s.quality, out);
+            }
+            if (!ok) return false;
+            if (i == 0) first = out;
+            if (out.size() <= limit) {
+                if (i > 0)
+                    Logger::log("이미지가 커서 품질/해상도를 낮춤 (품질 %lu, %.0f%%, %zu KB)",
+                                (unsigned long)s.quality, s.scale * 100.0, out.size() / 1024);
+                return true;
+            }
+        }
+
+        // 사진 한도를 맞추지 못함 -> 원본 품질 JPEG 를 문서로 전송
+        if (!asDocument && first.size() <= DOC_LIMIT) {
+            asDocument = true;
+            out.swap(first);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    static bool getEncoderClsid(const WCHAR* mime, CLSID* clsid)
+    {
+        UINT num = 0, size = 0;
+        Gdiplus::GetImageEncodersSize(&num, &size);
+        if (size == 0) return false;
+
+        std::vector<BYTE> buf(size);
+        auto* enc = reinterpret_cast<Gdiplus::ImageCodecInfo*>(buf.data());
+        Gdiplus::GetImageEncoders(num, size, enc);
+        for (UINT i = 0; i < num; ++i) {
+            if (wcscmp(enc[i].MimeType, mime) == 0) {
+                *clsid = enc[i].Clsid;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    ULONG_PTR token_ = 0;
+    bool ok_ = false;
+};
+
+// ================================================================ TelegramClient
+class TelegramClient {
+public:
+    TelegramClient(std::string token, std::string chatId, const StopSignal& stop)
+        : token_(std::move(token)), chatId_(std::move(chatId)), stop_(stop)
+    {
+        InitializeCriticalSection(&connCs_);
+    }
+    ~TelegramClient()
+    {
+        if (hConn_) WinHttpCloseHandle(hConn_);
+        if (hSession_) WinHttpCloseHandle(hSession_);
+        DeleteCriticalSection(&connCs_);
+    }
+    NO_COPY(TelegramClient);
+
+    // 전송 1회 시도. 성공 시 true, 실패 시 resp 에 오류 내용.
+    // asDoc=true 이면 sendDocument(원본 유지, 50MB), 아니면 sendPhoto(10MB).
+    bool sendImage(const std::string& caption, const std::vector<BYTE>& img,
+                   bool jpeg, bool asDoc, std::string& resp) const
+    {
+        resp.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+
+        std::string body;
+        body.reserve(img.size() + 1024);
+        addField(body, boundary, "chat_id", chatId_);
+        addField(body, boundary, "caption", caption);
+
+        body += "--" + boundary + "\r\n";
+        body += std::string("Content-Disposition: form-data; name=\"") +
+                (asDoc ? "document" : "photo") + "\"; filename=\"screen" +
+                (jpeg ? ".jpg" : ".png") + "\"\r\n";
+        body += std::string("Content-Type: ") + (jpeg ? "image/jpeg" : "image/png") + "\r\n\r\n";
+        body.append((const char*)img.data(), img.size());
+        body += "\r\n--" + boundary + "--\r\n";
+
+        return post(asDoc ? L"sendDocument" : L"sendPhoto",
+                    "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 텍스트를 .txt 파일로 전송 (/log 등 내용이 길 때). text 는 UTF-8.
+    bool sendTextDocument(const std::string& caption, const std::string& filename,
+                          const std::string& text, std::string& resp) const
+    {
+        resp.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+
+        std::string body;
+        body.reserve(text.size() + 1024);
+        addField(body, boundary, "chat_id", chatId_);
+        if (!caption.empty()) addField(body, boundary, "caption", caption);
+
+        body += "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\n";
+        body += "Content-Type: text/plain; charset=utf-8\r\n\r\n";
+        body += text;
+        body += "\r\n--" + boundary + "--\r\n";
+
+        return post(L"sendDocument", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 파일 원본 바이트를 문서로 전송 (/download). filename 은 UTF-8.
+    bool sendFileDocument(const std::string& caption, const std::string& filename,
+                          const std::vector<BYTE>& data, std::string& resp) const
+    {
+        resp.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+
+        std::string body;
+        body.reserve(data.size() + 1024);
+        addField(body, boundary, "chat_id", chatId_);
+        if (!caption.empty()) addField(body, boundary, "caption", caption);
+
+        body += "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"document\"; filename=\"" + filename + "\"\r\n";
+        body += "Content-Type: application/octet-stream\r\n\r\n";
+        body.append((const char*)data.data(), data.size());
+        body += "\r\n--" + boundary + "--\r\n";
+
+        return post(L"sendDocument", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 명령 메뉴 등록 (setMyCommands). json 은 {"commands":[{"command":"..","description":".."},..]} (UTF-8)
+    bool setMyCommands(const std::string& json, std::string& resp) const
+    {
+        return post(L"setMyCommands", "application/json", json, resp);
+    }
+
+    // getFile: file_id -> file_path (폰에서 받은 파일 내려받기용). 실패 시 resp 에 오류 내용.
+    bool getFilePath(const std::string& fileId, std::string& filePath, std::string& resp) const
+    {
+        filePath.clear();
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "file_id", fileId);
+        body += "--" + boundary + "--\r\n";
+        if (!post(L"getFile", "multipart/form-data; boundary=" + boundary, body, resp)) return false;
+        const std::string k = "\"file_path\":\"";
+        size_t p = resp.find(k);
+        if (p == std::string::npos) return false;
+        p += k.size();
+        const size_t e = resp.find('"', p);
+        if (e == std::string::npos) return false;
+        std::string fp = resp.substr(p, e - p);
+        for (size_t i; (i = fp.find("\\/")) != std::string::npos; ) fp.replace(i, 2, "/");
+        filePath = fp;
+        return !filePath.empty();
+    }
+
+    // getFile 로 얻은 file_path 의 파일을 내려받는다 (한도 kMaxDownload). 네트워크 오류면 1회 재시도.
+    bool downloadFile(const std::string& filePath, std::vector<BYTE>& data, std::string& err) const
+    {
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            data.clear();
+            err.clear();
+            HINTERNET hConn = connection();
+            if (!hConn) { err = "WinHTTP error (open)"; return false; }
+            const std::wstring path = L"/file/bot" + StrUtil::toWide(token_) + L"/" + StrUtil::toWide(filePath);
+            HINTERNET hReq = WinHttpOpenRequest(hConn, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+                                                WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+            if (!hReq) { err = "WinHTTP error (request)"; return false; }
+            bool ok = false, net = false;
+            if (WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                WinHttpReceiveResponse(hReq, nullptr)) {
+                DWORD status = 0, sz = sizeof(status);
+                WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                    WINHTTP_HEADER_NAME_BY_INDEX, &status, &sz, WINHTTP_NO_HEADER_INDEX);
+                if (status == 200) {
+                    ok = true;
+                    for (;;) {
+                        DWORD avail = 0;
+                        if (!WinHttpQueryDataAvailable(hReq, &avail)) { ok = false; net = true; err = "다운로드 중단"; break; }
+                        if (avail == 0) break;
+                        if (data.size() + avail > kMaxDownload) { ok = false; err = "파일이 너무 큽니다"; break; }
+                        const size_t old = data.size();
+                        data.resize(old + avail);
+                        DWORD rd = 0;
+                        if (!WinHttpReadData(hReq, &data[old], avail, &rd)) { ok = false; net = true; err = "다운로드 중단"; break; }
+                        data.resize(old + rd);
+                        if (rd == 0) break;
+                    }
+                } else {
+                    err = "HTTP " + std::to_string(status);
+                }
+            } else {
+                net = true;
+                err = "WinHTTP error " + std::to_string(GetLastError());
+            }
+            WinHttpCloseHandle(hReq);
+            if (ok) return true;
+            if (!net || stop_.requested()) break;
+        }
+        data.clear();
+        return false;
+    }
+
+    // 텍스트 메시지 전송 (설정된 chat 으로)
+    bool sendMessage(const std::string& text, std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "chat_id", chatId_);
+        addField(body, boundary, "text", text);
+        body += "--" + boundary + "--\r\n";
+        return post(L"sendMessage", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 인라인 키보드(버튼)가 붙은 텍스트 메시지 전송. replyMarkup 은 reply_markup JSON 문자열.
+    bool sendMessageWithKeyboard(const std::string& text, const std::string& replyMarkup,
+                                 std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "chat_id", chatId_);
+        addField(body, boundary, "text", text);
+        addField(body, boundary, "reply_markup", replyMarkup);
+        body += "--" + boundary + "--\r\n";
+        return post(L"sendMessage", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 버튼을 눌렀을 때 텔레그램 앱의 로딩 표시를 없앤다 (text 가 있으면 잠깐 알림으로 표시)
+    bool answerCallbackQuery(const std::string& callbackId, const std::string& text,
+                             std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "callback_query_id", callbackId);
+        if (!text.empty()) addField(body, boundary, "text", text);
+        body += "--" + boundary + "--\r\n";
+        return post(L"answerCallbackQuery", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 이미 보낸 메시지의 내용을 바꾼다. reply_markup 을 생략하므로 붙어 있던 버튼은 사라진다.
+    bool editMessageText(const std::string& messageId, const std::string& text,
+                         std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "chat_id", chatId_);
+        addField(body, boundary, "message_id", messageId);
+        addField(body, boundary, "text", text);
+        body += "--" + boundary + "--\r\n";
+        return post(L"editMessageText", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 메시지를 채팅창 상단에 고정한다 (알림 없음)
+    bool pinMessage(const std::string& messageId, std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "chat_id", chatId_);
+        addField(body, boundary, "message_id", messageId);
+        addField(body, boundary, "disable_notification", "true");
+        body += "--" + boundary + "--\r\n";
+        return post(L"pinChatMessage", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // sendMessage 응답({"ok":true,"result":{"message_id":N,...}})에서 message_id 를 꺼낸다. 없으면 "".
+    static std::string extractMessageId(const std::string& resp)
+    {
+        const std::string k = "\"message_id\":";
+        size_t p = resp.find(k);
+        if (p == std::string::npos) return "";
+        p += k.size();
+        size_t e = p;
+        while (e < resp.size() && isdigit((unsigned char)resp[e])) ++e;
+        return resp.substr(p, e - p);
+    }
+
+    // 새 업데이트 조회 (롱폴링). timeoutSec 동안 새 메시지/버튼 클릭을 기다린다.
+    bool getUpdates(long long offset, int timeoutSec, std::string& resp) const
+    {
+        const std::string boundary = "----ScreenTelegramBoundary7MA4YWxkTrZu0gW";
+        std::string body;
+        addField(body, boundary, "offset", std::to_string(offset));
+        addField(body, boundary, "timeout", std::to_string(timeoutSec));
+        addField(body, boundary, "allowed_updates", "[\"message\",\"callback_query\"]");
+        body += "--" + boundary + "--\r\n";
+        return post(L"getUpdates", "multipart/form-data; boundary=" + boundary, body, resp);
+    }
+
+    // 전송 실패 시 재시도 (네트워크 오류, 5xx, 429 retry_after). 최대 3회.
+    bool sendImageWithRetry(const std::string& caption, const std::vector<BYTE>& img,
+                            bool jpeg, bool asDoc, std::string& resp) const
+    {
+        const int maxTry = 3;
+        for (int attempt = 1; ; ++attempt) {
+            if (sendImage(caption, img, jpeg, asDoc, resp)) return true;
+            if (attempt >= maxTry) return false;
+
+            bool net = resp.empty() || resp.rfind("WinHTTP error", 0) == 0;
+            bool srv = resp.find("\"error_code\":5") != std::string::npos;
+            int retryAfter = 0;
+            size_t p = resp.find("\"retry_after\":");
+            if (p != std::string::npos) retryAfter = atoi(resp.c_str() + p + 14);
+            if (!net && !srv && retryAfter <= 0) return false; // 재시도해도 소용없는 오류
+
+            int waitSec = retryAfter > 0 ? std::min(retryAfter + 1, 60) : 5 * attempt;
+            Logger::log("전송 실패, %d초 후 재시도 (%d/%d)", waitSec, attempt, maxTry - 1);
+            if (stop_.wait((DWORD)waitSec * 1000)) return false; // 종료 요청
+        }
+    }
+
+private:
+    static constexpr size_t kMaxDownload = 21u * 1024 * 1024; // getFile 한도(20MB)에 여유
+
+    // WinHTTP 세션/연결 핸들은 한 번만 만들어 모든 스레드(메인/명령/침입 탐지)가 공유한다.
+    // 요청마다 세션을 새로 열면 자동 프록시 탐색과 TLS 핸드셰이크를 매번 반복하게 된다.
+    // (WinHttpConnect 는 소켓을 열지 않는다. 실제 소켓은 세션이 keep-alive 로 풀링하고 끊기면 알아서 다시 연다.
+    //  WinHTTP 핸들은 스레드 안전하므로 요청 핸들만 호출마다 만들면 된다.)
+    HINTERNET connection() const
+    {
+        CsLock lk(&connCs_);
+        if (hConn_) return hConn_;
+        if (!hSession_) {
+            hSession_ = WinHttpOpen(L"ScreenTelegram/1.0",
+                                    WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                                    WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+            if (!hSession_) return nullptr;
+            WinHttpSetTimeouts(hSession_, 10000, 10000, 60000, 120000);
+        }
+        hConn_ = WinHttpConnect(hSession_, L"api.telegram.org", INTERNET_DEFAULT_HTTPS_PORT, 0);
+        return hConn_;
+    }
+
+    // POST. 응답 본문을 resp 에 담고, "ok":true 이면 true.
+    // 오래 놀던 keep-alive 소켓이 끊겨 있던 경우(12030/12032)에는 즉시 한 번 더 시도한다 (새 소켓으로 연결됨).
+    bool post(const wchar_t* method, const std::string& contentType,
+              const std::string& body, std::string& resp) const
+    {
+        if (postOnce(method, contentType, body, resp)) return true;
+        if (resp == "WinHTTP error 12030" || resp == "WinHTTP error 12032")
+            return postOnce(method, contentType, body, resp);
+        return false;
+    }
+
+    // POST 1회.
+    bool postOnce(const wchar_t* method, const std::string& contentType,
+                  const std::string& body, std::string& resp) const
+    {
+        resp.clear();
+        HINTERNET hConn = connection();
+        if (!hConn) {
+            resp = "WinHTTP error (open)";
+            return false;
+        }
+
+        bool ok = false;
+        HINTERNET hReq = nullptr;
+        if (hConn) {
+            std::wstring path = L"/bot" + StrUtil::toWide(token_) + L"/" + method;
+            hReq = WinHttpOpenRequest(hConn, L"POST", path.c_str(), nullptr,
+                                      WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                      WINHTTP_FLAG_SECURE);
+        }
+        if (hReq) {
+            std::wstring hdr = L"Content-Type: " + StrUtil::toWide(contentType);
+            if (WinHttpSendRequest(hReq, hdr.c_str(), (DWORD)-1L,
+                                   (LPVOID)body.data(), (DWORD)body.size(),
+                                   (DWORD)body.size(), 0) &&
+                WinHttpReceiveResponse(hReq, nullptr)) {
+                DWORD avail = 0;
+                while (WinHttpQueryDataAvailable(hReq, &avail) && avail > 0) {
+                    std::string chunk(avail, '\0');
+                    DWORD rd = 0;
+                    if (!WinHttpReadData(hReq, &chunk[0], avail, &rd) || rd == 0) break;
+                    resp.append(chunk.data(), rd);
+                }
+                ok = resp.find("\"ok\":true") != std::string::npos;
+            } else {
+                char e[64];
+                snprintf(e, sizeof(e), "WinHTTP error %lu", GetLastError());
+                resp = e;
+            }
+        } else {
+            resp = "WinHTTP error (request)";
+        }
+        if (hReq) WinHttpCloseHandle(hReq); // 세션/연결 핸들은 재사용하므로 닫지 않는다
+        return ok;
+    }
+
+    static void addField(std::string& body, const std::string& boundary,
+                         const std::string& name, const std::string& value)
+    {
+        body += "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n";
+        body += value + "\r\n";
+    }
+
+    std::string token_;
+    std::string chatId_;
+    const StopSignal& stop_;
+    mutable HINTERNET hSession_ = nullptr; // connection() 이 늦게 만들고 소멸자에서 닫는다
+    mutable HINTERNET hConn_ = nullptr;
+    mutable CRITICAL_SECTION connCs_;      // 위 두 핸들의 생성 보호
+};
+
+// ================================================================ CommandListener
+// 텔레그램 봇 명령 수신 (getUpdates). 설정된 chat_id 에서 온 명령만 허용한다.
+// 주의: 같은 봇 토큰으로 다른 프로그램이 getUpdates/webhook 을 쓰면 409 충돌이 난다.
+// 수신 이벤트 1건: 일반 명령(/shot 등) 또는 인라인 버튼 클릭(callback_query)
+struct BotEvent {
+    std::string cmd;        // 명령(소문자, '/' 포함, @봇이름 제거). 버튼 클릭이면 비어 있음
+    std::string arg;        // 명령 뒤의 인자(JSON 이스케이프 해제, 앞뒤 공백 제거, 대소문자 유지). "/ini A=1" -> "A=1"
+    std::string cbData;     // 버튼 클릭: callback_data (예: "stop_yes"). 일반 명령이면 비어 있음
+    std::string cbId;       // 버튼 클릭: callback_query id (answerCallbackQuery 용)
+    std::string messageId;  // 버튼 클릭: 버튼이 붙어 있던 메시지의 id
+    std::string fileId;     // 파일 수신: 첨부된 파일의 file_id (document/photo/video/audio/voice/animation/video_note)
+    std::string fileName;   // 파일 수신: 원본 파일명(UTF-8). 사진처럼 이름이 없으면 비어 있음
+    std::string fileKind;   // 파일 수신: "document", "photo" 등
+    long long fileSize = 0; // 파일 수신: 크기(바이트). 모르면 0
+    bool isCallback() const { return !cbData.empty(); }
+    bool isFile() const { return !fileId.empty(); }
+};
+
+// /restart 요청 플래그: WinMain 이 app.run() 이 끝난 뒤 같은 exe 를 다시 실행한다.
+static volatile LONG g_restartRequested = 0;
+
+class CommandListener {
+public:
+    CommandListener(const TelegramClient& tg, std::string chatId,
+                    std::vector<std::string> allowedUsers)
+        : tg_(tg), chatId_(StrUtil::trim(chatId)), users_(std::move(allowedUsers)) {}
+
+    // 시작 시 쌓여 있던 예전 명령/버튼 클릭은 실행하지 않도록 모두 건너뛴다.
+    void skipPending()
+    {
+        for (int i = 0; i < 20; ++i) {
+            int n = 0;
+            if (!fetch(0, nullptr, n) || n == 0) break;
+        }
+    }
+
+    // 최대 timeoutSec 초 기다리며 새 명령/버튼 클릭을 읽는다. 통신 실패 시 false.
+    bool poll(int timeoutSec, std::vector<BotEvent>& events)
+    {
+        int n = 0;
+        return fetch(timeoutSec, &events, n);
+    }
+
+private:
+    bool fetch(int timeoutSec, std::vector<BotEvent>* events, int& count)
+    {
+        count = 0;
+        std::string resp;
+        if (!tg_.getUpdates(offset_, timeoutSec, resp)) {
+            if (!failing_) { // 같은 오류 반복 로그 방지
+                failing_ = true;
+                Logger::log("명령 수신 실패: %s%s", resp.substr(0, 200).c_str(),
+                            resp.find("\"error_code\":409") != std::string::npos
+                                ? " (같은 봇 토큰을 다른 프로그램이 getUpdates/webhook 으로 사용 중)"
+                                : "");
+            }
+            return false;
+        }
+        if (failing_) {
+            failing_ = false;
+            Logger::log("명령 수신 복구");
+        }
+
+        // 응답은 {"ok":true,"result":[{"update_id":N,"message":{...}},...]} 형태.
+        // "update_id": 위치로 잘라 항목별로 처리한다.
+        const std::string key = "\"update_id\":";
+        std::vector<size_t> starts;
+        for (size_t p = resp.find(key); p != std::string::npos; p = resp.find(key, p + key.size()))
+            starts.push_back(p);
+
+        for (size_t i = 0; i < starts.size(); ++i) {
+            size_t end = (i + 1 < starts.size()) ? starts[i + 1] : resp.size();
+            std::string seg = resp.substr(starts[i], end - starts[i]);
+
+            long long uid = atoll(seg.c_str() + key.size());
+            if (uid >= offset_) offset_ = uid + 1; // 처리한 업데이트는 다시 받지 않음
+            ++count;
+            if (!events) continue;
+
+            // 버튼 클릭(callback_query)이면 메시지 텍스트가 아니라 callback_data 로 판단한다.
+            // (callback_query 안의 "text" 는 버튼이 붙은 봇 메시지의 본문이므로 명령으로 해석하면 안 됨)
+            BotEvent ev;
+            std::string what; // 로그용
+            const std::string cbKey = "\"callback_query\":{\"id\":\"";
+            const size_t cbPos = seg.find(cbKey);
+            if (cbPos != std::string::npos) {
+                size_t s = cbPos + cbKey.size();
+                size_t e = seg.find('"', s);
+                ev.cbId = e == std::string::npos ? "" : seg.substr(s, e - s);
+                ev.cbData = extractCallbackData(seg);
+                const std::string mk = "\"message_id\":";
+                size_t mp = seg.find(mk, cbPos);
+                if (mp != std::string::npos) {
+                    mp += mk.size();
+                    size_t me = mp;
+                    while (me < seg.size() && isdigit((unsigned char)seg[me])) ++me;
+                    ev.messageId = seg.substr(mp, me - mp);
+                }
+                if (ev.cbData.empty()) continue;
+                what = "버튼 " + ev.cbData;
+            } else {
+                const std::string rawText = extractText(seg);
+                ev.cmd = extractCommand(rawText);
+                if (!ev.cmd.empty()) {
+                    ev.arg = extractArg(rawText);
+                    what = ev.cmd;
+                } else if (extractFile(seg, ev)) {   // 명령이 아니고 파일이 첨부된 메시지 (폰 -> PC)
+                    what = "파일 " + (ev.fileName.empty() ? ev.fileKind : ev.fileName);
+                } else {
+                    continue;
+                }
+            }
+
+            std::string chat = extractChatId(seg);
+            if (chat != chatId_) {
+                Logger::log("허용되지 않은 chat id(%s)의 명령 무시: %s", chat.c_str(), what.c_str());
+                continue;
+            }
+
+            // 보낸 사람 확인: 허용 목록이 있으면 목록에 있는 사용자만,
+            // 없으면 개인 chat(양수 id)에서만 허용 (그룹이면 아무나 /stop 을 보낼 수 있으므로 거부)
+            // 버튼 클릭도 동일하게 검사한다 (callback_query.from = 버튼을 누른 사람).
+            const std::string from = extractUserId(seg);
+            if (!users_.empty()) {
+                if (std::find(users_.begin(), users_.end(), from) == users_.end()) {
+                    Logger::log("허용되지 않은 사용자(%s)의 명령 무시: %s", from.c_str(), what.c_str());
+                    continue;
+                }
+            } else if (!chatId_.empty() && chatId_[0] == '-') {
+                if (!warnedGroup_) {
+                    warnedGroup_ = true;
+                    Logger::log("그룹 chat 에서는 TELEGRAM_ALLOWED_USER_IDS 를 설정해야 명령이 동작합니다. 명령 무시.");
+                }
+                continue;
+            }
+            events->push_back(ev);
+        }
+        return true;
+    }
+
+    // s[p] 가 '{' 또는 '[' 일 때 짝이 맞는 끝까지의 부분 문자열 (문자열 안의 괄호는 무시). 실패 시 "".
+    static std::string balanced(const std::string& s, size_t p)
+    {
+        int depth = 0;
+        bool inStr = false;
+        for (size_t i = p; i < s.size(); ++i) {
+            const char c = s[i];
+            if (inStr) {
+                if (c == '\\') ++i;
+                else if (c == '"') inStr = false;
+                continue;
+            }
+            if (c == '"') inStr = true;
+            else if (c == '{' || c == '[') ++depth;
+            else if (c == '}' || c == ']') { if (--depth == 0) return s.substr(p, i - p + 1); }
+        }
+        return std::string();
+    }
+
+    // 객체 obj 의 바로 아래(깊이 1) key 의 값. 문자열이면 따옴표 안쪽(이스케이프 그대로), 아니면 원문. 없으면 "".
+    // (document 안의 thumbnail 에도 file_id 가 있으므로 깊이를 구분해야 한다)
+    static std::string topValue(const std::string& obj, const std::string& key)
+    {
+        int depth = 0;
+        for (size_t i = 0; i < obj.size(); ++i) {
+            const char c = obj[i];
+            if (c == '"') {
+                size_t e = i + 1;
+                while (e < obj.size() && obj[e] != '"') { if (obj[e] == '\\') ++e; ++e; }
+                if (depth == 1 && e < obj.size() && e + 1 < obj.size() && obj[e + 1] == ':' &&
+                    obj.compare(i + 1, e - i - 1, key) == 0) {
+                    const size_t v = e + 2;
+                    if (v < obj.size() && obj[v] == '"') {
+                        size_t ve = v + 1;
+                        while (ve < obj.size() && obj[ve] != '"') { if (obj[ve] == '\\') ++ve; ++ve; }
+                        return obj.substr(v + 1, ve - v - 1);
+                    }
+                    size_t ve = v;
+                    while (ve < obj.size() && obj[ve] != ',' && obj[ve] != '}') ++ve;
+                    return obj.substr(v, ve - v);
+                }
+                i = e;
+            } else if (c == '{' || c == '[') {
+                ++depth;
+            } else if (c == '}' || c == ']') {
+                --depth;
+            }
+        }
+        return std::string();
+    }
+
+    // 파일이 첨부된 메시지면 ev 의 file* 를 채우고 true. photo 는 크기별 배열의 마지막(가장 큰 것)을 쓴다.
+    static bool extractFile(const std::string& seg, BotEvent& ev)
+    {
+        static const char* const kinds[] = {"document", "video", "audio", "voice", "animation", "video_note"};
+        std::string obj;
+        for (const char* k : kinds) {
+            const std::string key = std::string("\"") + k + "\":{";
+            const size_t p = seg.find(key);
+            if (p == std::string::npos) continue;
+            obj = balanced(seg, p + key.size() - 1);
+            ev.fileKind = k;
+            break;
+        }
+        if (obj.empty()) {
+            const std::string key = "\"photo\":[";
+            const size_t p = seg.find(key);
+            if (p == std::string::npos) return false;
+            const std::string arr = balanced(seg, p + key.size() - 1);
+            const size_t last = arr.rfind('{');
+            if (last == std::string::npos) return false;
+            obj = balanced(arr, last);
+            ev.fileKind = "photo";
+        }
+        ev.fileId = topValue(obj, "file_id");
+        if (ev.fileId.empty()) return false;
+        ev.fileName = ev.fileKind == "photo" ? std::string() : unescapeJson(topValue(obj, "file_name"));
+        ev.fileSize = atoll(topValue(obj, "file_size").c_str());
+        return true;
+    }
+
+    // callback_query 의 "data":"..." (메시지 본문 뒤, 항목 끝쪽에 있으므로 마지막 것을 사용)
+    static std::string extractCallbackData(const std::string& seg)
+    {
+        const std::string k = "\"data\":\"";
+        size_t p = seg.rfind(k);
+        if (p == std::string::npos) return "";
+        p += k.size();
+        size_t e = seg.find('"', p);
+        return e == std::string::npos ? "" : seg.substr(p, e - p);
+    }
+
+    // message.from.id (메시지에서 "from" 이 chat 보다 먼저 나온다)
+    static std::string extractUserId(const std::string& seg)
+    {
+        const std::string k = "\"from\":{\"id\":";
+        size_t p = seg.find(k);
+        if (p == std::string::npos) return "";
+        p += k.size();
+        size_t e = p;
+        while (e < seg.size() && isdigit((unsigned char)seg[e])) ++e;
+        return seg.substr(p, e - p);
+    }
+
+    static std::string extractChatId(const std::string& seg)
+    {
+        const std::string k = "\"chat\":{\"id\":";
+        size_t p = seg.find(k);
+        if (p == std::string::npos) return "";
+        p += k.size();
+        size_t e = p;
+        while (e < seg.size() && (seg[e] == '-' || isdigit((unsigned char)seg[e]))) ++e;
+        return seg.substr(p, e - p);
+    }
+
+    // "text":"..." 의 원문(이스케이프는 그대로 둠)
+    static std::string extractText(const std::string& seg)
+    {
+        const std::string k = "\"text\":\"";
+        size_t p = seg.find(k);
+        if (p == std::string::npos) return "";
+        std::string out;
+        for (p += k.size(); p < seg.size() && seg[p] != '"'; ++p) {
+            if (seg[p] == '\\' && p + 1 < seg.size()) out += seg[p++];
+            out += seg[p];
+        }
+        return out;
+    }
+
+    // "/Shot@MyBot 인자" -> "/shot"
+    static std::string extractCommand(const std::string& text)
+    {
+        if (text.empty() || text[0] != '/') return "";
+        size_t e = 1;
+        while (e < text.size() && text[e] != ' ' && text[e] != '@' && text[e] != '\\') ++e;
+        std::string c = text.substr(0, e);
+        for (auto& ch : c) ch = (char)tolower((unsigned char)ch);
+        return c;
+    }
+
+    // "/ini@MyBot KEY=값" -> "KEY=값". raw 는 JSON 이스케이프가 그대로 남아 있는 텍스트.
+    static std::string extractArg(const std::string& raw)
+    {
+        size_t e = 1;
+        while (e < raw.size() && raw[e] != ' ' && raw[e] != '@' && raw[e] != '\\') ++e;
+        if (e < raw.size() && raw[e] == '@') // @봇이름 건너뜀
+            while (e < raw.size() && raw[e] != ' ' && raw[e] != '\\') ++e;
+        return StrUtil::trim(unescapeJson(raw.substr(e)));
+    }
+
+    static bool hex4(const std::string& s, size_t pos, unsigned& v)
+    {
+        if (pos + 4 > s.size()) return false;
+        v = 0;
+        for (size_t k = 0; k < 4; ++k) {
+            const char c = s[pos + k];
+            unsigned d;
+            if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
+            else return false;
+            v = (v << 4) | d;
+        }
+        return true;
+    }
+
+    static void appendUtf8(std::string& out, unsigned cp)
+    {
+        if (cp < 0x80) out += (char)cp;
+        else if (cp < 0x800) { out += (char)(0xC0 | (cp >> 6)); out += (char)(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) {
+            out += (char)(0xE0 | (cp >> 12)); out += (char)(0x80 | ((cp >> 6) & 0x3F));
+            out += (char)(0x80 | (cp & 0x3F));
+        } else {
+            out += (char)(0xF0 | (cp >> 18)); out += (char)(0x80 | ((cp >> 12) & 0x3F));
+            out += (char)(0x80 | ((cp >> 6) & 0x3F)); out += (char)(0x80 | (cp & 0x3F));
+        }
+    }
+
+    // JSON 문자열 이스케이프(\" \\ \/ \n \t \uXXXX, 서로게이트 쌍 포함)를 UTF-8 로 되돌린다.
+    static std::string unescapeJson(const std::string& s)
+    {
+        std::string out;
+        for (size_t i = 0; i < s.size(); ++i) {
+            const char c = s[i];
+            if (c != '\\' || i + 1 >= s.size()) { out += c; continue; }
+            const char n = s[++i];
+            switch (n) {
+            case 'n': out += '\n'; break;
+            case 'r': out += '\r'; break;
+            case 't': out += '\t'; break;
+            case 'b': out += '\b'; break;
+            case 'f': out += '\f'; break;
+            case 'u': {
+                unsigned cp = 0;
+                if (!hex4(s, i + 1, cp)) { out += "\\u"; break; }
+                i += 4;
+                unsigned lo = 0;
+                if (cp >= 0xD800 && cp <= 0xDBFF && i + 2 < s.size() && s[i + 1] == '\\' &&
+                    s[i + 2] == 'u' && hex4(s, i + 3, lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                    i += 6;
+                }
+                appendUtf8(out, cp);
+                break;
+            }
+            default: out += n; break; // \" \\ \/ 등
+            }
+        }
+        return out;
+    }
+
+    const TelegramClient& tg_;
+    std::string chatId_;
+    std::vector<std::string> users_;
+    long long offset_ = 0;
+    bool failing_ = false;
+    bool warnedGroup_ = false;
+};
+
+// ================================================================ 캡처 소스
+// 캡처 결과 1장: 라벨(예: "Monitor 1/2 (1920x1080)", "Camera") + 비트맵
+struct Shot {
+    std::string label;  // 캡션/로그용
+    std::string tag;    // 파일명용 (예: "Monitor1", "Camera")
+    ScopedBitmap bmp;
+
+    Shot(std::string l, std::string t, HBITMAP h)
+        : label(std::move(l)), tag(std::move(t)), bmp(h) {}
+    Shot(Shot&&) noexcept = default;
+    Shot& operator=(Shot&&) noexcept = default;
+};
+
+// 캡처 소스 인터페이스. 캡처한 이미지를 out 에 추가한다. (실패 시 로그만 남기고 추가 안 함)
+class ICaptureSource {
+public:
+    virtual ~ICaptureSource() = default;
+    virtual void capture(std::vector<Shot>& out) = 0;
+    virtual bool isCamera() const { return false; } // /photo, /screen 필터용
+};
+
+// 어떤 소스를 캡처할지 (/shot=All, /screen=ScreenOnly, /photo=CameraOnly)
+enum class CaptureFilter { All, ScreenOnly, CameraOnly };
+
+// ---------------------------------------------------------------- MonitorCapture
+class MonitorCapture : public ICaptureSource {
+public:
+    explicit MonitorCapture(const Config& cfg) : cfg_(cfg) {}
+
+    void capture(std::vector<Shot>& out) override
+    {
+        std::vector<MonInfo> mons = enumerate();
+        if (mons.empty()) {
+            Logger::log("모니터를 찾을 수 없습니다.");
+            return;
+        }
+
+        // 잠금 화면/로그온 전(보안 데스크톱)에서는 화면 캡처가 불가하므로 건너뜀
+        HDESK hDesk = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+        if (!hDesk) {
+            Logger::log("입력 데스크톱 접근 불가 (잠금 화면/로그온 전/원격 끊김) - 화면 캡처 건너뜀");
+            return;
+        }
+        CloseDesktop(hDesk);
+
+        for (size_t i = 0; i < mons.size(); ++i) {
+            int oneBased = (int)i + 1;
+            if (!cfg_.isMonitorEnabled(oneBased)) {
+                if (skipLogged_.insert(oneBased).second) // 처음 한 번만 로그
+                    Logger::log("모니터 %d 는 INI 설정에 의해 건너뜀 (MONITOR%d=FALSE)",
+                                oneBased, oneBased);
+                continue;
+            }
+
+            const RECT& rc = mons[i].rc;
+            int w = rc.right - rc.left, h = rc.bottom - rc.top;
+
+            HBITMAP hBmp = grab(rc);
+            if (!hBmp) {
+                Logger::log("모니터 %zu 캡처 실패", i + 1);
+                continue;
+            }
+
+            char label[96];
+            snprintf(label, sizeof(label), "Monitor %zu/%zu (%dx%d)",
+                     i + 1, mons.size(), w, h);
+            out.emplace_back(label, "Monitor" + std::to_string(oneBased), hBmp);
+        }
+    }
+
+private:
+    struct MonInfo {
+        RECT rc;
+        bool primary;
+    };
+
+    static BOOL CALLBACK enumProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp)
+    {
+        auto* v = reinterpret_cast<std::vector<MonInfo>*>(lp);
+        MONITORINFO mi;
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoA(hMon, &mi)) {
+            MonInfo m;
+            m.rc = mi.rcMonitor;
+            m.primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
+            v->push_back(m);
+        }
+        return TRUE;
+    }
+
+    // 주 모니터를 1번으로, 나머지는 왼쪽->오른쪽 순
+    static std::vector<MonInfo> enumerate()
+    {
+        std::vector<MonInfo> v;
+        EnumDisplayMonitors(nullptr, nullptr, enumProc, reinterpret_cast<LPARAM>(&v));
+        std::stable_sort(v.begin(), v.end(), [](const MonInfo& a, const MonInfo& b) {
+            if (a.primary != b.primary) return a.primary;
+            if (a.rc.left != b.rc.left) return a.rc.left < b.rc.left;
+            return a.rc.top < b.rc.top;
+        });
+        return v;
+    }
+
+    static HBITMAP grab(const RECT& rc)
+    {
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+        if (w <= 0 || h <= 0) return nullptr;
+
+        HDC hScreen = GetDC(nullptr);
+        HDC hMem = CreateCompatibleDC(hScreen);
+        HBITMAP hBmp = CreateCompatibleBitmap(hScreen, w, h);
+        HGDIOBJ old = SelectObject(hMem, hBmp);
+
+        BOOL ok = BitBlt(hMem, 0, 0, w, h, hScreen, rc.left, rc.top,
+                         SRCCOPY | CAPTUREBLT);
+
+        SelectObject(hMem, old);
+        DeleteDC(hMem);
+        ReleaseDC(nullptr, hScreen);
+
+        if (!ok) {
+            DeleteObject(hBmp);
+            return nullptr;
+        }
+        return hBmp;
+    }
+
+    const Config& cfg_;
+    std::set<int> skipLogged_;
+};
+
+// ---------------------------------------------------------------- CameraCapture
+// Media Foundation 함수를 런타임에 동적으로 로드한다.
+// MF 함수를 직접(암시적 링크) 호출하면, mfplat.dll / mfreadwrite.dll 을 로드하지
+// 못하는 환경(Windows N/KN 등)에서 exe 가 "시작조차" 못 한다. 이를 막기 위해
+// LoadLibrary/GetProcAddress 로 실행 중에만 찾고, 실패하면 카메라만 비활성화한다.
+class CameraCapture : public ICaptureSource {
+public:
+    explicit CameraCapture(const Config& cfg) : cfg_(cfg)
+    {
+        InitializeCriticalSection(&frameCs_);
+        InitializeCriticalSection(&camCs_);
+    }
+    ~CameraCapture() override
+    {
+        closeReader();
+        if (started_ && api_.pMFShutdown) api_.pMFShutdown();
+        DeleteCriticalSection(&camCs_);
+        DeleteCriticalSection(&frameCs_);
+    }
+    NO_COPY(CameraCapture);
+
+    // MF 초기화. 실패하면 false (이 경우 소스를 사용하지 않는다).
+    bool start()
+    {
+        std::string err;
+        if (loadApi(err) && SUCCEEDED(api_.pMFStartup(MF_VERSION, 0))) {
+            started_ = true;
+            return true;
+        }
+        Logger::log("카메라 기능 비활성화: %s", err.c_str());
+        Logger::log("(화면 캡처 기능은 정상적으로 계속 동작합니다)");
+        return false;
+    }
+
+    bool isCamera() const override { return true; }
+
+    // ---- 침입 탐지 스레드 전용 API (공유 모드에서는 이 스레드만 카메라에 접근한다) ----
+
+    // 공유 모드 전환 (/detectOn, /detectOff 로 런타임에 바뀜). 탐지 스레드에서만 호출한다.
+    //  on=true : 메인 스레드의 capture() 는 카메라를 직접 열지 않고, 탐지 스레드가 저장해 둔 최신 프레임을 사용한다.
+    //  on=false: 탐지 스레드가 연 카메라를 그 스레드에서 닫고, 메인 스레드가 다시 직접(필요할 때만) 카메라를 연다.
+    // 메인 스레드가 카메라를 쓰는 중이면 끝날 때까지 기다린다 (camCs_).
+    void setSharedMode(bool on)
+    {
+        CsLock lk(&camCs_);
+        closeReader(); // 어느 쪽이 열어 둔 것이든 모드가 바뀌면 닫고 새 소유자가 다시 연다
+        sharedMode_ = on;
+        EnterCriticalSection(&frameCs_);
+        latest_.raw.clear(); // 오래된 프레임이 남지 않도록
+        latest_.tick = 0;
+        LeaveCriticalSection(&frameCs_);
+    }
+
+    // 카메라 프레임 원본(RGB32) 1장을 읽는다. 카메라가 닫혀 있으면 연다. 실패하면 닫고 false (다음 호출에서 다시 연다).
+    bool grabFrame(std::vector<BYTE>& raw, LONG& stride, std::string& errMsg)
+    {
+        CsLock lk(&camCs_);
+        if (!loadApi(errMsg)) return false;
+
+        int warmup = 1; // 열어 둔 동안 쌓인 오래된 프레임 1장을 버리고 최신 프레임 사용
+        if (!reader_) {
+            if (!openReader(errMsg)) return false;
+            warmup = 5;
+        }
+        if (!readRaw(warmup, raw, stride, errMsg)) {
+            closeReader();
+            return false;
+        }
+
+        if (sharedMode_) { // 메인 스레드(/shot, 주기 캡처)가 쓸 수 있도록 최신 프레임 보관
+            EnterCriticalSection(&frameCs_);
+            latest_.raw = raw;
+            latest_.stride = stride;
+            latest_.w = w_;
+            latest_.h = h_;
+            latest_.bottomUp = bottomUp_;
+            latest_.tick = GetTickCount64();
+            LeaveCriticalSection(&frameCs_);
+        }
+        return true;
+    }
+
+    // 프레임 원본을 축소(가로 약 160px)한 그레이스케일로 변환
+    bool makeGray(const std::vector<BYTE>& raw, LONG stride, std::vector<BYTE>& gray, int& gw, int& gh) const
+    {
+        const int step = std::max(1, (int)w_ / 160);
+        gw = (int)w_ / step;
+        gh = (int)h_ / step;
+        if (gw <= 0 || gh <= 0 || raw.size() < (size_t)stride * h_) return false;
+        gray.assign((size_t)gw * gh, 0);
+        for (int y = 0; y < gh; ++y) {
+            for (int x = 0; x < gw; ++x) {
+                unsigned sum = 0;
+                for (int yy = 0; yy < step; ++yy) {
+                    const BYTE* p = raw.data() + (size_t)(y * step + yy) * stride + (size_t)x * step * 4;
+                    for (int xx = 0; xx < step; ++xx, p += 4)
+                        sum += (29u * p[0] + 150u * p[1] + 77u * p[2]) >> 8; // B,G,R -> 밝기
+                }
+                gray[(size_t)y * gw + x] = (BYTE)(sum / (unsigned)(step * step));
+            }
+        }
+        return true;
+    }
+
+    // 프레임 원본 -> HBITMAP (호출자가 소유)
+    HBITMAP makeBitmap(const std::vector<BYTE>& raw, LONG stride) const
+    {
+        if (raw.size() < (size_t)stride * h_) return nullptr;
+        return frameToBitmap(raw.data(), stride, w_, h_, bottomUp_);
+    }
+
+    void capture(std::vector<Shot>& out) override
+    {
+        std::string err;
+        HBITMAP h = captureFrame(err);
+        if (!h) {
+            Logger::log("카메라 캡처 실패: %s", err.c_str());
+            return;
+        }
+        out.emplace_back("Camera", "Camera", h);
+    }
+
+private:
+    typedef HRESULT(WINAPI* PFN_MFStartup)(ULONG, DWORD);
+    typedef HRESULT(WINAPI* PFN_MFShutdown)(void);
+    typedef HRESULT(WINAPI* PFN_MFCreateAttributes)(IMFAttributes**, UINT32);
+    typedef HRESULT(WINAPI* PFN_MFEnumDeviceSources)(IMFAttributes*, IMFActivate***, UINT32*);
+    typedef HRESULT(WINAPI* PFN_MFCreateMediaType)(IMFMediaType**);
+    typedef HRESULT(WINAPI* PFN_MFCreateSourceReaderFromMediaSource)(
+        IMFMediaSource*, IMFAttributes*, IMFSourceReader**);
+
+    struct Api {
+        HMODULE hMfplat = nullptr;
+        HMODULE hMf = nullptr;         // MFEnumDeviceSources 는 mf.dll 소속
+        HMODULE hMfreadwrite = nullptr;
+        PFN_MFStartup pMFStartup = nullptr;
+        PFN_MFShutdown pMFShutdown = nullptr;
+        PFN_MFCreateAttributes pMFCreateAttributes = nullptr;
+        PFN_MFEnumDeviceSources pMFEnumDeviceSources = nullptr;
+        PFN_MFCreateMediaType pMFCreateMediaType = nullptr;
+        PFN_MFCreateSourceReaderFromMediaSource pMFCreateSourceReaderFromMediaSource = nullptr;
+        bool ready = false;
+    };
+
+    // 참고(MSDN): MFStartup/MFShutdown/MFCreateAttributes/MFCreateMediaType -> mfplat.dll
+    //            MFEnumDeviceSources                                        -> mf.dll
+    //            MFCreateSourceReaderFromMediaSource                        -> mfreadwrite.dll
+    bool loadApi(std::string& errMsg)
+    {
+        if (api_.ready) return true;
+
+        api_.hMfplat = LoadLibraryW(L"mfplat.dll");
+        api_.hMf = LoadLibraryW(L"mf.dll");
+        api_.hMfreadwrite = LoadLibraryW(L"mfreadwrite.dll");
+        if (!api_.hMfplat || !api_.hMf || !api_.hMfreadwrite) {
+            errMsg = "mfplat.dll / mf.dll / mfreadwrite.dll 중 일부를 찾을 수 없습니다. "
+                     "(Windows N/KN 에디션이면 'Media Feature Pack' 설치 필요)";
+            return false;
+        }
+
+        api_.pMFStartup = (PFN_MFStartup)GetProcAddress(api_.hMfplat, "MFStartup");
+        api_.pMFShutdown = (PFN_MFShutdown)GetProcAddress(api_.hMfplat, "MFShutdown");
+        api_.pMFCreateAttributes =
+            (PFN_MFCreateAttributes)GetProcAddress(api_.hMfplat, "MFCreateAttributes");
+        api_.pMFEnumDeviceSources =
+            (PFN_MFEnumDeviceSources)GetProcAddress(api_.hMf, "MFEnumDeviceSources");
+        api_.pMFCreateMediaType =
+            (PFN_MFCreateMediaType)GetProcAddress(api_.hMfplat, "MFCreateMediaType");
+        api_.pMFCreateSourceReaderFromMediaSource =
+            (PFN_MFCreateSourceReaderFromMediaSource)GetProcAddress(
+                api_.hMfreadwrite, "MFCreateSourceReaderFromMediaSource");
+
+        if (!api_.pMFStartup) errMsg += "MFStartup(mfplat.dll) ";
+        if (!api_.pMFShutdown) errMsg += "MFShutdown(mfplat.dll) ";
+        if (!api_.pMFCreateAttributes) errMsg += "MFCreateAttributes(mfplat.dll) ";
+        if (!api_.pMFEnumDeviceSources) errMsg += "MFEnumDeviceSources(mf.dll) ";
+        if (!api_.pMFCreateMediaType) errMsg += "MFCreateMediaType(mfplat.dll) ";
+        if (!api_.pMFCreateSourceReaderFromMediaSource)
+            errMsg += "MFCreateSourceReaderFromMediaSource(mfreadwrite.dll) ";
+
+        if (!errMsg.empty()) {
+            errMsg = "Media Foundation 함수를 찾지 못함: " + errMsg;
+            return false;
+        }
+
+        api_.ready = true;
+        return true;
+    }
+
+    // RGB32(BGRA) 프레임 버퍼를 HBITMAP(DIB)으로 변환
+    // bottomUp=true 이면 버퍼의 첫 행이 화면 맨 아래 행이므로 뒤집어서 복사한다.
+    // 또한 MF RGB32 의 4번째 바이트(X)는 0 일 수 있어 알파를 0xFF 로 채운다.
+    static HBITMAP frameToBitmap(const BYTE* data, LONG stride, UINT32 w, UINT32 h,
+                                 bool bottomUp)
+    {
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = (LONG)w;
+        bi.bmiHeader.biHeight = -(LONG)h; // top-down
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+
+        void* bits = nullptr;
+        HDC hdc = GetDC(nullptr);
+        HBITMAP hBmp = CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        ReleaseDC(nullptr, hdc);
+        if (!hBmp || !bits) return nullptr;
+
+        BYTE* dst = (BYTE*)bits;
+        LONG rowBytes = (LONG)w * 4;
+        for (UINT32 y = 0; y < h; ++y) {
+            const BYTE* srcRow = data + (size_t)(bottomUp ? (h - 1 - y) : y) * stride;
+            BYTE* d = dst + (size_t)y * rowBytes;
+            memcpy(d, srcRow, (size_t)rowBytes);
+            for (LONG x = 3; x < rowBytes; x += 4) d[x] = 0xFF; // 알파 불투명
+        }
+        return hBmp;
+    }
+
+    // 최초 1회 카메라 목록을 로그에 남김 (CAMERA_INDEX 선택용)
+    void logDevicesOnce(IMFActivate** devices, UINT32 count)
+    {
+        if (listed_) return;
+        listed_ = true;
+        for (UINT32 i = 0; i < count; ++i) {
+            WCHAR* nm = nullptr;
+            UINT32 len = 0;
+            if (SUCCEEDED(devices[i]->GetAllocatedString(
+                    MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &nm, &len)) && nm) {
+                Logger::log("  카메라 #%u: %s", (unsigned)i, StrUtil::toUtf8(nm).c_str());
+                CoTaskMemFree(nm);
+            }
+        }
+    }
+
+    void closeReader()
+    {
+        if (reader_) { reader_->Release(); reader_ = nullptr; }
+        if (source_) { source_->Shutdown(); source_->Release(); source_ = nullptr; }
+    }
+
+    // cfg_.cameraIndex 번째 웹캠을 열어 reader_ 를 준비한다. 실패 시 false (열린 것은 모두 정리).
+    bool openReader(std::string& errMsg)
+    {
+        IMFAttributes* pAttr = nullptr;
+        IMFActivate** ppDevices = nullptr;
+        UINT32 count = 0;
+        IMFAttributes* pReaderAttr = nullptr;
+        IMFMediaType* pType = nullptr;
+
+        HRESULT hr = api_.pMFCreateAttributes(&pAttr, 1);
+        if (SUCCEEDED(hr))
+            hr = pAttr->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                                MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+        if (SUCCEEDED(hr))
+            hr = api_.pMFEnumDeviceSources(pAttr, &ppDevices, &count);
+
+        if (SUCCEEDED(hr) && count == 0) {
+            errMsg = "카메라 장치를 찾을 수 없습니다.";
+            hr = E_FAIL;
+        }
+
+        if (SUCCEEDED(hr)) {
+            logDevicesOnce(ppDevices, count);
+            UINT32 idx = 0;
+            if (cfg_.cameraIndex >= 0 && (UINT32)cfg_.cameraIndex < count)
+                idx = (UINT32)cfg_.cameraIndex;
+            else
+                Logger::log("CAMERA_INDEX=%d 가 범위를 벗어나 0번 카메라를 사용합니다.",
+                            cfg_.cameraIndex);
+            hr = ppDevices[idx]->ActivateObject(IID_PPV_ARGS(&source_));
+        }
+
+        // 리더가 카메라의 원본 포맷(MJPEG/YUY2/NV12 등)을 RGB32 로 자동
+        // 변환할 수 있도록 허용한다. 이게 없으면 원본 포맷과 RGB32 가 바로
+        // 맞지 않는 경우 MF_E_INVALIDMEDIATYPE(0xC00D36B4) 로 실패한다.
+        if (SUCCEEDED(hr))
+            hr = api_.pMFCreateAttributes(&pReaderAttr, 1);
+        if (SUCCEEDED(hr))
+            hr = pReaderAttr->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+        if (SUCCEEDED(hr))
+            hr = api_.pMFCreateSourceReaderFromMediaSource(source_, pReaderAttr, &reader_);
+
+        // 출력 포맷을 RGB32(BGRA) 로 강제 설정
+        if (SUCCEEDED(hr))
+            hr = api_.pMFCreateMediaType(&pType);
+        if (SUCCEEDED(hr))
+            hr = pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        if (SUCCEEDED(hr))
+            hr = pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+        if (SUCCEEDED(hr))
+            hr = reader_->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pType);
+
+        w_ = h_ = 0;
+        bottomUp_ = true; // MF RGB 규약: stride 가 음수이면 bottom-up (속성 없을 때 기본)
+        if (SUCCEEDED(hr)) {
+            IMFMediaType* pCur = nullptr;
+            hr = reader_->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCur);
+            if (SUCCEEDED(hr)) {
+                MFGetAttributeSize(pCur, MF_MT_FRAME_SIZE, &w_, &h_);
+                UINT32 ds = 0;
+                if (SUCCEEDED(pCur->GetUINT32(MF_MT_DEFAULT_STRIDE, &ds)))
+                    bottomUp_ = ((LONG)ds < 0);
+                pCur->Release();
+            }
+        }
+
+        if (SUCCEEDED(hr) && (w_ == 0 || h_ == 0)) {
+            errMsg = "카메라 프레임 크기를 확인할 수 없습니다.";
+            hr = E_FAIL;
+        }
+
+        if (FAILED(hr) && errMsg.empty()) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "카메라 열기 실패 (0x%08lX)", (unsigned long)hr);
+            errMsg = buf;
+        }
+
+        if (pType) pType->Release();
+        if (pReaderAttr) pReaderAttr->Release();
+        if (ppDevices) {
+            for (UINT32 i = 0; i < count; ++i) ppDevices[i]->Release();
+            CoTaskMemFree(ppDevices);
+        }
+        if (pAttr) pAttr->Release();
+
+        if (FAILED(hr)) {
+            closeReader();
+            return false;
+        }
+        return true;
+    }
+
+    // 열려 있는 reader_ 에서 프레임 원본(RGB32)을 읽어 raw 에 복사한다. 앞의 warmupFrames 장은 버린다
+    // (자동 노출/화이트밸런스 안정화, 또는 열어 두는 동안 쌓인 오래된 프레임 제거).
+    bool readRaw(int warmupFrames, std::vector<BYTE>& raw, LONG& stride, std::string& errMsg)
+    {
+        bool got = false;
+        HRESULT hr = S_OK;
+        for (int attempt = 0; attempt < warmupFrames + 3 && SUCCEEDED(hr); ++attempt) {
+            DWORD flags = 0;
+            IMFSample* pSample = nullptr;
+            hr = reader_->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
+                                     nullptr, &flags, nullptr, &pSample);
+            if (FAILED(hr)) break;
+            if (!pSample) continue; // 타임아웃 등으로 샘플 없음, 재시도
+
+            if (attempt < warmupFrames) {
+                pSample->Release();
+                continue;
+            }
+
+            IMFMediaBuffer* pBuf = nullptr;
+            hr = pSample->ConvertToContiguousBuffer(&pBuf);
+            if (SUCCEEDED(hr)) {
+                BYTE* data = nullptr;
+                DWORD maxLen = 0, curLen = 0;
+                hr = pBuf->Lock(&data, &maxLen, &curLen);
+                if (SUCCEEDED(hr)) {
+                    stride = (LONG)(curLen / h_);
+                    if (stride < (LONG)w_ * 4) stride = (LONG)w_ * 4;
+                    if ((size_t)stride * h_ <= curLen) {
+                        raw.assign(data, data + curLen);
+                        got = true;
+                    } else {
+                        hr = E_FAIL; // 버퍼가 프레임보다 작음 (범위 밖 읽기 방지)
+                    }
+                    pBuf->Unlock();
+                }
+                pBuf->Release();
+            }
+            pSample->Release();
+            break;
+        }
+
+        if (!got) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "카메라 캡처 실패 (0x%08lX)", (unsigned long)hr);
+            errMsg = buf;
+        }
+        return got;
+    }
+
+    HBITMAP readFrame(int warmupFrames, std::string& errMsg)
+    {
+        std::vector<BYTE> raw;
+        LONG stride = 0;
+        if (!readRaw(warmupFrames, raw, stride, errMsg)) return nullptr;
+        HBITMAP h = frameToBitmap(raw.data(), stride, w_, h_, bottomUp_);
+        if (!h) errMsg = "카메라 프레임 변환 실패";
+        return h;
+    }
+
+    // 공유 모드: 탐지 스레드가 저장한 최신 프레임으로 비트맵 생성. 아직 첫 프레임이 없으면 잠시 기다린다.
+    HBITMAP bitmapFromLatest(std::string& errMsg)
+    {
+        for (int i = 0; i < 80; ++i) { // 최대 약 8초 (카메라가 막 열리는 중일 수 있음)
+            EnterCriticalSection(&frameCs_);
+            const bool fresh = !latest_.raw.empty() && GetTickCount64() - latest_.tick < 10000;
+            if (fresh) {
+                std::vector<BYTE> raw = latest_.raw;
+                const LONG stride = latest_.stride;
+                const UINT32 w = latest_.w, h = latest_.h;
+                const bool bu = latest_.bottomUp;
+                LeaveCriticalSection(&frameCs_);
+                HBITMAP bmp = frameToBitmap(raw.data(), stride, w, h, bu);
+                if (!bmp) errMsg = "카메라 프레임 변환 실패";
+                return bmp;
+            }
+            LeaveCriticalSection(&frameCs_);
+            Sleep(100);
+        }
+        errMsg = "침입 탐지 스레드에서 최신 카메라 프레임을 받지 못했습니다.";
+        return nullptr;
+    }
+
+    // 한 프레임 캡처 (실패 시 nullptr). CAMERA_KEEP_OPEN=FALSE 이면 매번 열고 닫는다.
+    // 열어 두는 모드에서 읽기에 실패하면 닫아서 다음 주기에 다시 연다.
+    HBITMAP captureFrame(std::string& errMsg)
+    {
+        {
+            CsLock lk(&camCs_); // 모드 전환(setSharedMode)/탐지 스레드의 프레임 읽기와 동시에 카메라를 열지 않도록
+            if (!sharedMode_) {
+                if (!loadApi(errMsg))
+                    return nullptr;
+
+                int warmup = 2; // 이미 열려 있는 경우
+                if (!reader_) {
+                    if (!openReader(errMsg)) return nullptr;
+                    warmup = 5;
+                }
+                HBITMAP result = readFrame(warmup, errMsg);
+                if (!result || !cfg_.cameraKeepOpen) closeReader();
+                return result;
+            }
+        }
+        return bitmapFromLatest(errMsg); // 침입 탐지 스레드가 카메라를 전담 (락 밖에서 대기)
+    }
+
+    const Config& cfg_;
+    Api api_;
+    bool started_ = false;
+    bool listed_ = false;
+    IMFMediaSource* source_ = nullptr;
+    IMFSourceReader* reader_ = nullptr;
+    UINT32 w_ = 0, h_ = 0;
+    bool bottomUp_ = true;
+
+    // 탐지 스레드 -> 메인 스레드 최신 프레임 공유 (frameCs_ 로 보호)
+    struct LatestFrame {
+        std::vector<BYTE> raw;
+        LONG stride = 0;
+        UINT32 w = 0, h = 0;
+        bool bottomUp = true;
+        ULONGLONG tick = 0;
+    };
+    LatestFrame latest_;
+    CRITICAL_SECTION frameCs_;
+    CRITICAL_SECTION camCs_;       // reader_/source_ 와 sharedMode_ 보호 (카메라 접근 직렬화)
+    volatile bool sharedMode_ = false;
+};
+
+// ================================================================ MotionDetector
+// 침입(움직임) 탐지. 보안 카메라/VMS 에서 널리 쓰는 프레임 차분(frame differencing) +
+// 배경 모델링(running average) 방식에 오탐 억제 장치를 더했다.
+//   1) 그레이스케일 + 3x3 박스 블러        : 센서 노이즈 억제
+//   2) 이동 평균 배경 모델                 : 서서히 변하는 조명/그림자에 적응
+//   3) 픽셀 임계값 + 변화 면적 비율 임계값 : 작은 노이즈/벌레 등 무시
+//   4) 연속 N프레임 확인                   : 순간적인 깜빡임 무시
+//   5) 전역 밝기 변화 거부                 : 조명 켬/끔, 자동 노출 변화로 화면 대부분이 바뀌면 탐지 안 함
+//   6) 워밍업                              : 시작/카메라 재연결 직후 노출 안정화 동안 탐지 안 함
+//   7) 쿨다운                              : 한 번 탐지 후 일정 시간 재탐지 억제 (알림 폭주 방지)
+class MotionDetector {
+public:
+    struct Params {
+        int pixelThreshold = 25;     // 픽셀 밝기 차이 임계값 (0~255)
+        double areaPercent = 1.0;    // 변화 픽셀 비율(%) 임계값
+        int confirmFrames = 2;       // 연속 프레임 수
+        int cooldownSec = 60;        // 재탐지 대기(초)
+        double lightingPercent = 60.0; // 이 비율 이상 변하면 조명 변화로 간주 (탐지 안 함, 배경 재설정)
+        int warmupFrames = 10;       // 시작 시 안정화 프레임 수
+        float alpha = 0.05f;         // 배경 학습률
+    };
+
+    MotionDetector() = default;
+    explicit MotionDetector(const Params& p) : p_(p) {}
+
+    // 그레이 프레임 1장을 넣고, 침입으로 확정되면 true. areaOut 에 이번 프레임의 변화 면적(%) 반환.
+    bool update(const std::vector<BYTE>& gray, int w, int h, ULONGLONG nowMs, double* areaOut = nullptr)
+    {
+        if (areaOut) *areaOut = 0.0;
+        if (w <= 0 || h <= 0 || gray.size() != (size_t)w * h) return false;
+
+        std::vector<BYTE> cur = blur(gray, w, h);
+        const size_t n = cur.size();
+        if (bg_.size() != n || w_ != w || h_ != h) { // 최초 또는 해상도 변경
+            w_ = w; h_ = h;
+            resetBackground(cur);
+            warmup_ = p_.warmupFrames;
+            return false;
+        }
+
+        std::vector<char> mask(n, 0);
+        size_t changed = 0;
+        for (size_t i = 0; i < n; ++i) {
+            if (std::fabs((float)cur[i] - bg_[i]) > (float)p_.pixelThreshold) {
+                mask[i] = 1;
+                ++changed;
+            }
+        }
+        const double pct = 100.0 * (double)changed / (double)n;
+        if (areaOut) *areaOut = pct;
+
+        if (warmup_ > 0) { // 노출 안정화 중: 배경을 빠르게 따라간다
+            --warmup_;
+            for (size_t i = 0; i < n; ++i) bg_[i] += 0.5f * ((float)cur[i] - bg_[i]);
+            consec_ = 0;
+            return false;
+        }
+
+        if (pct >= p_.lightingPercent) { // 조명/노출 급변: 침입이 아니라 장면 전체 변화
+            resetBackground(cur);
+            warmup_ = 3;
+            consec_ = 0;
+            return false;
+        }
+
+        if (pct >= p_.areaPercent) ++consec_;
+        else consec_ = 0;
+
+        if (consec_ >= p_.confirmFrames && nowMs >= nextAllowedMs_) {
+            nextAllowedMs_ = nowMs + (ULONGLONG)p_.cooldownSec * 1000ULL;
+            consec_ = 0;
+            resetBackground(cur); // 새 장면을 배경으로 받아들여 같은 변화로 반복 탐지되지 않게 함
+            return true;
+        }
+
+        // 배경 갱신: 변화 없는 픽셀은 정상 속도, 변한 픽셀은 아주 느리게 (침입자가 배경에 녹지 않도록)
+        const float slow = p_.alpha * 0.1f;
+        for (size_t i = 0; i < n; ++i)
+            bg_[i] += (mask[i] ? slow : p_.alpha) * ((float)cur[i] - bg_[i]);
+        return false;
+    }
+
+private:
+    static std::vector<BYTE> blur(const std::vector<BYTE>& g, int w, int h)
+    {
+        std::vector<BYTE> out(g.size());
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                unsigned sum = 0, cnt = 0;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    int yy = y + dy;
+                    if (yy < 0 || yy >= h) continue;
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        int xx = x + dx;
+                        if (xx < 0 || xx >= w) continue;
+                        sum += g[(size_t)yy * w + xx];
+                        ++cnt;
+                    }
+                }
+                out[(size_t)y * w + x] = (BYTE)(sum / cnt);
+            }
+        }
+        return out;
+    }
+
+    void resetBackground(const std::vector<BYTE>& cur)
+    {
+        bg_.assign(cur.begin(), cur.end());
+    }
+
+    Params p_;
+    std::vector<float> bg_;
+    int w_ = 0, h_ = 0;
+    int warmup_ = 0;
+    int consec_ = 0;
+    ULONGLONG nextAllowedMs_ = 0;
+};
+
+// ================================================================ ImageWindow
+// 폰에서 받은 이미지를 PC 화면에 보여 주는 창. 이미지 1장마다 창 1개(전용 스레드 + 메시지 루프)를 만든다.
+// 창은 화면의 80% 안에 맞춰 열리고 크기 조절 가능(비율 유지). Esc 또는 닫기 버튼으로 닫는다.
+class ImageWindow {
+public:
+    // 이미지 바이트(jpg/png/bmp/gif/tif)를 디코딩해 새 창으로 띄운다. 디코딩에 실패하면 false.
+    static bool show(const std::vector<BYTE>& data, const std::string& title)
+    {
+        int w = 0, h = 0;
+        HBITMAP hb = decode(data, w, h);
+        if (!hb) return false;
+        Ctx* c = new Ctx{hb, w, h, StrUtil::toWide(title), (int)InterlockedIncrement(&counter_)};
+        HANDLE t = CreateThread(nullptr, 0, threadProc, c, 0, nullptr);
+        if (!t) {
+            DeleteObject(hb);
+            delete c;
+            return false;
+        }
+        CloseHandle(t);
+        return true;
+    }
+
+private:
+    struct Ctx {
+        HBITMAP bmp;
+        int w, h;
+        std::wstring title;
+        int slot; // 창이 정확히 겹치지 않도록 위치를 조금씩 어긋나게 하는 번호
+    };
+    static inline LONG counter_ = 0;
+    static constexpr const wchar_t* kClass = L"ScreenTelegramImageView";
+
+    // GDI+ 로 디코딩해 HBITMAP 으로 돌려준다 (EXIF 방향 반영, 투명은 흰색).
+    static HBITMAP decode(const std::vector<BYTE>& data, int& w, int& h)
+    {
+        ImageEncoder gdi; // GDI+ 세션 (다른 곳의 세션과 독립적으로 시작/종료해도 안전)
+        if (!gdi.ok() || data.empty()) return nullptr;
+        HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, data.size());
+        if (!hg) return nullptr;
+        void* p = GlobalLock(hg);
+        if (!p) { GlobalFree(hg); return nullptr; }
+        memcpy(p, data.data(), data.size());
+        GlobalUnlock(hg);
+        IStream* st = nullptr;
+        if (CreateStreamOnHGlobal(hg, TRUE, &st) != S_OK) { GlobalFree(hg); return nullptr; }
+        HBITMAP hb = nullptr;
+        {
+            Gdiplus::Bitmap bmp(st);
+            if (bmp.GetLastStatus() == Gdiplus::Ok && bmp.GetWidth() > 0 && bmp.GetHeight() > 0) {
+                const UINT sz = bmp.GetPropertyItemSize(PropertyTagOrientation);
+                if (sz >= sizeof(Gdiplus::PropertyItem)) {
+                    std::vector<BYTE> buf(sz);
+                    auto* pi = reinterpret_cast<Gdiplus::PropertyItem*>(buf.data());
+                    if (bmp.GetPropertyItem(PropertyTagOrientation, sz, pi) == Gdiplus::Ok &&
+                        pi->type == PropertyTagTypeShort && pi->length >= 2) {
+                        switch (*(const WORD*)pi->value) {
+                        case 2: bmp.RotateFlip(Gdiplus::RotateNoneFlipX); break;
+                        case 3: bmp.RotateFlip(Gdiplus::Rotate180FlipNone); break;
+                        case 4: bmp.RotateFlip(Gdiplus::RotateNoneFlipY); break;
+                        case 5: bmp.RotateFlip(Gdiplus::Rotate90FlipX); break;
+                        case 6: bmp.RotateFlip(Gdiplus::Rotate90FlipNone); break;
+                        case 7: bmp.RotateFlip(Gdiplus::Rotate270FlipX); break;
+                        case 8: bmp.RotateFlip(Gdiplus::Rotate270FlipNone); break;
+                        default: break;
+                        }
+                    }
+                }
+                w = (int)bmp.GetWidth();
+                h = (int)bmp.GetHeight();
+                if (bmp.GetHBITMAP(Gdiplus::Color(255, 255, 255), &hb) != Gdiplus::Ok) hb = nullptr;
+            }
+        } // bmp 를 스트림보다 먼저 해제
+        st->Release();
+        return hb;
+    }
+
+    static LRESULT CALLBACK wndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
+    {
+        Ctx* c = reinterpret_cast<Ctx*>(GetWindowLongPtrW(hw, GWLP_USERDATA));
+        switch (msg) {
+        case WM_NCCREATE:
+            SetWindowLongPtrW(hw, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+            break;
+        case WM_ERASEBKGND:
+            return 1; // WM_PAINT 에서 전체를 칠한다 (깜빡임 방지)
+        case WM_SIZE:
+            InvalidateRect(hw, nullptr, FALSE);
+            return 0;
+        case WM_KEYDOWN:
+            if (wp == VK_ESCAPE) DestroyWindow(hw);
+            return 0;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(hw, &ps);
+            RECT rc;
+            GetClientRect(hw, &rc);
+            FillRect(dc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+            if (c && c->bmp && c->w > 0 && c->h > 0 && rc.right > 0 && rc.bottom > 0) {
+                const double sc = std::min((double)rc.right / c->w, (double)rc.bottom / c->h);
+                const int dw = std::max(1, (int)(c->w * sc)), dh = std::max(1, (int)(c->h * sc));
+                HDC mem = CreateCompatibleDC(dc);
+                HGDIOBJ old = SelectObject(mem, c->bmp);
+                SetStretchBltMode(dc, HALFTONE);
+                SetBrushOrgEx(dc, 0, 0, nullptr);
+                StretchBlt(dc, (rc.right - dw) / 2, (rc.bottom - dh) / 2, dw, dh, mem, 0, 0, c->w, c->h, SRCCOPY);
+                SelectObject(mem, old);
+                DeleteDC(mem);
+            }
+            EndPaint(hw, &ps);
+            return 0;
+        }
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        }
+        return DefWindowProcW(hw, msg, wp, lp);
+    }
+
+    static DWORD WINAPI threadProc(LPVOID param)
+    {
+        std::unique_ptr<Ctx> c(static_cast<Ctx*>(param));
+        const HINSTANCE inst = GetModuleHandleW(nullptr);
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = wndProc;
+        wc.hInstance = inst;
+        wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)); // 32512 = IDC_ARROW
+        wc.lpszClassName = kClass;
+        RegisterClassExW(&wc); // 이미 등록돼 있으면 실패하지만 그대로 쓰면 된다
+
+        RECT wa;
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+        const double sc = std::min(1.0, std::min((wa.right - wa.left) * 0.8 / c->w, (wa.bottom - wa.top) * 0.8 / c->h));
+        RECT r = {0, 0, std::max(200, (int)(c->w * sc)), std::max(150, (int)(c->h * sc))};
+        AdjustWindowRectEx(&r, WS_OVERLAPPEDWINDOW, FALSE, 0);
+        const int off = (c->slot % 10) * 32;
+        HWND hw = CreateWindowExW(0, kClass, c->title.c_str(), WS_OVERLAPPEDWINDOW,
+                                  wa.left + 40 + off, wa.top + 40 + off, r.right - r.left, r.bottom - r.top,
+                                  nullptr, nullptr, inst, c.get());
+        if (hw) {
+            ShowWindow(hw, SW_SHOW);
+            // 다른 창 뒤에 숨지 않도록 잠깐 최상위로 올렸다가 되돌린다 (계속 최상위로 남기지는 않음)
+            SetWindowPos(hw, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetWindowPos(hw, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetForegroundWindow(hw);
+            MSG m;
+            while (GetMessageW(&m, nullptr, 0, 0) > 0) {
+                TranslateMessage(&m);
+                DispatchMessageW(&m);
+            }
+        }
+        DeleteObject(c->bmp);
+        return 0;
+    }
+};
+
+// ================================================================ ScreenTelegramApp
+// 스레드 구성:
+//   침입 탐지 스레드: 카메라 프레임 분석 -> 침입 확정 시 알림 메시지 + 카메라 이미지 저장·전송을 스스로 수행.
+//                  (메인 주기 캡처, /pause, /shot, 전송 재시도 등과 무관하게 독립 동작. 카메라는 이 스레드만 접근하고
+//                   메인 스레드는 이 스레드가 공유하는 최신 프레임을 받아 쓴다)
+//   메인 스레드   : 주기 캡처/저장/전송 (GDI+, 카메라 사용), /shot 처리
+//   명령 스레드   : 텔레그램 getUpdates 롱폴링. /pause /resume /status /stop /help 는 즉시 처리하고,
+//                  /shot 은 메인 스레드에 요청만 전달한다. (캡처/전송 중에도 명령에 바로 반응)
+class ScreenTelegramApp {
+public:
+    ScreenTelegramApp()
+    {
+        InitializeCriticalSection(&cs_);
+        InitializeCriticalSection(&ioCs_);
+        shotEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); // 자동 리셋
+    }
+    ~ScreenTelegramApp()
+    {
+        if (shotEvent_) CloseHandle(shotEvent_);
+        DeleteCriticalSection(&cs_);
+        DeleteCriticalSection(&ioCs_);
+    }
+    NO_COPY(ScreenTelegramApp);
+
+    // 종료 요청 (바로 반환). run() 이 끝나길 기다리는 것은 호출한 쪽 몫.
+    void requestStop() { stop_.request(); }
+
+    int run()
+    {
+        enableThreadDpiAwareness(); // 고DPI 환경에서도 실제 해상도로 캡처 (이 스레드만)
+
+        Logger::log("==================== 프로그램 시작 ====================");
+        Logger::log("Telegram 모듈 시작: %s v%s (빌드 %s %s), PID %lu", APP_NAME, APP_VERSION_STR, __DATE__, __TIME__,
+                    (unsigned long)GetCurrentProcessId());
+        Logger::log("exe 폴더: %s", SysUtil::exeDir().c_str());
+        const std::string ini = resolveIniPath();
+        iniPath_ = ini; // /INTERVAL=nnn 이 값을 저장할 때 사용
+        if (!cfg_.load(ini)) {
+            Logger::log("INI 파일을 열 수 없습니다: %s", ini.c_str());
+            return 1;
+        }
+        if (cfg_.previousSessionClear) {
+            // 시작 직후(INI 를 읽은 뒤, 캡처/명령 수신 전)에 이전 세션의 흔적을 지운다.
+            const bool logOk = Logger::clearFile();
+            size_t failed = 0;
+            const size_t n = SysUtil::clearFolderFiles(imageDir_, failed);
+            Logger::log("==================== 프로그램 시작 (이전 세션 정리 후) ====================");
+            Logger::log("%s v%s, PID %lu", APP_NAME, APP_VERSION_STR, (unsigned long)GetCurrentProcessId());
+            Logger::log("PREVIOUS_SESSION_CLEAR=TRUE: log.txt %s, image 폴더 파일 %zu개 삭제%s",
+                        logOk ? "삭제" : "삭제 실패", n,
+                        failed ? (", 삭제 실패 " + std::to_string(failed) + "개").c_str() : "");
+        }
+        if (cfg_.token.empty() || cfg_.chatId.empty()) {
+            if (!cfg_.saveOnly) {
+                Logger::log("gsHomeManager.ini [Telegram] 에 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없어 텔레그램 기능은 사용하지 않습니다.");
+                return 1;
+            }
+            if (cfg_.commands) { // SAVE_ONLY 는 토큰 없이도 실행 가능, 대신 명령 수신은 불가
+                cfg_.commands = false;
+                Logger::log("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없어 명령 수신은 사용하지 않습니다.");
+            }
+        }
+        Logger::log("설정 로드: %s (간격 %d초, 카메라 %s, 반복 %s)", ini.c_str(), cfg_.interval,
+                    cfg_.cameraEnabled ? "사용" : "사용안함",
+                    cfg_.maxLoop > 0 ? std::to_string(cfg_.maxLoop).c_str() : "무제한");
+        if (cfg_.saveOnly)
+            Logger::log("SAVE_ONLY=TRUE: 이미지는 텔레그램으로 보내지 않고 image 폴더에 저장만 합니다. (/shot 제외)");
+        if (cfg_.keepDays > 0 || cfg_.keepMax > 0)
+            Logger::log("image 폴더 자동 정리: %d일 보관, 최대 %d개 (0 = 제한 없음)",
+                        cfg_.keepDays, cfg_.keepMax);
+        else
+            Logger::log("image 폴더 자동 정리 안 함 (KEEP_DAYS / KEEP_MAX_FILES 로 설정 가능)");
+        for (const auto& kv : cfg_.monitorEnabled)
+            Logger::log("  MONITOR%d = %s", kv.first, kv.second ? "TRUE" : "FALSE");
+
+        // 선언 순서의 역순으로 해제된다: 소스(MFShutdown) -> 전송 -> GDI+ -> COM
+        ComScope com;
+        ImageEncoder encoder;
+        if (!encoder.ok()) {
+            Logger::log("GDI+ 초기화 실패");
+            return 1;
+        }
+        TelegramClient telegram(cfg_.token, cfg_.chatId, stop_);
+        encoder_ = &encoder;
+        telegram_ = &telegram;
+
+        // 텔레그램 명령 수신 (SAVE_ONLY=TRUE 여도 폴링은 계속한다)
+        std::unique_ptr<CommandListener> listener;
+        if (cfg_.commands) {
+            listener = std::make_unique<CommandListener>(telegram, cfg_.chatId, cfg_.allowedUsers);
+            listener->skipPending();
+            Logger::log("텔레그램 명령 수신 활성: /shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL=nnn /ini /log /CMD /version /restart /stop /help");
+            if (cfg_.allowedUsers.empty() && StrUtil::trim(cfg_.chatId)[0] == '-')
+                Logger::log("경고: TELEGRAM_CHAT_ID 가 그룹입니다. TELEGRAM_ALLOWED_USER_IDS 를 설정하지 않으면 명령이 거부됩니다.");
+        }
+
+        std::vector<std::unique_ptr<ICaptureSource>> sources;
+        sources.push_back(std::make_unique<MonitorCapture>(cfg_));
+        if (cfg_.cameraEnabled) {
+            auto cam = std::make_unique<CameraCapture>(cfg_);
+            if (cam->start()) { // 실패해도 앱은 계속 실행
+                camera_ = cam.get();
+                sources.push_back(std::move(cam));
+            }
+        }
+        cameraReady_ = (camera_ != nullptr);
+
+        // 침입 탐지: INI 스위치 대신 텔레그램 /detectOn /detectOff 로 켜고 끈다.
+        // 켜져 있는 동안 카메라를 상시 열어 두고 INTRUSION_CHECK_MS 마다 프레임을 검사한다.
+        // 마지막 상태는 detect.state 파일에 저장되어 재시작 후에도 이어진다 (파일이 없으면 꺼짐).
+        detParams_.pixelThreshold = cfg_.intrusionPixelThr;
+        detParams_.areaPercent = cfg_.intrusionAreaPct;
+        detParams_.confirmFrames = cfg_.intrusionConfirm;
+        detParams_.cooldownSec = cfg_.intrusionCooldown;
+        // 시작 시 켜지는 조건: AUTO_DETECT=TRUE (매번 /detectOn 자동 수행) 이거나, 마지막 상태가 '켜짐'.
+        if (camera_) {
+            if (cfg_.autoDetect) {
+                if (!applyDetect(true)) // /detectOn 과 동일: 켜고 상태 저장
+                    Logger::log("detect.state 저장 실패 (침입 탐지는 켜집니다)");
+                Logger::log("침입 탐지: AUTO_DETECT=TRUE 이므로 /detectOn 을 자동 수행했습니다. (/detectOff 로 끄기)");
+            } else if (loadDetectState()) {
+                InterlockedExchange(&detectOn_, 1);
+                Logger::log("침입 탐지: 이전 상태가 '켜짐' 이므로 시작합니다. (/detectOff 로 끄기)");
+            } else {
+                Logger::log("침입 탐지: 꺼짐 (텔레그램 /detectOn 으로 켜기, 또는 INI 에 AUTO_DETECT=TRUE)");
+            }
+        } else if (cfg_.autoDetect || loadDetectState()) {
+            Logger::log("침입 탐지를 켜도록 설정돼 있지만 카메라를 사용할 수 없어 사용하지 않습니다. (CAMERA=TRUE 및 카메라 연결 필요)");
+        }
+
+        stop_.install();
+        startTick_ = GetTickCount64();
+        if (listener) startWorker(*listener, telegram);
+        if (cfg_.localTrigger && !cfg_.token.empty() && !cfg_.chatId.empty()) startTrigger(telegram); // WiFiScan 감시의 /HomeBack /NotHome 수신
+        if (listener) registerMenu(telegram); // 텔레그램 입력창 "메뉴" 등록 (TELEGRAM_MENU=FALSE 로 끌 수 있음)
+        if (listener) updateDetectBar(telegram, initialDetectState()); // 채팅창 상단 고정: 현재 상태(/detectOn 또는 /detectOff)
+        sendGreeting(telegram); // 준비 완료 인사말 (1회)
+        if (camera_) startIntrusion(); // 침입 탐지 스레드 시작 (꺼져 있으면 대기만 함, 다른 기능과 독립)
+
+        // 실행 간격 유지 (처리 시간만큼 보정). 종료 요청이 오면 대기 중에도 즉시 탈출.
+        while (!stop_.requested()) {
+            ULONGLONG start = GetTickCount64();
+            periodStart_ = start; // /INTERVAL 변경 시 남은 대기 시간을 다시 계산하는 기준
+
+            cycle(sources, encoder, telegram);
+
+            // MAX_LOOP 횟수만큼 실행했으면 마지막 대기 없이 바로 종료
+            LONG done = InterlockedIncrement(&loopCount_);
+            if (cfg_.maxLoop > 0 && done >= cfg_.maxLoop) {
+                Logger::log("MAX_LOOP=%d 회 완료", cfg_.maxLoop);
+                if (detectOn_) { // 침입 탐지는 독립 기능이므로 반복이 끝나도 계속 동작
+                    Logger::log("침입 탐지가 켜져 있어 계속 실행합니다. (/stop 또는 Ctrl+C 로 종료)");
+                    while (idle(3600000, sources, encoder, telegram)) {} // /shot 등 명령은 계속 처리
+                }
+                break;
+            }
+
+            ULONGLONG elapsed = GetTickCount64() - start;
+            ULONGLONG period = (ULONGLONG)cfg_.interval * 1000ULL;
+            DWORD wait = elapsed < period ? (DWORD)(period - elapsed) : 0;
+            if (!idle(wait, sources, encoder, telegram, true)) break;
+        }
+
+        stop_.request(); // 명령/침입 탐지 스레드도 종료시킨다
+        stopTrigger();
+        stopWorker();
+        stopIntrusion();
+        Logger::log("종료합니다.");
+        return 0;
+    }
+
+private:
+    struct WorkerCtx {
+        ScreenTelegramApp* app = nullptr;
+        CommandListener* listener = nullptr;
+        const TelegramClient* telegram = nullptr;
+    };
+
+    static DWORD WINAPI workerThunk(LPVOID p)
+    {
+        auto* c = static_cast<WorkerCtx*>(p);
+        c->app->commandLoop(*c->listener, *c->telegram);
+        return 0;
+    }
+
+    void startWorker(CommandListener& listener, const TelegramClient& telegram)
+    {
+        ctx_.app = this;
+        ctx_.listener = &listener;
+        ctx_.telegram = &telegram;
+        worker_ = CreateThread(nullptr, 0, workerThunk, &ctx_, 0, nullptr);
+        if (!worker_) Logger::log("명령 수신 스레드 생성 실패 - 명령을 사용할 수 없습니다.");
+    }
+
+    // ---- 로컬 트리거 (LocalTrigger 큐) ----
+    // 같은 프로세스의 WiFiScan 감시(HomeWatcher)가 텔레그램을 거치지 않고 /HomeBack, /NotHome 을 전달하는 통로.
+    // (봇이 sendMessage 로 보낸 글은 봇 자신이 getUpdates 로 받지 못해서 텔레그램 경유로는 동작하지 않는다.)
+    // 허용 명령은 /homeback, /nothome 두 개뿐이다 (다른 명령은 이 통로로 실행되지 않는다).
+    struct TriggerCtx {
+        ScreenTelegramApp* app = nullptr;
+        const TelegramClient* telegram = nullptr;
+    };
+
+    static DWORD WINAPI triggerThunk(LPVOID p)
+    {
+        auto* c = static_cast<TriggerCtx*>(p);
+        c->app->triggerLoop(*c->telegram);
+        return 0;
+    }
+
+    void startTrigger(const TelegramClient& telegram)
+    {
+        tctx_.app = this;
+        tctx_.telegram = &telegram;
+        trigger_ = CreateThread(nullptr, 0, triggerThunk, &tctx_, 0, nullptr);
+        if (!trigger_) Logger::log("로컬 트리거 스레드 생성 실패 - WiFiScan 감시의 /HomeBack /NotHome 을 처리할 수 없습니다.");
+    }
+
+    void stopTrigger()
+    {
+        if (!trigger_) return;
+        if (WaitForSingleObject(trigger_, 20000) == WAIT_TIMEOUT) { // 명령 처리(네트워크) 중이면 끝날 때까지 잠시 대기
+            Logger::log("로컬 트리거 스레드 종료 지연 - 강제 종료");
+            TerminateThread(trigger_, 0);
+        }
+        CloseHandle(trigger_);
+        trigger_ = nullptr;
+    }
+
+    void triggerLoop(const TelegramClient& telegram)
+    {
+        // 시작할 때 이미 큐에 있는 트리거(부팅 직후 WiFiScan 이 먼저 넘긴 첫 판정)도 처리한다. 오래된 것은 아래 나이 검사에서 버려진다.
+        Logger::log("로컬 트리거 수신 시작 (WiFiScan 감시 -> 텔레그램 명령, 허용: /HomeBack /NotHome, %lld초 안의 것만)", kTriggerMaxAgeSec);
+        while (!stop_.wait(1000)) {
+            LocalTrigger::Item it;
+            while (!stop_.requested() && LocalTrigger::take(it)) {
+                const long long ageSec = (long long)((GetTickCount64() - it.tick) / 1000);
+                if (ageSec > kTriggerMaxAgeSec) {
+                    Logger::log("로컬 트리거 무시: 오래된 요청 (%lld초 전) %s", ageSec, it.cmd.c_str());
+                    continue;
+                }
+                if (it.cmd != "/homeback" && it.cmd != "/nothome") {
+                    Logger::log("로컬 트리거 무시: 허용되지 않은 내용 (%.40s)", it.cmd.c_str());
+                    continue;
+                }
+                Logger::log("로컬 트리거 수신: %s", it.cmd.c_str());
+                CsLock lk(cmdCs_);
+                handleCommand(it.cmd, "", telegram);
+            }
+        }
+    }
+
+    void stopWorker()
+    {
+        if (!worker_) return;
+        // 롱폴링(최대 kPollSec 초) 중이면 끝날 때까지 잠시 기다린다. 너무 길면 강제 종료 (어차피 프로세스 종료 중)
+        if (WaitForSingleObject(worker_, 20000) == WAIT_TIMEOUT) {
+            Logger::log("명령 수신 스레드 종료 지연 - 강제 종료");
+            TerminateThread(worker_, 0);
+        }
+        CloseHandle(worker_);
+        worker_ = nullptr;
+    }
+
+    // 설정 파일: gsHomeManager.ini 의 [Telegram] 섹션 (명령줄 인자는 사용하지 않는다)
+    static std::string resolveIniPath()
+    {
+        return iniFilePath();
+    }
+
+    // 시작 준비가 끝났음을 텔레그램으로 알린다 (프로그램 시작당 1회). 부팅 직후 네트워크가 늦을 수 있어 최대 3회 시도.
+    // 텔레그램 입력창의 "메뉴"(/ 명령 목록)에 표시할 명령을 등록한다 (시작할 때 1회).
+    // 명령 이름은 소문자/숫자/_ 만 허용되므로 소문자로 등록한다. 이 프로그램은 명령을 대소문자 구분 없이 처리하므로
+    // 메뉴에서 누른 /homeback 도 /HomeBack 과 똑같이 동작한다. 실패해도 프로그램 동작에는 영향 없음.
+    // 채팅창 상단 고정 메시지: 현재 침입 탐지 상태 하나만 보여 준다. 켜짐 "❤️ /detectOn", 꺼짐 "💙 /detectOff".
+    // 상태가 바뀔 때마다 같은 메시지를 고쳐 쓴다. 메시지 id 는 exe 폴더의 pinned.id 에 저장한다.
+    // 메시지가 없으면(지웠거나 처음) 새로 보내서 고정한다. 안 나오면 pinned.id 를 지우고 재시작.
+    void updateDetectBar(const TelegramClient& telegram, bool on)
+    {
+        if (cfg_.token.empty() || cfg_.chatId.empty()) return;
+        CsLock lk(pinCs_);
+        // 카메라가 없거나 CAMERA=FALSE 이면 침입 탐지를 쓸 수 없으므로 상태 대신 안내를 보여 준다.
+        const std::string text = !camera_ ? "\xE2\x9D\xA4\xEF\xB8\x8F \xEC\xB9\xB4\xEB\xA9\x94\xEB\x9D\xBC\xEA\xB0\x80 \xEC\x9E\x91\xEB\x8F\x99\xED\x95\x98\xEC\xA7\x80 \xEC\x95\x8A\xEC\x8A\xB5\xEB\x8B\x88\xEB\x8B\xA4"
+                                          : on ? "\xE2\x9D\xA4\xEF\xB8\x8F /detectOn" : "\xF0\x9F\x92\x99 /detectOff";
+        const std::string idFile = SysUtil::exeDir() + "\\pinned.id";
+        std::string oldId;
+        {
+            std::ifstream f(idFile, std::ios::binary);
+            std::getline(f, oldId);
+            while (!oldId.empty() && !isdigit((unsigned char)oldId.back())) oldId.pop_back();
+        }
+        std::string resp;
+        if (!oldId.empty()) {      // 고쳐 쓰기: 성공 또는 "not modified"(이미 같은 내용) 이면 메시지가 남아 있다는 뜻
+            const bool ok = telegram.editMessageText(oldId, text, resp);
+            if (ok || resp.find("not modified") != std::string::npos) {
+                Logger::log("상단 고정 메시지: %s", !camera_ ? "카메라 없음" : on ? "detectOn" : "detectOff");
+                return;
+            }
+        }
+        if (!telegram.sendMessage(text, resp)) { Logger::log("상단 고정 메시지 전송 실패: %s", resp.substr(0, 120).c_str()); return; }
+        const std::string id = TelegramClient::extractMessageId(resp);
+        if (id.empty()) return;
+        std::string r2;
+        if (!telegram.pinMessage(id, r2)) {
+            Logger::log("상단 고정 실패 (그룹이면 봇에게 '메시지 고정' 권한 필요): %s", r2.substr(0, 120).c_str());
+            return;
+        }
+        SysUtil::writeFile(idFile, std::vector<BYTE>(id.begin(), id.end()));
+        Logger::log("상단 고정 메시지 생성: %s (id %s)", !camera_ ? "카메라 없음" : on ? "detectOn" : "detectOff", id.c_str());
+    }
+
+    // 시작할 때 처음 보여 줄 상태: 큐에 최근 트리거가 있으면 그 내용(/NotHome -> 켜짐, /HomeBack -> 꺼짐)을 따르고,
+    // 없으면 실제 침입 탐지 상태를 따른다. (큐는 비우지 않는다. 꺼내서 처리하는 건 트리거 스레드)
+    bool initialDetectState() const
+    {
+        LocalTrigger::Item it;
+        if (LocalTrigger::latest(it) && (long long)((GetTickCount64() - it.tick) / 1000) <= kTriggerMaxAgeSec) {
+            if (it.cmd == "/nothome") return true;
+            if (it.cmd == "/homeback") return false;
+        }
+        return detectOn_ != 0;
+    }
+
+    void registerMenu(const TelegramClient& telegram)
+    {
+        if (!cfg_.menu || cfg_.token.empty()) return;
+        static const char* const kMenu[][2] = {
+            {"shot", "📸 지금 화면+카메라 캡처해서 전송"},
+            {"screen", "🖥️ 지금 화면만 캡처해서 전송"},
+            {"photo", "📷 지금 카메라만 캡처해서 전송"},
+            {"pause", "⏸️ 이미지 전송 중단 (저장은 계속)"},
+            {"resume", "▶️ 이미지 전송 재개"},
+            {"status", "ℹ️ 상태 확인"},
+            {"detecton", "🚨 침입 탐지 켜기"},
+            {"detectoff", "🔕 침입 탐지 끄기"},
+            {"interval", "⏱️ 캡처 간격 확인 (변경: /INTERVAL=초)"},
+            {"ini", "📝 INI 에 새 키 추가 (/ini 키=값)"},
+            {"log", "📜 실행 로그 전송 (/log [n|all])"},
+            {"cmd", "💻 PC 에서 명령 실행 (/CMD 명령)"},
+            {"download", "📥 PC 에서 파일을 골라 전송"},
+            {"github", "🌐 PC 브라우저로 GitHub ReadMe 열기"},
+            {"homeback", "🏠 귀가 인사 + 침입 탐지 끄기"},
+            {"nothome", "🚪 외출 인사 + 침입 탐지 켜기"},
+            {"version", "🔖 프로그램 버전 표시"},
+            {"restart", "🔄 프로그램 재시작 (Yes/No 확인)"},
+            {"stop", "🛑 프로그램 종료 (Yes/No 확인)"},
+            {"help", "❓ 도움말"},
+        };
+        std::string json = "{\"commands\":[";
+        int n = 0;
+        for (const auto& m : kMenu) {
+            if (n++) json += ",";
+            json += std::string("{\"command\":\"") + m[0] + "\",\"description\":\"" + m[1] + "\"}";
+        }
+        json += "]}";
+        std::string resp;
+        if (telegram.setMyCommands(json, resp)) Logger::log("텔레그램 명령 메뉴 등록: %d개", n);
+        else Logger::log("텔레그램 명령 메뉴 등록 실패: %s", resp.substr(0, 150).c_str());
+    }
+
+    void sendGreeting(const TelegramClient& telegram)
+    {
+        if (!cfg_.greeting || cfg_.token.empty() || cfg_.chatId.empty()) return;
+
+        const std::string host = SysUtil::hostName();
+        std::string text = "안녕하세요! [" + host + "] " + APP_NAME + " v" + APP_VERSION_STR + " 준비가 완료되었습니다.\n" +
+                           "간격: " + std::to_string(cfg_.interval) + "초 / 카메라: " +
+                           (cameraReady_ ? "사용" : "사용안함") + " / 침입 탐지: " +
+                           (detectOn_ ? "켜짐" : "꺼짐") + "\n" +
+                           "시작 시각: " + SysUtil::timestamp();
+        if (cfg_.commands)
+            text += "\n명령 목록은 /help 로 확인하세요. (침입 탐지: /detectOn /detectOff)";
+
+        std::string resp;
+        for (int attempt = 1; attempt <= 3; ++attempt) {
+            if (telegram.sendMessage(text, resp)) {
+                Logger::log("시작 인사말 전송 완료");
+                return;
+            }
+            Logger::log("시작 인사말 전송 실패 (%d/3): %s", attempt, resp.substr(0, 120).c_str());
+            if (attempt < 3 && stop_.wait(3000)) return;
+        }
+    }
+
+    // ---- 명령 스레드 ----
+    void commandLoop(CommandListener& listener, const TelegramClient& telegram)
+    {
+        while (!stop_.requested()) {
+            std::vector<BotEvent> events;
+            if (!listener.poll(kPollSec, events)) {
+                // 통신 실패: 바로 재시도하면 CPU/네트워크를 낭비하므로 잠시 대기
+                if (stop_.wait(5000)) break;
+                continue;
+            }
+            for (const auto& ev : events) {
+                if (stop_.requested()) break;
+                CsLock lk(cmdCs_); // 로컬 트리거 스레드의 명령 처리와 겹치지 않게 순서대로 처리
+                if (ev.isCallback()) handleCallback(ev, telegram);
+                else if (ev.isFile()) handleUpload(ev, telegram);
+                else handleCommand(ev.cmd, ev.arg, telegram);
+            }
+        }
+    }
+
+    // 메인 스레드에서 ms 동안 대기한다. 명령 스레드의 캡처 요청(/shot /screen /photo)이 오면 즉시 처리하고
+    // 남은 시간만큼 계속 대기.
+    // followInterval=true 이면 대기 중 /INTERVAL 로 간격이 바뀌었을 때 (주기 시작 시각 + 새 간격)으로 끝나는 시각을 다시 계산한다.
+    // 종료 요청이 오면 false.
+    bool idle(DWORD ms, std::vector<std::unique_ptr<ICaptureSource>>& sources,
+              const ImageEncoder& encoder, const TelegramClient& telegram,
+              bool followInterval = false)
+    {
+        ULONGLONG end = GetTickCount64() + ms;
+        HANDLE h[2] = { stop_.handle(), shotEvent_ };
+        for (;;) {
+            ULONGLONG now = GetTickCount64();
+            DWORD remain = now >= end ? 0 : (DWORD)(end - now);
+            DWORD r = WaitForMultipleObjects(2, h, FALSE, remain);
+            if (r == WAIT_OBJECT_0) return false;                 // 종료 요청
+            if (r == WAIT_OBJECT_0 + 1) {                         // 캡처 요청
+                LONG mask = InterlockedExchange(&shotMask_, 0);
+                if (mask) {
+                    CaptureFilter f = mask == 3 ? CaptureFilter::All
+                                    : (mask == 1 ? CaptureFilter::ScreenOnly : CaptureFilter::CameraOnly);
+                    Logger::log("즉시 캡처 처리 (%s)",
+                                f == CaptureFilter::All ? "화면+카메라"
+                                : (f == CaptureFilter::ScreenOnly ? "화면만" : "카메라만"));
+                    cycle(sources, encoder, telegram, true, f); // 중단 상태여도 전송, 반복 횟수에는 포함 안 함
+                }
+                if (followInterval && InterlockedExchange(&intervalChanged_, 0)) {
+                    end = periodStart_ + (ULONGLONG)cfg_.interval * 1000ULL; // 이미 지났으면 바로 다음 캡처
+                    Logger::log("캡처 간격 변경 반영: %d초", (int)cfg_.interval);
+                }
+                continue;
+            }
+            if (r == WAIT_FAILED) return !stop_.wait(remain);
+
+            return true; // 시간 경과
+        }
+    }
+
+    // ---- 침입 탐지 스레드 ----
+    static DWORD WINAPI intrusionThunk(LPVOID p)
+    {
+        static_cast<ScreenTelegramApp*>(p)->intrusionLoop();
+        return 0;
+    }
+
+    void startIntrusion()
+    {
+        intrusionThread_ = CreateThread(nullptr, 0, intrusionThunk, this, 0, nullptr);
+        if (!intrusionThread_) Logger::log("침입 탐지 스레드 생성 실패 - 침입 탐지를 사용할 수 없습니다.");
+        else Logger::log("침입 탐지 스레드 시작");
+    }
+
+    void stopIntrusion()
+    {
+        if (!intrusionThread_) return;
+        // 진행 중인 전송/프레임 읽기가 끝나도록 충분히 기다린다 (정상이면 즉시 끝남)
+        if (WaitForSingleObject(intrusionThread_, 60000) == WAIT_TIMEOUT) {
+            Logger::log("침입 탐지 스레드 종료 지연 - 강제 종료");
+            TerminateThread(intrusionThread_, 0);
+        }
+        CloseHandle(intrusionThread_);
+        intrusionThread_ = nullptr;
+    }
+
+    // 카메라 프레임을 INTRUSION_CHECK_MS 간격으로 분석한다. 침입이 확정되면 이 스레드가 직접
+    // 알림 메시지를 보내고 카메라 이미지(탐지된 그 프레임)를 저장·전송한다 (메인 스레드 상태와 무관).
+    void intrusionLoop()
+    {
+        // 카메라 장치 열거가 STA 에서 안정적이므로 이 스레드도 STA 로 초기화
+        const bool comOk = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+        std::vector<BYTE> raw, gray;
+        LONG stride = 0;
+        int gw = 0, gh = 0;
+        bool failing = false;
+        bool active = false; // 이 스레드가 카메라를 잡고 탐지 중인지
+
+        while (!stop_.requested()) {
+            // /detectOff 상태: 카메라를 놓고(메인 스레드가 필요할 때만 직접 열도록) 켜질 때까지 대기
+            if (!detectOn_) {
+                if (active) {
+                    camera_->setSharedMode(false);
+                    active = false;
+                    failing = false;
+                    Logger::log("침입 탐지 중지 (카메라 해제)");
+                }
+                if (stop_.wait(300)) break;
+                continue;
+            }
+            // /detectOn 으로 켜진 직후: 탐지기를 새로 만들고(배경 재학습) 카메라 전담 모드로 전환
+            if (!active) {
+                detector_ = MotionDetector(detParams_);
+                camera_->setSharedMode(true);
+                active = true;
+                Logger::log("침입 탐지 시작: 검사 %dms, 픽셀 임계 %d, 면적 %.2f%%, 연속 %d프레임, 쿨다운 %d초",
+                            cfg_.intrusionCheckMs, detParams_.pixelThreshold, detParams_.areaPercent,
+                            detParams_.confirmFrames, detParams_.cooldownSec);
+            }
+
+            const ULONGLONG t0 = GetTickCount64();
+            std::string err;
+            if (!camera_->grabFrame(raw, stride, err)) {
+                if (!failing) { // 같은 오류 반복 로그 방지
+                    failing = true;
+                    Logger::log("침입 탐지용 카메라 프레임 읽기 실패: %s", err.c_str());
+                }
+                if (stop_.wait(2000)) break; // 잠시 후 다시 열어 본다
+                continue;
+            }
+            if (failing) {
+                failing = false;
+                Logger::log("침입 탐지 카메라 복구");
+            }
+
+            double area = 0.0;
+            if (camera_->makeGray(raw, stride, gray, gw, gh) &&
+                detector_.update(gray, gw, gh, t0, &area))
+                onIntrusion(area, raw, stride);
+
+            const ULONGLONG el = GetTickCount64() - t0;
+            const DWORD wait = el < (ULONGLONG)cfg_.intrusionCheckMs
+                                   ? (DWORD)((ULONGLONG)cfg_.intrusionCheckMs - el) : 0;
+            if (stop_.wait(wait)) break;
+        }
+
+        if (active) camera_->setSharedMode(false); // 스레드에서 연 카메라는 이 스레드에서 정리
+        if (comOk) CoUninitialize();
+    }
+
+    // 침입 확정: 알림 메시지 -> 카메라 이미지만 저장/전송 (모니터 화면 캡처는 하지 않음)
+    // (SAVE_ONLY, /pause 와 무관하게 무조건 전송). 카메라 이미지는 침입을 탐지한 바로 그 프레임을 사용한다.
+    void onIntrusion(double area, const std::vector<BYTE>& raw, LONG stride)
+    {
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        char text[128];
+        snprintf(text, sizeof(text), "[침입탐지 : %04d년 %02d월 %02d일 %02d시 %02d분 %02d초]",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+        Logger::log("%s (변화 영역 %.1f%%)", text, area);
+
+        if (!cfg_.token.empty() && !cfg_.chatId.empty()) {
+            std::string resp;
+            for (int attempt = 1; attempt <= 3; ++attempt) {
+                if (telegram_->sendMessage(text, resp)) break;
+                Logger::log("침입 알림 메시지 전송 실패 (%d/3): %s", attempt, resp.substr(0, 120).c_str());
+                if (stop_.wait(2000)) return;
+            }
+        }
+
+        std::vector<Shot> shots;
+        HBITMAP hb = camera_->makeBitmap(raw, stride);
+        if (hb) shots.emplace_back("Camera", "Camera", hb);
+        emitShots(shots, *encoder_, *telegram_, true, SysUtil::hostName(), SysUtil::timestamp(),
+                  "Intrusion_", "침입탐지 ");
+    }
+
+    // 명령 스레드에서 호출됨. /shot 은 메인 스레드로 넘긴다.
+    void handleCommand(const std::string& cmd, const std::string& arg, const TelegramClient& telegram)
+    {
+        Logger::log("명령 수신: %s", cmd.c_str());
+        const std::string host = SysUtil::hostName();
+        std::string resp;
+
+        if (cmd == "/shot" || cmd == "/screen" || cmd == "/photo") {
+            const LONG mask = cmd == "/shot" ? 3 : (cmd == "/screen" ? 1 : 2); // 1=화면 2=카메라
+            if (cmd == "/photo" && !cameraReady_) {
+                telegram.sendMessage("[" + host + "] 카메라를 사용할 수 없습니다. "
+                                     "(CAMERA=TRUE 설정과 카메라 연결을 확인하세요)", resp);
+            } else {
+                InterlockedOr(&shotMask_, mask);
+                SetEvent(shotEvent_);
+            }
+        } else if (cmd == "/status") {
+            ULONGLONG sec = (GetTickCount64() - startTick_) / 1000;
+            const std::string maxLoopStr =
+                cfg_.maxLoop > 0 ? std::to_string(cfg_.maxLoop) : std::string("무제한");
+            const std::string last = getLastCycle();
+            char keep[96];
+            if (cfg_.keepDays > 0 || cfg_.keepMax > 0)
+                snprintf(keep, sizeof(keep), "%d일 / 최대 %d개 (0=제한 없음)", cfg_.keepDays, cfg_.keepMax);
+            else
+                snprintf(keep, sizeof(keep), "자동 정리 안 함");
+            char buf[800];
+            snprintf(buf, sizeof(buf),
+                     "[%s] 실행 중 (v" APP_VERSION_STR ")\n가동 시간: %llu일 %02llu:%02llu:%02llu\n간격: %d초\n"
+                     "반복: %d / %s\n이미지 전송: %s\n카메라: %s\n이미지 보관: %s\n침입 탐지: %s\n마지막 캡처: %s",
+                     host.c_str(), sec / 86400, (sec / 3600) % 24, (sec / 60) % 60, sec % 60,
+                     cfg_.interval, (int)loopCount_, maxLoopStr.c_str(),
+                     cfg_.saveOnly ? "안 함 (SAVE_ONLY=TRUE, /shot 만 전송)"
+                                   : (paused_ ? "중단됨 (/resume 으로 재개)" : "진행 중"),
+                     cfg_.cameraEnabled ? "사용" : "사용안함", keep,
+                     detectOn_ ? "켜짐 (/detectOff 로 끄기)" : "꺼짐 (/detectOn 으로 켜기)",
+                     last.empty() ? "-" : last.c_str());
+            telegram.sendMessage(buf, resp);
+        } else if (cmd == "/detecton" || cmd == "/detectoff") {
+            // 명령은 소문자로 정규화되어 들어온다 (/detectOn -> /detecton)
+            const bool on = (cmd == "/detecton");
+            // 텔레그램 글자는 색을 지정할 수 없어 색깔 원 이모지로 표시: [detectOn] 빨강, [detectOff] 파랑
+            const std::string tag = on ? "\xF0\x9F\x94\xB4 [detectOn]\n" : "\xF0\x9F\x94\xB5 [detectOff]\n";
+            if (!camera_) {
+                telegram.sendMessage(tag + "[" + host + "] 카메라를 사용할 수 없어 침입 탐지를 켜거나 끌 수 없습니다. "
+                                     "(CAMERA=TRUE 설정과 카메라 연결을 확인하세요)", resp);
+            } else if ((detectOn_ != 0) == on) {
+                telegram.sendMessage(tag + "[" + host + "] 침입 탐지는 이미 " + (on ? "켜져" : "꺼져") + " 있습니다.", resp);
+            } else {
+                const bool saved = applyDetect(on);
+                updateDetectBar(telegram, on); // 상단 고정 메시지도 현재 상태로
+                std::string msg = tag + "[" + host + "] 침입 탐지를 " + (on ? "켰습니다." : "껐습니다.");
+                if (on)
+                    msg += " (카메라를 상시 사용하므로 다른 앱은 카메라를 쓸 수 없습니다. 끄려면 /detectOff)";
+                else
+                    msg += " (카메라를 해제합니다. 다시 켜려면 /detectOn)";
+                if (!saved)
+                    msg += "\n주의: 상태 파일(detect.state) 저장에 실패해 재시작하면 이전 상태로 돌아갑니다.";
+                telegram.sendMessage(msg, resp);
+                Logger::log("침입 탐지 %s (텔레그램 명령)", on ? "켬" : "끔");
+            }
+        } else if (cmd == "/version") {
+            telegram.sendMessage("[" + host + "] " + APP_NAME + " v" + APP_VERSION_STR +
+                                 "\n빌드: " + __DATE__ + " " + __TIME__, resp);
+        } else if (cmd == "/log") {
+            handleLogCmd(arg, host, telegram);
+        } else if (cmd == "/homeback") { // 명령은 소문자로 정규화되어 들어온다 (/HomeBack -> /homeback)
+            telegram.sendMessage("\xF0\x9F\x92\x99\xF0\x9F\x92\x99 [집에 돌아 오신 것을 환영합니다. 푹 쉬세요] \xF0\x9F\x92\x99\xF0\x9F\x92\x99", resp);   // 파란 하트 2개씩
+            Logger::log("/HomeBack: 귀가 인사 전송 -> /detectOff 자동 처리");
+            handleCommand("/detectoff", "", telegram); // 인사말 뒤에 침입 탐지 끄기 (카메라 없음/이미 꺼짐이면 그 안내 메시지가 나감)
+            handleCommand("/pause", "", telegram);     // 집에 왔으니 이미지 전송도 중단
+        } else if (cmd == "/nothome") { // /NotHome -> /nothome
+            telegram.sendMessage("\xE2\x9D\xA4\xEF\xB8\x8F\xE2\x9D\xA4\xEF\xB8\x8F 안녕히 다녀오세요. 제가 집을 잘 지키고 있겠습니다. \xE2\x9D\xA4\xEF\xB8\x8F\xE2\x9D\xA4\xEF\xB8\x8F", resp);   // 빨간 하트 2개씩
+            Logger::log("/NotHome: 외출 인사 전송 -> /detectOn 자동 처리");
+            handleCommand("/detecton", "", telegram); // 인사말 뒤에 침입 탐지 켜기 (카메라 없음/이미 켜짐이면 그 안내 메시지가 나감)
+            handleCommand("/resume", "", telegram);   // 외출하니 이미지 전송도 재개
+        } else if (cmd == "/github") {
+            handleGithub(host, telegram);
+        } else if (cmd == "/download") {
+            handleDownload(host, telegram);
+        } else if (cmd == "/cmd") {
+            handleCmdCmd(arg, host, telegram);
+        } else if (cmd == "/ini") {
+            handleIni(arg, host, telegram);
+        } else if (cmd == "/interval" || cmd.rfind("/interval=", 0) == 0) {
+            // /INTERVAL=nnn : 캡처/전송 간격(초) 변경. 명령은 소문자로 정규화되어 들어온다 (/INTERVAL=300 -> /interval=300).
+            // 값을 바로 적용하고 INI 의 TELEGRAM_INTERVAL 도 갱신한다. "/INTERVAL" 만 보내면 현재 값과 사용법을 알려 준다.
+            const size_t eq = cmd.find('=');
+            if (eq == std::string::npos) {
+                telegram.sendMessage("[" + host + "] 현재 캡처 간격: " + std::to_string((int)cfg_.interval) +
+                                     "초\n사용법: /INTERVAL=nnn (" + std::to_string(kMinInterval) + "~" +
+                                     std::to_string(kMaxInterval) + "초)", resp);
+            } else {
+                const std::string num = cmd.substr(eq + 1);
+                const bool digits = !num.empty() && num.size() <= 6 &&
+                                    num.find_first_not_of("0123456789") == std::string::npos;
+                const long v = digits ? atol(num.c_str()) : 0;
+                if (!digits || v < kMinInterval || v > kMaxInterval) {
+                    telegram.sendMessage("[" + host + "] 잘못된 값입니다: " + num + "\n사용법: /INTERVAL=nnn (" +
+                                         std::to_string(kMinInterval) + "~" + std::to_string(kMaxInterval) +
+                                         "초, 숫자만)", resp);
+                } else if ((int)v == (int)cfg_.interval) {
+                    telegram.sendMessage("[" + host + "] 캡처 간격은 이미 " + std::to_string(v) + "초입니다.", resp);
+                } else {
+                    const int old = cfg_.interval;
+                    cfg_.interval = (int)v;
+                    InterlockedExchange(&intervalChanged_, 1);
+                    SetEvent(shotEvent_); // 대기 중인 메인 스레드를 깨워 새 간격으로 남은 시간을 다시 계산
+                    const bool saved = SysUtil::updateIniValue(iniPath_, "TELEGRAM_INTERVAL", std::to_string(v));
+                    std::string msg = "[" + host + "] 캡처 간격을 " + std::to_string(old) + "초 -> " +
+                                      std::to_string(v) + "초로 변경했습니다.";
+                    if (!saved)
+                        msg += "\n주의: INI 파일 저장에 실패해 재시작하면 이전 값으로 돌아갑니다.";
+                    telegram.sendMessage(msg, resp);
+                    Logger::log("캡처 간격 변경 %d -> %ld초 (텔레그램 명령, INI %s)", old, v,
+                                saved ? "저장됨" : "저장 실패");
+                }
+            }
+        } else if (cmd == "/pause") {
+            InterlockedExchange(&paused_, 1); // 캡처/저장은 계속하고 텔레그램 이미지 전송만 중단
+            telegram.sendMessage("[" + host + "] 이미지 전송을 중단합니다. "
+                                 "(저장은 계속되고, 침입 탐지는 계속 동작합니다. /resume 으로 재개)", resp);
+        } else if (cmd == "/resume") {
+            InterlockedExchange(&paused_, 0);
+            telegram.sendMessage("[" + host + "] " + (cfg_.saveOnly
+                ? "SAVE_ONLY=TRUE 이므로 /shot 으로만 이미지를 전송합니다."
+                : "이미지 전송을 다시 시작합니다."), resp);
+        } else if (cmd == "/restart") {
+            // /stop 처럼 Yes/No 버튼으로 확인한 뒤에만 재시작한다. 버튼 처리는 handleCallback().
+            const std::string keyboard =
+                "{\"inline_keyboard\":[[{\"text\":\"Yes\",\"callback_data\":\"restart_yes\"},"
+                "{\"text\":\"No\",\"callback_data\":\"restart_no\"}]]}";
+            if (telegram.sendMessageWithKeyboard("[" + host + "] 재시작하시겠습니까?(y/n)", keyboard, resp)) {
+                restartMsgId_ = TelegramClient::extractMessageId(resp);
+                restartAskTick_ = GetTickCount64();
+            } else {
+                Logger::log("재시작 확인 메시지 전송 실패 - 재시작하지 않음: %s", resp.substr(0, 120).c_str());
+            }
+        } else if (cmd == "/stop") {
+            // 바로 종료하지 않고 Yes/No 버튼으로 확인한다. 버튼 처리는 handleCallback().
+            // 확인 메시지 전송에 실패하면 종료하지 않는다.
+            const std::string keyboard =
+                "{\"inline_keyboard\":[[{\"text\":\"Yes\",\"callback_data\":\"stop_yes\"},"
+                "{\"text\":\"No\",\"callback_data\":\"stop_no\"}]]}";
+            if (telegram.sendMessageWithKeyboard("[" + host + "] 종료하시겠습니까?(y/n)", keyboard, resp)) {
+                stopMsgId_ = TelegramClient::extractMessageId(resp);
+                stopAskTick_ = GetTickCount64();
+            } else {
+                Logger::log("종료 확인 메시지 전송 실패 - 종료하지 않음: %s", resp.substr(0, 120).c_str());
+            }
+        } else {
+            std::string text = "[" + host + "]\n";
+            if (cmd != "/help" && cmd != "/start" && cmd != "//") // "//" 는 /help 와 동일
+                text += "알 수 없는 명령: " + cmd + "\n";
+            text += "/shot - 지금 화면+카메라 캡처해서 전송\n/screen - 지금 화면만 캡처해서 전송\n"
+                    "/photo - 지금 카메라만 캡처해서 전송\n/pause - 이미지 전송 중단\n"
+                    "/resume - 이미지 전송 재개\n/status - 상태 확인\n"
+                    "/detectOn - 침입 탐지 켜기\n/detectOff - 침입 탐지 끄기\n"
+                    "/INTERVAL=nnn - 캡처 간격(초) 변경 (/INTERVAL 만 보내면 현재 값)\n"
+                    "/ini 키=값 - INI 에 새 키 추가 (이미 있는 키는 경고만, 재시작 후 적용)\n"
+                    "/log [n|all] - 실행 로그 전송 (기본 최근 50줄, 길면 문서로)\n"
+                    "/CMD 명령 - 뒤의 문자열을 PC 에서 실행하고 결과를 txt 파일로 전송\n"
+                    "/HomeBack - 귀가 인사 전송 후 침입 탐지 끄기\n"
+                    "/NotHome - 외출 인사 전송 후 침입 탐지 켜기\n"
+                    "/github - PC 기본 브라우저로 GitHub ReadMe 페이지 열기\n"
+                    "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
+                    "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 창으로 표시, mp4/mp3 는 기본 플레이어로 실행\n"
+                    "/version - 버전 표시\n"
+                    "/restart - 프로그램 재시작 (Yes/No 확인)\n/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
+            telegram.sendMessage(text, resp);
+        }
+    }
+
+    // /log [n] : log.txt 의 마지막 n 줄(기본 50, 1~2000)을 보낸다. 텔레그램 메시지 길이(4096자)를 넘으면
+    // 텍스트 문서(.txt)로 보낸다. "/log all" 은 log.txt 전체를 문서로 보낸다. (명령 스레드에서 호출)
+    void handleLogCmd(const std::string& arg, const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /log (최근 " + std::to_string(kDefaultLogLines) +
+                                  "줄) / /log n (최근 n줄, 1~" + std::to_string(kMaxLogLines) +
+                                  ") / /log all (log.txt 전체, 문서로)";
+        const bool all = StrUtil::upper(arg) == "ALL";
+
+        int n = kDefaultLogLines;
+        if (!all && !arg.empty()) {
+            const bool digits = arg.size() <= 6 && arg.find_first_not_of("0123456789") == std::string::npos;
+            const long v = digits ? atol(arg.c_str()) : 0;
+            if (!digits || v < 1 || v > kMaxLogLines) {
+                telegram.sendMessage(pre + "잘못된 값입니다: " + arg + usage, resp);
+                return;
+            }
+            n = (int)v;
+        }
+
+        const std::string text = all ? Logger::tailLines(kMaxLogLines) : Logger::tailLines(n);
+        if (text.empty()) {
+            telegram.sendMessage(pre + "log.txt 가 없거나 비어 있습니다." + usage, resp);
+            return;
+        }
+
+        // 메시지로 보내기엔 너무 길면(텔레그램 한도 4096자, 캡션/안내문 여유분 확보) 문서로 전환
+        if (!all && text.size() <= 3500) {
+            if (!telegram.sendMessage(pre + "log.txt 최근 " + std::to_string(n) + "줄\n\n" + text, resp))
+                Logger::log("/log 전송 실패: %s", resp.substr(0, 150).c_str());
+            return;
+        }
+
+        char fname[64];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(fname, sizeof(fname), "log_%Y%m%d_%H%M%S.txt", &tmv);
+        const std::string caption = pre + (all ? "log.txt 전체" : ("log.txt 최근 " + std::to_string(n) + "줄")) +
+                                    " (" + std::to_string(text.size() / 1024) + " KB)";
+        if (!telegram.sendTextDocument(caption, fname, text, resp)) {
+            telegram.sendMessage(pre + "로그 전송 실패: " + resp.substr(0, 200), resp);
+            Logger::log("/log 문서 전송 실패: %s", resp.substr(0, 150).c_str());
+        }
+    }
+
+    // cmd.exe /c 로 명령(UTF-8)을 실행하고 stdout+stderr 를 합쳐 UTF-8 로 out 에 담는다. 표준 입력은 NUL.
+    // kCmdTimeoutMs 를 넘으면 하위 프로세스까지 종료(timedOut). 출력이 kCmdMaxOut 을 넘으면 잘라 낸다(truncated).
+    // 프로세스를 시작하지 못하면 false (err 에 사유).
+    static bool runShell(const std::string& cmdUtf8, std::string& out, DWORD& exitCode,
+                         bool& timedOut, bool& truncated, std::string& err)
+    {
+        out.clear(); exitCode = 0; timedOut = false; truncated = false;
+
+        SECURITY_ATTRIBUTES sa = {};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        HANDLE rd = nullptr, wr = nullptr;
+        if (!CreatePipe(&rd, &wr, &sa, 0)) { err = "CreatePipe 실패"; return false; }
+        SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+        HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                                 OPEN_EXISTING, 0, nullptr);
+
+        wchar_t comspec[MAX_PATH] = L"";
+        if (!GetEnvironmentVariableW(L"COMSPEC", comspec, MAX_PATH) || !comspec[0]) {
+            GetSystemDirectoryW(comspec, MAX_PATH);
+            wcscat(comspec, L"\\cmd.exe");
+        }
+        // /s: 바깥쪽 따옴표 한 쌍만 벗기고 안쪽 따옴표는 그대로 둔다
+        std::wstring line = L"\"" + std::wstring(comspec) + L"\" /d /s /c \"" + StrUtil::toWide(cmdUtf8) + L"\"";
+
+        STARTUPINFOW si = {};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        si.hStdInput = nul;
+        si.hStdOutput = wr;
+        si.hStdError = wr;
+
+        HANDLE job = CreateJobObjectW(nullptr, nullptr); // 시간 초과 시 하위 프로세스까지 종료하기 위함
+        PROCESS_INFORMATION pi = {};
+        std::vector<wchar_t> buf(line.begin(), line.end());
+        buf.push_back(L'\0');
+        const BOOL ok = CreateProcessW(comspec, buf.data(), nullptr, nullptr, TRUE,
+                                       CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi);
+        CloseHandle(wr);
+        if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+        if (!ok) {
+            err = "프로세스 시작 실패 (오류 " + std::to_string(GetLastError()) + ")";
+            CloseHandle(rd);
+            if (job) CloseHandle(job);
+            return false;
+        }
+        if (job) AssignProcessToJobObject(job, pi.hProcess);
+        ResumeThread(pi.hThread);
+
+        std::string raw;
+        const ULONGLONG t0 = GetTickCount64();
+        for (;;) {
+            // 종료 여부를 먼저 보고 파이프를 비운다 (종료 후 남은 출력까지 읽기 위함)
+            const bool exited = WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0;
+            DWORD avail = 0;
+            if (!PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr)) break;
+            if (avail > 0) {
+                char b[8192];
+                DWORD n = 0;
+                if (!ReadFile(rd, b, avail < sizeof(b) ? avail : (DWORD)sizeof(b), &n, nullptr) || n == 0) break;
+                if (raw.size() < kCmdMaxOut) raw.append(b, n);
+                else truncated = true;
+                continue;
+            }
+            if (exited) break;
+            if (GetTickCount64() - t0 > kCmdTimeoutMs) {
+                timedOut = true;
+                if (job) TerminateJobObject(job, 1); else TerminateProcess(pi.hProcess, 1);
+                WaitForSingleObject(pi.hProcess, 3000);
+                break;
+            }
+            Sleep(50);
+        }
+        if (raw.size() > kCmdMaxOut) { raw.resize(kCmdMaxOut); truncated = true; }
+
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(rd);
+        if (job) CloseHandle(job);
+
+        // 출력 문자 집합: UTF-8 로 유효하면(chcp 65001 등) 그대로, 아니면 콘솔 OEM 코드 페이지(한국어 Windows 는 CP949)로 변환
+        if (raw.empty()) return true;
+        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, raw.data(), (int)raw.size(), nullptr, 0) > 0) {
+            out = raw;
+        } else {
+            const int wn = MultiByteToWideChar(CP_OEMCP, 0, raw.data(), (int)raw.size(), nullptr, 0);
+            if (wn > 0) {
+                std::wstring w((size_t)wn, L'\0');
+                MultiByteToWideChar(CP_OEMCP, 0, raw.data(), (int)raw.size(), &w[0], wn);
+                out = StrUtil::toUtf8(w.c_str(), wn);
+            } else {
+                out = raw;
+            }
+        }
+        return true;
+    }
+
+    // 폰 -> PC : 허용된 chat/사용자가 봇 채팅에 보낸 파일(document/photo/video/audio/voice 등)을 받아 UPLOAD_DIR 에 저장한다.
+    // 파일명은 경로/금지 문자/예약어를 정리하고, 같은 이름이 있으면 _1, _2 를 붙이며 덮어쓰지 않는다. (명령 스레드에서 호출)
+    static std::wstring safeFileName(const std::string& utf8)
+    {
+        std::wstring w = StrUtil::toWide(utf8);
+        const size_t pos = w.find_last_of(L"\\/");
+        if (pos != std::wstring::npos) w = w.substr(pos + 1);
+        for (auto& c : w)
+            if (c < 32 || wcschr(L"<>:\"/\\|?*", c)) c = L'_';
+        if (w.size() > 150) {
+            const size_t dot = w.rfind(L'.');
+            const std::wstring ext = (dot != std::wstring::npos && w.size() - dot <= 16) ? w.substr(dot) : L"";
+            w = w.substr(0, 150 - ext.size()) + ext;
+        }
+        while (!w.empty() && (w.back() == L' ' || w.back() == L'.')) w.pop_back();
+        size_t b = 0;
+        while (b < w.size() && w[b] == L' ') ++b;
+        w = w.substr(b);
+        if (w.empty()) return L"";
+        std::wstring stem = w.substr(0, w.find(L'.'));
+        for (auto& c : stem) c = (wchar_t)towupper(c);
+        bool reserved = stem == L"CON" || stem == L"PRN" || stem == L"AUX" || stem == L"NUL";
+        if (stem.size() == 4 && (stem.compare(0, 3, L"COM") == 0 || stem.compare(0, 3, L"LPT") == 0) &&
+            stem[3] >= L'1' && stem[3] <= L'9')
+            reserved = true;
+        if (reserved) w = L"_" + w;
+        return w;
+    }
+
+    // dir\name 으로 새 파일을 만든다 (이미 있으면 name_1.ext, name_2.ext ...). CREATE_NEW 라 덮어쓰지 않는다.
+    static bool createUniqueFile(const std::wstring& dir, const std::wstring& name, std::wstring& outPath, HANDLE& h)
+    {
+        const size_t dot = name.rfind(L'.');
+        const bool hasExt = dot != std::wstring::npos && dot > 0;
+        const std::wstring stem = hasExt ? name.substr(0, dot) : name;
+        const std::wstring ext = hasExt ? name.substr(dot) : L"";
+        for (int i = 0; i < 1000; ++i) {
+            const std::wstring cand = dir + L"\\" + stem + (i ? L"_" + std::to_wstring(i) : L"") + ext;
+            h = CreateFileW(cand.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h != INVALID_HANDLE_VALUE) { outPath = cand; return true; }
+            const DWORD e = GetLastError();
+            if (e != ERROR_FILE_EXISTS && e != ERROR_ALREADY_EXISTS) return false;
+        }
+        return false;
+    }
+
+    // 경로의 확장자가 ext(소문자)와 같은지 (대소문자 무시)
+    static bool hasExt(const std::wstring& path, const wchar_t* ext)
+    {
+        const size_t dot = path.rfind(L'.');
+        if (dot == std::wstring::npos) return false;
+        std::wstring e = path.substr(dot + 1);
+        for (auto& c : e) c = (wchar_t)towlower(c);
+        return e == ext;
+    }
+
+    // 사진(photo)이거나 GDI+ 가 읽는 확장자(jpg/png/bmp/gif/tif)의 파일이면 이미지로 본다.
+    static bool isImage(const BotEvent& ev, const std::wstring& path)
+    {
+        if (ev.fileKind == "photo") return true;
+        const size_t dot = path.rfind(L'.');
+        if (dot == std::wstring::npos) return false;
+        std::wstring ext = path.substr(dot + 1);
+        for (auto& c : ext) c = (wchar_t)towlower(c);
+        return ext == L"jpg" || ext == L"jpeg" || ext == L"png" || ext == L"bmp" || ext == L"gif" ||
+               ext == L"tif" || ext == L"tiff";
+    }
+
+    static std::string fmtSize(unsigned long long b)
+    {
+        char t[32];
+        if (b >= 1048576ULL) snprintf(t, sizeof(t), "%.1fMB", (double)b / 1048576.0);
+        else snprintf(t, sizeof(t), "%lluKB", (b + 1023) / 1024);
+        return t;
+    }
+
+    std::string uploadDir() const
+    {
+        std::string d = StrUtil::trim(cfg_.uploadDir);
+        while (!d.empty() && (d.back() == '\\' || d.back() == '/')) d.pop_back();
+        if (d.empty()) return SysUtil::exeDir() + "\\upload";
+        if (d.size() >= 2 && (d[1] == ':' || (d[0] == '\\' && d[1] == '\\'))) return d; // 절대 경로
+        return SysUtil::exeDir() + "\\" + d;
+    }
+
+    void handleUpload(const BotEvent& ev, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + SysUtil::hostName() + "] ";
+        const std::string label = ev.fileName.empty() ? ev.fileKind : ev.fileName;
+        Logger::log("파일 수신: %s (%lld바이트)", label.c_str(), ev.fileSize);
+
+        if (ev.fileSize > (long long)kUploadMaxBytes) {
+            telegram.sendMessage(pre + "파일이 너무 커서 받을 수 없습니다: " + label + " (" +
+                                 fmtSize((unsigned long long)ev.fileSize) + ", 봇 API 한도 20MB)", resp);
+            return;
+        }
+        std::string filePath;
+        if (!telegram.getFilePath(ev.fileId, filePath, resp)) {
+            const bool big = resp.find("too big") != std::string::npos;
+            telegram.sendMessage(pre + (big ? "파일이 너무 커서 받을 수 없습니다 (봇 API 한도 20MB): "
+                                            : "파일 정보를 가져오지 못했습니다: ") +
+                                 (big ? label : resp.substr(0, 150)), resp);
+            Logger::log("파일 수신 실패(getFile): %s", resp.substr(0, 150).c_str());
+            return;
+        }
+        std::wstring name = safeFileName(ev.fileName);
+        if (name.empty()) { // 사진 등 이름이 없으면 시각 + 텔레그램이 정한 이름(예: file_12.jpg)
+            const size_t sl = filePath.find_last_of('/');
+            name = safeFileName(SysUtil::fileStamp() + "_" + (sl == std::string::npos ? filePath : filePath.substr(sl + 1)));
+            if (name.empty()) name = StrUtil::toWide(SysUtil::fileStamp() + ".bin");
+        }
+
+        std::vector<BYTE> data;
+        std::string err;
+        if (!telegram.downloadFile(filePath, data, err)) {
+            telegram.sendMessage(pre + "파일을 내려받지 못했습니다: " + label + " (" + err + ")", resp);
+            Logger::log("파일 수신 실패(download): %s : %s", label.c_str(), err.c_str());
+            return;
+        }
+
+        const std::string dir = uploadDir();
+        if (!SysUtil::ensureDir(dir)) {
+            telegram.sendMessage(pre + "저장 폴더를 만들 수 없습니다: " + dir, resp);
+            Logger::log("upload 폴더 생성 실패: %s", dir.c_str());
+            return;
+        }
+        std::wstring outPath;
+        HANDLE h = INVALID_HANDLE_VALUE;
+        if (!createUniqueFile(StrUtil::toWide(dir), name, outPath, h)) {
+            telegram.sendMessage(pre + "파일을 만들 수 없습니다: " + label + " (오류 " + std::to_string(GetLastError()) + ")", resp);
+            return;
+        }
+        bool ok = true;
+        size_t put = 0;
+        while (put < data.size()) {
+            DWORD wr = 0;
+            const DWORD want = (DWORD)std::min<size_t>(data.size() - put, 16u * 1024 * 1024);
+            if (!WriteFile(h, data.data() + put, want, &wr, nullptr) || wr == 0) { ok = false; break; }
+            put += wr;
+        }
+        CloseHandle(h);
+        const std::string saved = StrUtil::toUtf8(outPath.c_str());
+        if (!ok) {
+            DeleteFileW(outPath.c_str()); // 쓰다 만 파일은 남기지 않는다
+            telegram.sendMessage(pre + "파일 저장 실패 (디스크 공간/권한 확인): " + saved, resp);
+            Logger::log("파일 저장 실패: %s", saved.c_str());
+            return;
+        }
+        Logger::log("파일 저장: %s (%zu바이트)", saved.c_str(), data.size());
+        if (cfg_.uploadShowImage && isImage(ev, outPath)) { // 이미지면 PC 화면에 장당 별개의 창으로 표시
+            const size_t sl = outPath.find_last_of(L"\\/");
+            const std::string title = StrUtil::toUtf8((sl == std::wstring::npos ? outPath : outPath.substr(sl + 1)).c_str());
+            if (!ImageWindow::show(data, title)) Logger::log("이미지 창 표시 실패(지원하지 않는 형식): %s", saved.c_str());
+        }
+        if (cfg_.uploadPlayMedia && (hasExt(outPath, L"mp4") || hasExt(outPath, L"mp3"))) { // .mp4/.mp3 만 PC 기본 플레이어로 실행 (다른 확장자는 실행하지 않음)
+            ComScope com; // ShellExecute 는 COM 초기화된 스레드에서 호출하도록 권장
+            const HINSTANCE r = ShellExecuteW(nullptr, L"open", outPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            if ((INT_PTR)r > 32) Logger::log("미디어 재생 실행: %s", saved.c_str());
+            else Logger::log("미디어 재생 실행 실패(코드 %lld): %s", (long long)(INT_PTR)r, saved.c_str());
+        }
+        telegram.sendMessage(pre + "저장 완료: " + saved + " (" + fmtSize(data.size()) + ")", resp);
+    }
+
+    // /github : PC 의 기본 브라우저로 kGithubUrl 을 연다. (명령 스레드에서 호출)
+    void handleGithub(const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        ComScope com; // ShellExecute 는 COM 초기화된 스레드에서 호출하도록 권장
+        const HINSTANCE r = ShellExecuteW(nullptr, L"open", StrUtil::toWide(kGithubUrl).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if ((INT_PTR)r > 32) {
+            Logger::log("/github: 기본 브라우저로 열기 성공");
+            telegram.sendMessage(pre + "PC 기본 브라우저로 GitHub 페이지를 열었습니다.\n" + kGithubUrl, resp);
+        } else {
+            Logger::log("/github: 브라우저 열기 실패 (코드 %lld)", (long long)(INT_PTR)r);
+            telegram.sendMessage(pre + "브라우저를 열지 못했습니다 (코드 " + std::to_string((long long)(INT_PTR)r) + "). 잠금 화면이거나 기본 브라우저가 없는지 확인하세요.", resp);
+        }
+    }
+
+    // /download : PC 화면에 파일 탐색기(열기 창)를 띄워 사용자가 여러 파일을 고르면 하나씩 문서로 전송한다.
+    // 창이 떠 있는 동안 명령 스레드가 대기한다 (kDownloadTimeoutMs 안에 고르지 않으면 자동 취소). (명령 스레드에서 호출)
+    static UINT_PTR CALLBACK downloadDlgHook(HWND h, UINT msg, WPARAM, LPARAM)
+    {
+        if (msg == WM_INITDIALOG) {
+            HWND dlg = GetParent(h);
+            SetWindowPos(dlg, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // 다른 창 뒤로 숨지 않게
+            SetForegroundWindow(dlg);
+            SetTimer(h, 1, kDownloadTimeoutMs, nullptr);
+        } else if (msg == WM_TIMER) {
+            KillTimer(h, 1);
+            PostMessageW(GetParent(h), WM_COMMAND, IDCANCEL, 0);
+        }
+        return 0;
+    }
+
+    // 취소/시간 초과면 false + err 비움, 대화상자 오류면 false + err 설정.
+    static bool pickFiles(std::vector<std::wstring>& files, std::string& err)
+    {
+        files.clear();
+        err.clear();
+        std::vector<wchar_t> buf(kPickBufChars, L'\0');
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.lpstrFile = buf.data();
+        ofn.nMaxFile = (DWORD)buf.size();
+        ofn.lpstrFilter = L"모든 파일 (*.*)\0*.*\0";
+        ofn.lpstrTitle = L"텔레그램으로 보낼 파일 선택 (여러 개 선택 가능)";
+        ofn.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+                    OFN_HIDEREADONLY | OFN_NOCHANGEDIR | OFN_ENABLEHOOK;
+        ofn.lpfnHook = downloadDlgHook;
+        if (!GetOpenFileNameW(&ofn)) {
+            const DWORD e = CommDlgExtendedError();
+            if (e) {
+                char b[32];
+                snprintf(b, sizeof(b), "코드 0x%lX", (unsigned long)e);
+                err = b;
+            }
+            return false;
+        }
+        // 1개 선택: "전체경로\0\0". 여러 개: "폴더\0파일1\0파일2\0\0"
+        const wchar_t* p = buf.data();
+        const std::wstring first = p;
+        p += first.size() + 1;
+        if (*p == L'\0') {
+            files.push_back(first);
+        } else {
+            const std::wstring dir = (!first.empty() && first.back() == L'\\') ? first : first + L"\\";
+            while (*p) {
+                std::wstring name = p;
+                files.push_back(dir + name);
+                p += name.size() + 1;
+            }
+        }
+        return !files.empty();
+    }
+
+    static bool readWholeFile(const std::wstring& path, std::vector<BYTE>& out, std::string& err)
+    {
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) {
+            err = "파일을 열 수 없음 (오류 " + std::to_string(GetLastError()) + ")";
+            return false;
+        }
+        LARGE_INTEGER sz = {};
+        bool ok = false;
+        if (!GetFileSizeEx(h, &sz)) {
+            err = "파일 크기를 알 수 없음";
+        } else if (sz.QuadPart == 0) {
+            err = "빈 파일 (텔레그램은 0바이트 파일을 받지 않음)";
+        } else if (sz.QuadPart > (LONGLONG)kDownloadMaxBytes) {
+            err = "너무 큼 (" + std::to_string(sz.QuadPart / 1024 / 1024) + "MB, 한도 49MB)";
+        } else {
+            out.assign((size_t)sz.QuadPart, 0);
+            size_t got = 0;
+            ok = true;
+            while (got < out.size()) {
+                DWORD rd = 0;
+                const DWORD want = (DWORD)std::min<size_t>(out.size() - got, 16u * 1024 * 1024);
+                if (!ReadFile(h, out.data() + got, want, &rd, nullptr) || rd == 0) {
+                    err = "파일 읽기 실패 (오류 " + std::to_string(GetLastError()) + ")";
+                    ok = false;
+                    break;
+                }
+                got += rd;
+            }
+        }
+        CloseHandle(h);
+        return ok;
+    }
+
+    void handleDownload(const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        ComScope com; // 공용 대화상자(셸 확장)용
+        telegram.sendMessage(pre + "PC 에 파일 선택 창을 띄웠습니다. 보낼 파일을 고르세요. "
+                             "(여러 개 선택 가능, " + std::to_string(kDownloadTimeoutMs / 60000) +
+                             "분 안에 고르지 않으면 취소)", resp);
+        Logger::log("/download: 파일 선택 창 표시");
+
+        std::vector<std::wstring> files;
+        std::string err;
+        if (!pickFiles(files, err)) {
+            if (err.empty()) {
+                telegram.sendMessage(pre + "파일 선택이 취소되었거나 시간이 초과되었습니다.", resp);
+                Logger::log("/download: 선택 취소 또는 시간 초과");
+            } else {
+                telegram.sendMessage(pre + "파일 선택 창을 열 수 없습니다: " + err, resp);
+                Logger::log("/download: 선택 창 오류 %s", err.c_str());
+            }
+            return;
+        }
+
+        int okCnt = 0, failCnt = 0;
+        std::string failList;
+        for (const auto& w : files) {
+            if (stop_.requested()) break;
+            const size_t pos = w.find_last_of(L"\\/");
+            const std::string name = StrUtil::toUtf8((pos == std::wstring::npos ? w : w.substr(pos + 1)).c_str());
+            std::vector<BYTE> data;
+            std::string e;
+            if (readWholeFile(w, data, e)) {
+                if (telegram.sendFileDocument(pre + name, name, data, resp)) {
+                    ++okCnt;
+                    Logger::log("/download 전송: %s (%zu바이트)", name.c_str(), data.size());
+                    continue;
+                }
+                e = "전송 실패: " + resp.substr(0, 100);
+            }
+            ++failCnt;
+            failList += "\n- " + name + " : " + e;
+            Logger::log("/download 실패: %s : %s", name.c_str(), e.c_str());
+        }
+        std::string msg = pre + "/download 완료: 성공 " + std::to_string(okCnt) + "개, 실패 " +
+                          std::to_string(failCnt) + "개 (선택 " + std::to_string(files.size()) + "개)";
+        if (!failList.empty()) msg += failList;
+        telegram.sendMessage(msg, resp);
+    }
+
+    // /CMD 명령 : /CMD 뒤의 문자열 전체(앞뒤 공백 제거)를 cmd.exe 로 실행하고 출력을 .txt 문서로 보낸다. (명령 스레드에서 호출)
+    // 실행하는 동안 이 명령 스레드가 막히므로 다른 텔레그램 명령은 끝난 뒤(최대 kCmdTimeoutMs) 처리된다.
+    void handleCmdCmd(const std::string& arg, const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /CMD 실행할 명령  (예: /CMD dir /b)\n"
+                                  "/CMD 뒤의 문자열 전체를 PC 의 cmd.exe 에서 실행하고 결과를 txt 파일로 보냅니다.";
+        const std::string cmdline = StrUtil::trim(arg);
+        if (cmdline.empty()) {
+            telegram.sendMessage(pre + "실행할 명령이 없습니다." + usage, resp);
+            return;
+        }
+
+        Logger::log("/CMD 실행: %.200s%s", cmdline.c_str(), cmdline.size() > 200 ? "..." : "");
+        std::string out, err;
+        DWORD code = 0;
+        bool timedOut = false, truncated = false;
+        const ULONGLONG t0 = GetTickCount64();
+        if (!runShell(cmdline, out, code, timedOut, truncated, err)) {
+            telegram.sendMessage(pre + "/CMD 실행 실패: " + err, resp);
+            Logger::log("/CMD 실행 실패: %s", err.c_str());
+            return;
+        }
+        const double sec = (double)(GetTickCount64() - t0) / 1000.0;
+        Logger::log("/CMD 종료: 코드 %lu, 출력 %zu바이트, %.1f초%s%s", (unsigned long)code, out.size(), sec,
+                    timedOut ? ", 시간 초과" : "", truncated ? ", 잘림" : "");
+
+        std::string head = pre + "/CMD " + (cmdline.size() > 300 ? cmdline.substr(0, 300) + "..." : cmdline) + "\n";
+        char info[160];
+        snprintf(info, sizeof(info), "종료 코드 %lu, %.1f초, 출력 %zu바이트", (unsigned long)code, sec, out.size());
+        head += info;
+        if (timedOut) head += "\n시간 초과(" + std::to_string(kCmdTimeoutMs / 1000) + "초)로 강제 종료했습니다.";
+        if (truncated) head += "\n출력이 " + std::to_string(kCmdMaxOut / 1024 / 1024) + "MB 를 넘어 뒷부분은 잘렸습니다.";
+
+        if (out.empty()) {
+            telegram.sendMessage(head + "\n(출력 없음)", resp);
+            return;
+        }
+        char fname[64];
+        time_t t = time(nullptr);
+        struct tm tmv;
+        localtime_s(&tmv, &t);
+        strftime(fname, sizeof(fname), "cmd_%Y%m%d_%H%M%S.txt", &tmv);
+        if (!telegram.sendTextDocument(head, fname, out, resp)) {
+            telegram.sendMessage(pre + "/CMD 결과 전송 실패: " + resp.substr(0, 200), resp);
+            Logger::log("/CMD 결과 문서 전송 실패: %s", resp.substr(0, 150).c_str());
+        }
+    }
+
+    // /ini 키=값 : INI 파일 끝에 새 키를 추가한다. 같은 키(대소문자 무시)가 이미 있으면 경고만 하고 삽입하지 않는다.
+    // 값은 Config 가 시작할 때만 읽으므로 추가한 값은 프로그램을 다시 시작해야 적용된다. (명령 스레드에서 호출)
+    void handleIni(std::string arg, const std::string& host, const TelegramClient& telegram)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /ini 키=값  (예: /ini INTRUSION_COOLDOWN=120)\n"
+                                  "INI 에 새 키만 추가합니다. 이미 있는 키는 바꾸지 않고 경고만 합니다. "
+                                  "추가한 값은 프로그램을 다시 시작해야 적용됩니다. (캡처 간격은 /INTERVAL=nnn)";
+
+        // [키=값] 처럼 대괄호로 감싸 보내도 허용 (= 가 있을 때만. [섹션] 줄은 추가하지 않음)
+        if (arg.size() >= 2 && arg.front() == '[' && arg.back() == ']' && arg.find('=') != std::string::npos)
+            arg = StrUtil::trim(arg.substr(1, arg.size() - 2));
+
+        if (arg.empty()) {
+            telegram.sendMessage(pre + "추가할 내용이 없습니다." + usage, resp);
+            return;
+        }
+        const size_t eq = arg.find('=');
+        if (eq == std::string::npos || arg.find_first_of("\r\n") != std::string::npos) {
+            telegram.sendMessage(pre + "형식이 올바르지 않습니다. 한 줄의 '키=값' 이어야 합니다." + usage, resp);
+            return;
+        }
+        const std::string key = StrUtil::upper(StrUtil::trim(arg.substr(0, eq)));
+        const std::string val = StrUtil::trim(arg.substr(eq + 1));
+        bool keyOk = !key.empty() && key.size() <= 64;
+        for (char c : key)
+            if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) keyOk = false;
+        if (!keyOk || val.size() > 400) {
+            telegram.sendMessage(pre + "키 이름은 영문/숫자/_ 만 쓸 수 있고(64자 이내), 값은 400자 이내여야 합니다." + usage, resp);
+            return;
+        }
+
+        switch (SysUtil::addIniKey(iniPath_, key, val)) {
+        case SysUtil::IniAdd::Exists:
+            telegram.sendMessage(pre + "경고: INI 에 이미 " + key + " 키가 있어 삽입하지 않았습니다. "
+                                 "(기존 값은 그대로입니다. 값을 바꾸려면 INI 파일을 직접 수정하세요)", resp);
+            Logger::log("/ini: 키가 이미 있어 삽입하지 않음: %s", key.c_str());
+            break;
+        case SysUtil::IniAdd::Added: {
+            std::string msg = pre + "INI 에 추가했습니다: " + key + "=" + val +
+                              "\n프로그램을 다시 시작해야 적용됩니다.";
+            if (!Config::isKnownKey(key))
+                msg += "\n주의: 이 프로그램이 사용하지 않는 키 이름입니다. 오타가 아닌지 확인하세요.";
+            telegram.sendMessage(msg, resp);
+            Logger::log("/ini: INI 에 키 추가: %s (값은 로그에 남기지 않음)", key.c_str());
+            break;
+        }
+        default:
+            telegram.sendMessage(pre + "INI 파일을 읽거나 쓰지 못했습니다. (경로/권한 확인)", resp);
+            Logger::log("/ini: INI 쓰기 실패: %s", iniPath_.c_str());
+            break;
+        }
+    }
+
+    // 프로그램 전체(gsHomeManager) 종료 요청: 본 창(UI 스레드)에 알려 시계 창과 WiFiScan 감시까지 정상 종료하게 한다.
+    // (/restart 는 g_restartRequested 를 함께 세워 두면 WinMain 이 종료 뒤 같은 exe 를 다시 실행한다)
+    static void requestAppExit()
+    {
+        ::ScanEvents::Quit();
+        Logger::log("프로그램 종료 요청: 본 창에 종료를 알림");
+    }
+
+    // 인라인 버튼 클릭 처리 (명령 스레드에서 호출). /stop, /restart 의 Yes/No 확인 버튼이 있다.
+    // 현재 대기 중인 확인 메시지의 버튼만 유효하다. 재시작 전의 오래된 메시지나 이미 처리된 메시지,
+    // 5분이 지난 메시지의 버튼은 종료로 이어지지 않는다.
+    void handleCallback(const BotEvent& ev, const TelegramClient& telegram)
+    {
+        Logger::log("버튼 수신: %s", ev.cbData.c_str());
+        const std::string host = SysUtil::hostName();
+        std::string resp;
+
+        if (ev.cbData == "restart_yes" || ev.cbData == "restart_no") { // /restart 확인 버튼
+            const bool ryes = (ev.cbData == "restart_yes");
+            const bool rvalid = !restartMsgId_.empty() && ev.messageId == restartMsgId_ &&
+                                GetTickCount64() - restartAskTick_ < 300000ULL;
+            if (!rvalid) {
+                telegram.answerCallbackQuery(ev.cbId, "만료된 요청입니다. /restart 를 다시 보내세요.", resp);
+                if (!ev.messageId.empty())
+                    telegram.editMessageText(ev.messageId, "[" + host + "] 재시작 확인이 만료되었습니다.", resp);
+                return;
+            }
+            restartMsgId_.clear();
+            if (ryes) {
+                telegram.answerCallbackQuery(ev.cbId, "재시작합니다.", resp);
+                telegram.editMessageText(ev.messageId, "[" + host + "] 재시작합니다. 잠시 후 시작 인사가 오면 완료입니다.", resp);
+                Logger::log("재시작 확인(Yes) - 재시작합니다.");
+                InterlockedExchange(&g_restartRequested, 1);
+                stop_.request();   // 텔레그램 모듈 종료
+                requestAppExit();  // 프로그램 전체 종료 -> WinMain 이 같은 exe 를 다시 실행
+            } else {
+                telegram.answerCallbackQuery(ev.cbId, "재시작을 취소했습니다.", resp);
+                telegram.editMessageText(ev.messageId, "[" + host + "] 재시작을 취소했습니다.", resp);
+                Logger::log("재시작 확인(No) - 재시작 취소");
+            }
+            return;
+        }
+
+        const bool yes = (ev.cbData == "stop_yes");
+        const bool no = (ev.cbData == "stop_no");
+        if (!yes && !no) { // 알 수 없는 버튼: 로딩 표시만 끈다
+            telegram.answerCallbackQuery(ev.cbId, "", resp);
+            return;
+        }
+
+        const bool valid = !stopMsgId_.empty() && ev.messageId == stopMsgId_ &&
+                           GetTickCount64() - stopAskTick_ < 300000ULL;
+        if (!valid) {
+            telegram.answerCallbackQuery(ev.cbId, "만료된 요청입니다. /stop 을 다시 보내세요.", resp);
+            if (!ev.messageId.empty())
+                telegram.editMessageText(ev.messageId, "[" + host + "] 종료 확인이 만료되었습니다.", resp);
+            return;
+        }
+
+        stopMsgId_.clear(); // 한 번 처리한 확인 메시지는 다시 쓸 수 없다
+        if (yes) {
+            telegram.answerCallbackQuery(ev.cbId, "종료합니다.", resp);
+            telegram.editMessageText(ev.messageId, "[" + host + "] 종료합니다.", resp);
+            Logger::log("종료 확인(Yes) - 프로그램을 종료합니다.");
+            stop_.request();   // 텔레그램 모듈 종료
+            requestAppExit();  // 프로그램 전체(시계, WiFiScan 감시 포함) 종료
+        } else {
+            telegram.answerCallbackQuery(ev.cbId, "종료를 취소했습니다.", resp);
+            telegram.editMessageText(ev.messageId, "[" + host + "] 종료를 취소했습니다.", resp);
+            Logger::log("종료 확인(No) - 종료 취소");
+        }
+    }
+
+    // 침입 탐지를 켜거나 끈다 (/detectOn /detectOff 와 AUTO_DETECT 가 공통으로 사용).
+    // 탐지 스레드가 detectOn_ 을 보고 카메라를 잡거나 놓는다. 반환값: 상태 파일 저장 성공 여부.
+    bool applyDetect(bool on)
+    {
+        InterlockedExchange(&detectOn_, on ? 1 : 0);
+        return saveDetectState(on);
+    }
+
+    // 침입 탐지 켜짐/꺼짐 상태 저장 (exe 폴더의 detect.state, 내용 "ON" / "OFF").
+    // 재시작/재부팅 후에도 마지막 상태가 이어지도록 한다. 파일이 없거나 ON 이 아니면 꺼짐.
+    bool saveDetectState(bool on) const
+    {
+        const std::string s = on ? "ON" : "OFF";
+        return SysUtil::writeFile(stateFile_, std::vector<BYTE>(s.begin(), s.end()));
+    }
+
+    bool loadDetectState() const
+    {
+        std::string s;
+        if (!SysUtil::readFile(stateFile_, s)) return false;
+        return StrUtil::upper(StrUtil::trim(s)) == "ON";
+    }
+
+    void setLastCycle(const std::string& s)
+    {
+        EnterCriticalSection(&cs_);
+        lastCycle_ = s;
+        LeaveCriticalSection(&cs_);
+    }
+
+    std::string getLastCycle()
+    {
+        EnterCriticalSection(&cs_);
+        std::string s = lastCycle_;
+        LeaveCriticalSection(&cs_);
+        return s;
+    }
+
+    // 현재 폴더(exe 폴더)의 image 폴더에 "YYYYMMDD_HHMMSS_태그.jpg|png" 로 저장
+    bool saveImage(const std::string& tag, const std::vector<BYTE>& img, bool jpeg)
+    {
+        if (!SysUtil::ensureDir(imageDir_)) {
+            Logger::log("image 폴더 생성 실패: %s", imageDir_.c_str());
+            return false;
+        }
+        const std::string path = imageDir_ + "\\" + SysUtil::fileStamp() + "_" + tag +
+                                 (jpeg ? ".jpg" : ".png");
+        if (SysUtil::writeFile(path, img)) {
+            Logger::log("저장: %s (%zu KB)", path.c_str(), img.size() / 1024);
+            return true;
+        }
+        Logger::log("이미지 저장 실패: %s", path.c_str());
+        return false;
+    }
+
+    // 1회 주기: 모든 소스 캡처 -> 인코딩 -> image 폴더 저장 -> 텔레그램 전송 -> 오래된 이미지 정리
+    void cycle(std::vector<std::unique_ptr<ICaptureSource>>& sources,
+               const ImageEncoder& encoder, const TelegramClient& telegram,
+               bool forceSend = false, CaptureFilter filter = CaptureFilter::All)
+    {
+        const std::string host = SysUtil::hostName();
+        const std::string ts = SysUtil::timestamp();
+        setLastCycle(ts);
+
+        std::vector<Shot> shots;
+        for (auto& src : sources) {
+            if (filter == CaptureFilter::ScreenOnly && src->isCamera()) continue;
+            if (filter == CaptureFilter::CameraOnly && !src->isCamera()) continue;
+            src->capture(shots);
+        }
+
+        emitShots(shots, encoder, telegram, forceSend, host, ts, "", "");
+    }
+
+    // 캡처된 이미지를 인코딩 -> image 폴더 저장 -> 텔레그램 전송 -> 오래된 이미지 정리.
+    // 메인 스레드(주기/명령 캡처)와 침입 탐지 스레드가 함께 사용하므로 스레드 안전해야 한다.
+    // filePrefix: 저장 파일명 태그 앞에 붙임 (침입 이미지는 "Intrusion_"), labelPrefix: 캡션 앞에 붙임.
+    void emitShots(std::vector<Shot>& shots, const ImageEncoder& encoder, const TelegramClient& telegram,
+                   bool forceSend, const std::string& host, const std::string& ts,
+                   const std::string& filePrefix, const std::string& labelPrefix)
+    {
+        bool saved = false;
+        // 이번 호출에서 실제로 전송할 가능성이 있는지 (아니면 전송용 축소본을 만들 필요가 없다)
+        const bool willSend = (forceSend || !(cfg_.saveOnly || paused_ != 0)) &&
+                              !cfg_.token.empty() && !cfg_.chatId.empty();
+        for (auto& shot : shots) {
+            if (stop_.requested()) break;
+
+            std::vector<BYTE> img;
+            bool jpeg = false, asDoc = false;
+            bool enc = encoder.encodeForTelegram(shot.bmp.get(), img, jpeg, asDoc);
+
+            // 저장본(img)은 원본 해상도 그대로 두고, 큰 화면(4K 등)은 전송용만 줄여서 올린다.
+            std::vector<BYTE> sendImg;
+            UINT sw = 0, sh = 0;
+            if (!(enc && jpeg && !asDoc && willSend &&
+                  encoder.encodeScaledJpeg(shot.bmp.get(), kSendMaxDim, 85, sendImg, sw, sh) &&
+                  !sendImg.empty() && sendImg.size() < img.size()))
+                sendImg.clear();
+            shot.bmp.reset();
+
+            if (!enc) {
+                Logger::log("%s 이미지 인코딩 실패", shot.label.c_str());
+                continue;
+            }
+
+            // 전송 전에 image 폴더에 저장 (저장 실패해도 전송은 계속)
+            if (saveImage(filePrefix + shot.tag, img, jpeg)) saved = true;
+            // 저장만 하고 전송은 생략 (SAVE_ONLY, 또는 /pause 상태). forceSend(/shot, 침입 탐지)는 항상 전송.
+            // 캡처 도중 명령 스레드가 /pause 를 처리하면 남은 이미지부터 바로 전송이 중단된다.
+            if (!forceSend && (cfg_.saveOnly || paused_ != 0)) continue;
+            if (cfg_.token.empty() || cfg_.chatId.empty()) continue; // 토큰 없이 저장만 하는 모드
+
+            const std::string label = labelPrefix + shot.label;
+            const std::string caption = "[" + host + "] " + label + " " + ts;
+            std::string resp;
+            const std::vector<BYTE>& payload = sendImg.empty() ? img : sendImg;
+            const ULONGLONG tSend = GetTickCount64();
+            if (telegram.sendImageWithRetry(caption, payload, jpeg, asDoc, resp))
+                Logger::log("%s 전송 성공 (%zu KB, %s%s%s, %llu ms)", label.c_str(),
+                            payload.size() / 1024, jpeg ? "JPEG" : "PNG",
+                            asDoc ? ", 문서로 전송" : "",
+                            sendImg.empty() ? "" : (", 축소 " + std::to_string(sw) + "x" + std::to_string(sh)).c_str(),
+                            (unsigned long long)(GetTickCount64() - tSend));
+            else
+                Logger::log("%s 전송 실패: %s", label.c_str(), resp.c_str());
+        }
+
+        if (saved) {
+            EnterCriticalSection(&ioCs_); // 두 스레드가 동시에 폴더를 정리하지 않도록
+            SysUtil::cleanupImages(imageDir_, cfg_.keepDays, cfg_.keepMax);
+            LeaveCriticalSection(&ioCs_);
+        }
+    }
+
+    Config cfg_;
+    StopSignal stop_;
+    volatile LONG paused_ = 0;       // /pause 상태 (텔레그램 이미지 전송 중단) - 명령 스레드가 변경
+    volatile LONG shotMask_ = 0;     // 캡처 요청 비트 (1=화면, 2=카메라) (명령 스레드 -> 메인 스레드)
+    CameraCapture* camera_ = nullptr; // sources 가 소유. 침입 탐지용 직접 접근
+    bool cameraReady_ = false;       // 카메라 초기화 성공 여부 (명령 스레드 시작 전에 설정)
+    std::string stopMsgId_;          // 대기 중인 /stop 확인 메시지의 id (명령 스레드 전용)
+    std::string restartMsgId_;       // 대기 중인 /restart 확인 메시지의 id (명령 스레드 전용)
+    ULONGLONG restartAskTick_ = 0;   // 그 확인 메시지를 보낸 시각
+    ULONGLONG stopAskTick_ = 0;      // 그 확인 메시지를 보낸 시각 (GetTickCount64)
+    volatile LONG detectOn_ = 0;     // 침입 탐지 켜짐 (/detectOn /detectOff 로 명령 스레드가 변경, 탐지 스레드가 읽음)
+    MotionDetector::Params detParams_;
+    MotionDetector detector_;        // 탐지 스레드 전용 (켜질 때마다 새로 만듦)
+    volatile LONG loopCount_ = 0;    // 완료한 반복 횟수 (/shot 은 제외)
+    ULONGLONG startTick_ = 0;        // 시작 시각 (가동 시간 계산용)
+    static constexpr int kPollSec = 10;         // 명령 롱폴링 대기(초). 연결을 재사용하므로 길게 잡아도 종료 반응은 최대 이 시간
+    static constexpr UINT kSendMaxDim = 2560;   // 전송용 이미지의 긴 변 상한(px). 텔레그램 사진은 어차피 이 크기까지만 보관
+    static constexpr int kMinInterval = 5;      // /INTERVAL 허용 범위(초). 너무 짧으면 텔레그램 전송 제한(429)에 걸림
+    static constexpr int kMaxInterval = 86400;
+    static constexpr int kDefaultLogLines = 50; // /log 기본 줄 수
+    static constexpr int kMaxLogLines = 2000;   // /log n 허용 최대 줄 수
+    static constexpr const char* kGithubUrl = "https://github.com/GarpsuKim/gsTop/blob/main/gsHomeManager/README.md"; // /github 가 여는 주소 (통합 후 gsHomeManager 의 README)
+    static constexpr long long kTriggerMaxAgeSec = 300;            // 이보다 오래된 트리거는 무시
+    static constexpr size_t kUploadMaxBytes = 20u * 1024 * 1024;   // 폰 -> PC 수신 한도 (봇 API getFile 20MB)
+    static constexpr UINT kDownloadTimeoutMs = 300000;            // /download 파일 선택 창 대기 시간(5분)
+    static constexpr size_t kDownloadMaxBytes = 49000000;         // /download 파일 1개 한도 (sendDocument 50MB)
+    static constexpr size_t kPickBufChars = 262144;               // 파일 선택 창 결과 버퍼(문자 수)
+    static constexpr DWORD kCmdTimeoutMs = 60000;                 // /CMD 최대 실행 시간
+    static constexpr size_t kCmdMaxOut = 20u * 1024u * 1024u;     // /CMD 출력 최대 크기 (sendDocument 50MB 한도에 여유)
+    std::string iniPath_;            // 로드한 INI 경로 (/INTERVAL 저장용)
+    volatile LONG intervalChanged_ = 0; // /INTERVAL 로 간격이 바뀜 (명령 스레드 -> 메인 스레드)
+    ULONGLONG periodStart_ = 0;      // 현재 주기의 시작 시각 (메인 스레드 전용)
+    std::string lastCycle_;          // 마지막 캡처 시각 (cs_ 로 보호)
+    CRITICAL_SECTION cs_;
+    HANDLE shotEvent_ = nullptr;
+    // 명령 처리 직렬화 (명령 스레드 + 로컬 트리거 스레드). CRITICAL_SECTION 은 같은 스레드에서 다시 잡아도 안전.
+    struct CsGuard {
+        CRITICAL_SECTION cs;
+        CsGuard() { InitializeCriticalSection(&cs); }
+        ~CsGuard() { DeleteCriticalSection(&cs); }
+        NO_COPY(CsGuard);
+    };
+    struct CsLock {
+        CRITICAL_SECTION* p;
+        explicit CsLock(CsGuard& g) : p(&g.cs) { EnterCriticalSection(p); }
+        ~CsLock() { LeaveCriticalSection(p); }
+        NO_COPY(CsLock);
+    };
+    CsGuard cmdCs_;
+    CsGuard pinCs_;   // 상단 고정 메시지 갱신 직렬화
+    HANDLE trigger_ = nullptr;
+    TriggerCtx tctx_;
+    HANDLE worker_ = nullptr;
+    WorkerCtx ctx_;
+    CRITICAL_SECTION ioCs_;          // image 폴더 정리 직렬화
+    HANDLE intrusionThread_ = nullptr;
+    const ImageEncoder* encoder_ = nullptr;      // 침입 탐지 스레드가 사용 (run() 의 지역 객체, 스레드 종료 후 해제)
+    const TelegramClient* telegram_ = nullptr;
+    const std::string imageDir_ = SysUtil::exeDir() + "\\image";
+    const std::string stateFile_ = SysUtil::exeDir() + "\\detect.state"; // 침입 탐지 켜짐/꺼짐 상태 저장
+};
+
+// ================================================================ 모듈 창구
+// gsHomeManager 의 WinMain 이 쓰는 시작/종료 함수. Telegram 모듈은 전용 스레드 1개(여기서 ScreenTelegramApp::run())로 돌고,
+// 그 안에서 다시 명령 수신 / 로컬 트리거 / 침입 탐지 스레드를 만든다. 서로 다른 스레드이므로 UI 와 독립적으로 동작한다.
+static ScreenTelegramApp* g_app = nullptr;
+static HANDLE g_thread = nullptr;
+
+// WiFiScan 감시(HomeWatcher)가 /HomeBack, /NotHome 을 넘길 때 호출 (어느 스레드에서든 안전)
+void PostTrigger(const std::string& cmd)
+{
+    LocalTrigger::post(cmd);
+}
+
+static DWORD WINAPI moduleThread(LPVOID)
+{
+    try {
+        g_app->run();
+    } catch (const std::exception& e) {
+        Logger::logCrash("치명적 오류: Telegram 모듈 예외 발생 - %s", e.what());
+    } catch (...) {
+        Logger::logCrash("치명적 오류: Telegram 모듈 알 수 없는 예외 발생");
+    }
+    return 0;
+}
+
+// 처리되지 않은 SEH 예외(접근 위반 등)가 나면 원인을 log.txt 에 남기고 종료한다.
+static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep)
+{
+    const EXCEPTION_RECORD* r = ep ? ep->ExceptionRecord : nullptr;
+    Logger::logCrash("치명적 오류: 처리되지 않은 예외 0x%08lX, 주소 %p (스레드 T%lu) - 프로그램이 비정상 종료됩니다.",
+                     r ? (unsigned long)r->ExceptionCode : 0UL, r ? r->ExceptionAddress : nullptr,
+                     (unsigned long)GetCurrentThreadId());
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// 잡히지 않은 C++ 예외 / std::terminate
+static void terminateHandler()
+{
+    Logger::logCrash("치명적 오류: 처리되지 않은 C++ 예외 (std::terminate) - 프로그램이 비정상 종료됩니다.");
+    ExitProcess(3);
+}
+
+// 프로세스 전체에 적용된다 (WinMain 맨 앞에서 한 번 호출)
+void InstallCrashHandlers()
+{
+    SetUnhandledExceptionFilter(crashFilter);
+    std::set_terminate(terminateHandler);
+}
+
+// gsHomeManager.ini 에 [Telegram] 섹션이 없으면 만든다.
+//  - 예전 screen_telegram.ini 가 있으면(exe 폴더, 또는 ..\screen_telegram 폴더) 그 내용을 그대로 가져온다 (원본 파일은 건드리지 않음).
+//  - 없으면 빈 토큰과 기본값 견본을 써 넣는다 (토큰을 채우면 다음 실행부터 동작).
+static void ensureIniSection(const std::string& ini)
+{
+    std::string content;
+    if (!SysUtil::readFile(ini, content)) return; // gsHomeManager.ini 는 앱이 먼저 만든다
+    size_t b = 0, e = 0;
+    if (SysUtil::findSection(content, "TELEGRAM", b, e)) return;
+
+    static const char kTemplate[] =
+    "; --- 텔레그램 (screen_telegram.cpp 통합) ---------------------------------------------------------\r\n"
+    "; 주기적으로 모니터(+웹캠) 화면을 캡처해 텔레그램으로 보내고, 텔레그램 봇 명령(/help 로 목록)으로 PC 를 제어합니다.\r\n"
+    "; TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 비어 있으면 텔레그램 기능은 사용하지 않습니다 (SAVE_ONLY=TRUE 이면 저장만 함).\r\n"
+    "; 값 뒤에 ' ; 메모' 처럼 공백 + ; 로 주석을 붙일 수 있습니다. 시작할 때만 읽으며, 텔레그램 /INTERVAL=nnn 과 /ini 는 이 섹션을 고칩니다.\r\n"
+    "TELEGRAM_BOT_TOKEN=\r\n"
+    "TELEGRAM_CHAT_ID=\r\n"
+    "; 캡처/전송 간격 (초, 5~86400). 텔레그램 /INTERVAL=nnn 으로도 바꿀 수 있습니다.\r\n"
+    "TELEGRAM_INTERVAL=60\r\n"
+    "; 캡처할 모니터 (MONITOR1, MONITOR2, ... 미기재 시 TRUE)\r\n"
+    "MONITOR1=TRUE\r\n"
+    "MONITOR2=TRUE\r\n"
+    "; 웹캠 캡처 (기본 FALSE) / 사용할 카메라 번호 (0부터, 목록은 log.txt 에 출력)\r\n"
+    "CAMERA=FALSE\r\n"
+    "CAMERA_INDEX=0\r\n"
+    "; 캡처/전송 반복 횟수 (0 = 무제한)\r\n"
+    "MAX_LOOP=0\r\n"
+    "; TRUE 이면 이미지를 텔레그램으로 보내지 않고 image 폴더에 저장만 합니다 (/shot 은 전송)\r\n"
+    "SAVE_ONLY=FALSE\r\n"
+    "; 텔레그램 봇 명령 수신 (/shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL /ini /log /CMD /download /github /HomeBack /NotHome /version /restart /stop /help)\r\n"
+    "TELEGRAM_COMMANDS=TRUE\r\n"
+    "; 명령을 내릴 수 있는 텔레그램 사용자 ID (쉼표로 구분). 비우면 개인 chat 만 허용, TELEGRAM_CHAT_ID 가 그룹이면 반드시 설정\r\n"
+    "TELEGRAM_ALLOWED_USER_IDS=\r\n"
+    "; image 폴더 자동 정리: N일 지난 이미지 삭제 / 최대 파일 수 (0 = 하지 않음)\r\n"
+    "KEEP_DAYS=7\r\n"
+    "KEEP_MAX_FILES=5000\r\n"
+    "; TRUE 이면 시작할 때 log.txt 와 image 폴더의 모든 파일을 삭제\r\n"
+    "PREVIOUS_SESSION_CLEAR=FALSE\r\n"
+    "; 폰 -> PC 파일 수신 저장 폴더 (상대 경로는 exe 폴더 기준) / 받은 이미지를 창으로 표시 / 받은 mp4, mp3 를 기본 플레이어로 실행\r\n"
+    "UPLOAD_DIR=upload\r\n"
+    "UPLOAD_SHOW_IMAGE=TRUE\r\n"
+    "UPLOAD_PLAY_MEDIA=TRUE\r\n"
+    "; WiFiScan 감시의 /HomeBack, /NotHome 판정을 텔레그램 명령으로 처리 (인사말 + 침입 탐지 끄기/켜기 + 이미지 전송 중단/재개)\r\n"
+    "LOCAL_TRIGGER=TRUE\r\n"
+    "; 시작할 때 텔레그램 입력창 메뉴(/ 명령 목록) 등록 / 시작 인사말 전송\r\n"
+    "TELEGRAM_MENU=TRUE\r\n"
+    "TELEGRAM_GREETING=TRUE\r\n"
+    "; TRUE 이면 시작할 때 침입 탐지(/detectOn)를 자동으로 켭니다 (CAMERA=TRUE 필요). FALSE 이면 detect.state 의 마지막 상태를 따릅니다.\r\n"
+    "AUTO_DETECT=FALSE\r\n"
+    "; 침입 탐지(카메라 모션 감지) 조정: 픽셀 밝기 변화 임계값(1~255) / 변화 면적 %(화면의 몇 % 이상) / 연속 확인 프레임 / 재탐지 대기(초) / 검사 간격(ms, 200~10000)\r\n"
+    "INTRUSION_PIXEL_THRESHOLD=25\r\n"
+    "INTRUSION_AREA_PERCENT=1.0\r\n"
+    "INTRUSION_CONFIRM_FRAMES=2\r\n"
+    "INTRUSION_COOLDOWN=60\r\n"
+    "INTRUSION_CHECK_MS=1000\r\n"
+    "; TRUE 이면 카메라를 계속 열어 둡니다 (지연/LED 깜빡임은 줄지만 다른 앱이 카메라를 쓸 수 없음)\r\n"
+    "CAMERA_KEEP_OPEN=FALSE\r\n";
+
+    std::string add, from;
+    const std::string dir = SysUtil::exeDir();
+    const std::string cands[] = { dir + "\\screen_telegram.ini", dir + "\\..\\screen_telegram\\screen_telegram.ini" };
+    std::string legacy;
+    for (const auto& c : cands) {
+        if (SysUtil::readFile(c, legacy) && !legacy.empty()) { from = c; break; }
+    }
+    if (!from.empty()) {
+        std::istringstream f(legacy);
+        std::string line;
+        bool first = true;
+        while (std::getline(f, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (first) { // UTF-8 BOM
+                first = false;
+                if (line.compare(0, 3, "\xEF\xBB\xBF") == 0) line.erase(0, 3);
+            }
+            const std::string t = StrUtil::trim(line);
+            if (!t.empty() && t[0] == '[') continue; // 옛 INI 는 섹션이 없었다. 섹션 줄은 가져오지 않는다
+            add += line + "\r\n";
+        }
+    } else {
+        add = kTemplate;
+    }
+
+    if (!content.empty() && content.back() != '\n') content += "\r\n";
+    content += "\r\n[Telegram]\r\n" + add;
+    if (SysUtil::replaceFileAtomic(ini, content)) {
+        if (from.empty()) Logger::log("gsHomeManager.ini 에 [Telegram] 섹션을 만들었습니다. TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 를 채우고 다시 시작하세요.");
+        else Logger::log("%s 의 설정을 gsHomeManager.ini [Telegram] 섹션으로 가져왔습니다. (원본은 그대로 둠)", from.c_str());
+    } else {
+        Logger::log("gsHomeManager.ini 에 [Telegram] 섹션을 쓰지 못했습니다.");
+    }
+}
+
+// Telegram 모듈 시작 (스레드 생성 후 바로 반환). 토큰/chat id 가 없으면 모듈이 스스로 종료하고 나머지 앱에는 영향이 없다.
+void Start()
+{
+    ensureIniSection(iniFilePath());
+    g_app = new ScreenTelegramApp();
+    g_thread = CreateThread(nullptr, 0, moduleThread, nullptr, 0, nullptr);
+    if (!g_thread) {
+        Logger::log("Telegram 모듈 스레드 생성 실패 - 텔레그램 기능을 사용할 수 없습니다.");
+        delete g_app;
+        g_app = nullptr;
+    }
+}
+
+// 종료 요청 (바로 반환)
+void RequestStop()
+{
+    if (g_app) g_app->requestStop();
+}
+
+// 모듈 스레드가 끝나길 최대 ms 기다린다. 끝났으면 true (정리 완료), 아직 도는 중이면 false.
+bool WaitStopped(DWORD ms)
+{
+    if (!g_thread) return true;
+    if (WaitForSingleObject(g_thread, ms) != WAIT_OBJECT_0) return false;
+    CloseHandle(g_thread);
+    g_thread = nullptr;
+    delete g_app;
+    g_app = nullptr;
+    return true;
+}
+
+// 텔레그램 /restart 로 재시작이 요청되었는지
+bool RestartRequested()
+{
+    return g_restartRequested != 0;
+}
+
+}  // namespace tg
+
+// ---------------------------------------------------------------- 원격 제어 (rdp_server.cpp / rdp_client.cpp 통합)
+// 다른 PC 의 화면(모니터마다 JPEG)을 받아 보고 마우스를 조작하는 LAN 용 원격 제어. 서버(조작당하는 PC)와 클라이언트(조작하는 PC)가 모두 이 앱 안에 있다.
+// 프로토콜은 예전 rdp_mini 와 같다 (헤더 5바이트 = 종류 1 + 길이 4, 인증 -> 모니터 정보 -> 화면 프레임 / 마우스 입력).
+// 설정은 gsHomeManager.ini 의 [RdpServer] / [RdpClient]. 서버는 전용 스레드, 클라이언트는 연결마다 전용 스레드(자기 창 + 메시지 루프).
+// TLS 없음: 신뢰하는 내부망에서만 사용할 것.
+namespace rdp {
+
+#pragma pack(push, 1)
+struct Hdr { uint8_t type; uint32_t len; };
+#pragma pack(pop)
+struct Ev { int32_t t, a, b, m; };                       // m = 모니터 번호 (마우스 이동)
+enum { RM_AUTH = 1, RM_FRAME = 2, RM_INPUT = 3, RM_INFO = 4 };
+enum { EV_MOVE = 1, EV_BTN = 2, EV_WHEEL = 3 };
+
+static bool sendAll(SOCKET s, const void* p, int n) {
+    const char* c = (const char*)p;
+    while (n > 0) { int r = send(s, c, n, 0); if (r <= 0) return false; c += r; n -= r; }
+    return true;
+}
+static bool recvAll(SOCKET s, void* p, int n) {
+    char* c = (char*)p;
+    while (n > 0) { int r = recv(s, c, n, 0); if (r <= 0) return false; c += r; n -= r; }
+    return true;
+}
+static bool sendMsg(SOCKET s, uint8_t type, const void* p, uint32_t len) {
+    Hdr h{type, len};
+    return sendAll(s, &h, sizeof h) && (len == 0 || sendAll(s, p, (int)len));
+}
+
+// UTF-8 메시지 상자 (어느 스레드에서나 호출 가능)
+static int Box(const char* text, const char* title, UINT flags) {
+    char16_t t[600], c[100];
+    t[0] = c[0] = 0;
+    Utf8::ToUtf16(text, -1, t, 600);
+    Utf8::ToUtf16(title, -1, c, 100);
+    return MessageBoxW(NULL, (LPCWSTR)t, (LPCWSTR)c, flags | MB_SETFOREGROUND | MB_TOPMOST);
+}
+
+// 이 PC 의 IPv4 주소들 ("a.b.c.d,  e.f.g.h")
+static std::string LocalIps() {
+    std::string out;
+    ULONG sz = 0;
+    GetAdaptersInfo(NULL, &sz);
+    if (!sz) return out;
+    std::vector<char> buf(sz);
+    IP_ADAPTER_INFO* ai = (IP_ADAPTER_INFO*)buf.data();
+    if (GetAdaptersInfo(ai, &sz) != NO_ERROR) return out;
+    for (; ai; ai = ai->Next)
+        for (IP_ADDR_STRING* a = &ai->IpAddressList; a; a = a->Next) {
+            const char* ip = a->IpAddress.String;
+            if (!ip[0] || !lstrcmpA(ip, "0.0.0.0")) continue;
+            if (!out.empty()) out += ",  ";
+            out += ip;
+        }
+    return out;
+}
+
+// ================================================================ 서버 (조작당하는 PC)
+class Server {
+public:
+    enum { ST_STOPPED, ST_LISTEN, ST_ASK, ST_CONN };
+    struct Cfg {
+        int port = 7071;
+        std::string pw;
+        std::string allowIp;        // 빈 문자열 = 모든 IP 허용
+        bool osk = false;           // 연결되면 화상 키보드(osk.exe) 실행
+        int accept = 0;             // 0 = 클라이언트 IP 마다 처음 한 번만 묻기, 1 = 묻지 않음(자동 수락), 2 = 접속할 때마다 묻기
+    };
+
+    static Server& Get() { static Server s; return s; }
+    ~Server() { Stop(); }
+
+    bool Running() const { return th_.joinable(); }
+
+    // 포트를 열고 대기 스레드를 시작. 실패하면 err 에 사유
+    bool Start(const Cfg& c, std::string& err) {
+        if (th_.joinable()) Stop();
+        if (c.port < 1 || c.port > 65535) { err = "port 번호는 1 ~ 65535 사이여야 합니다"; return false; }
+        if (c.pw.empty()) { err = "비밀번호가 비어 있습니다"; return false; }
+        WSADATA wd;
+        WSAStartup(MAKEWORD(2, 2), &wd);
+        SOCKET ls = socket(AF_INET, SOCK_STREAM, 0);
+        int one = 1;
+        sockaddr_in a = {};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_ANY);
+        a.sin_port = htons((u_short)c.port);
+        if (ls != INVALID_SOCKET) setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, (char*)&one, sizeof one);
+        if (ls == INVALID_SOCKET || bind(ls, (sockaddr*)&a, sizeof a) != 0 || listen(ls, 1) != 0) {
+            char m[200];
+            wsprintfA(m, "port %d 를 열 수 없습니다 (WSA 오류 %d). 이미 사용 중인 port 인지 확인하세요", c.port, WSAGetLastError());
+            if (ls != INVALID_SOCKET) closesocket(ls);
+            WSACleanup();
+            err = m;
+            Log::Put("원격 서버: %s", m);
+            return false;
+        }
+        { std::lock_guard<std::mutex> g(mtx_); cfg_ = c; }
+        ls_ = ls;
+        stop_ = false;
+        done_ = false;
+        frames_ = 0;
+        trusted_.clear();
+        SetState(ST_LISTEN, "");
+        th_ = std::thread([this] { Run(); });
+        Log::Put("원격 서버 시작: port %d, 허용 IP %s, 연결 확인 %s", c.port, c.allowIp.empty() ? "any" : c.allowIp.c_str(),
+                 c.accept == 1 ? "auto" : c.accept == 2 ? "always" : "once");
+        return true;
+    }
+
+    void Stop() {
+        if (!th_.joinable()) return;
+        stop_ = true;
+        SOCKET ls = ls_.exchange(INVALID_SOCKET);
+        if (ls != INVALID_SOCKET) closesocket(ls);                      // accept 를 깨움
+        SOCKET c = cur_;
+        if (c != INVALID_SOCKET) shutdown(c, SD_BOTH);                  // 진행 중인 세션/인증 대기를 깨움
+        for (int i = 0; i < 300 && !done_; i++) {                       // 허용 여부 질문창이 떠 있으면 No 로 닫음
+            HWND w = FindWindowW((LPCWSTR)u"#32770", (LPCWSTR)kAskTitle16);
+            if (w) PostMessageW(w, WM_COMMAND, IDNO, 0);
+            Sleep(30);
+        }
+        th_.join();
+        WSACleanup();
+        SetState(ST_STOPPED, "");
+        Log::Put("원격 서버 중지");
+    }
+
+    // 대화상자에 보여 줄 현재 상태
+    std::string Status() {
+        std::lock_guard<std::mutex> g(mtx_);
+        char b[240];
+        switch (state_) {
+        case ST_LISTEN: wsprintfA(b, "대기 중 (port %d) - 클라이언트의 연결을 기다립니다", cfg_.port); break;
+        case ST_ASK:    wsprintfA(b, "%s 에서 연결 요청 - 허용 여부를 묻는 중", peer_.c_str()); break;
+        case ST_CONN:   wsprintfA(b, "연결됨: %s  (보낸 화면 %lu 장)", peer_.c_str(), (unsigned long)frames_); break;
+        default:        return "중지됨";
+        }
+        return b;
+    }
+    // 실행 중인 서버에 설정 반영 (비밀번호, 허용 IP, 연결 확인, 화상 키보드). port 는 다시 시작해야 바뀜. 다음 접속부터 적용
+    void Update(const Cfg& c) {
+        std::lock_guard<std::mutex> g(mtx_);
+        const int port = cfg_.port;
+        cfg_ = c;
+        cfg_.port = port;
+    }
+    int Port() { std::lock_guard<std::mutex> g(mtx_); return cfg_.port; }
+    bool Connected() { std::lock_guard<std::mutex> g(mtx_); return state_ == ST_CONN; }
+
+private:
+    Server() = default;
+    static constexpr char16_t kAskTitle16[] = u"gsHomeManager - 원격 연결 요청";
+    static constexpr const char* kAskTitle = "gsHomeManager - 원격 연결 요청";
+
+    Cfg Snap() { std::lock_guard<std::mutex> g(mtx_); return cfg_; }
+
+    void SetState(int st, const std::string& peer) {
+        std::lock_guard<std::mutex> g(mtx_);
+        state_ = st;
+        peer_ = peer;
+    }
+
+    static bool JpegClsid(CLSID* out) {
+        UINT n = 0, sz = 0;
+        Gdiplus::GetImageEncodersSize(&n, &sz);
+        if (!sz) return false;
+        std::vector<char> buf(sz);
+        auto* ci = (Gdiplus::ImageCodecInfo*)buf.data();
+        Gdiplus::GetImageEncoders(n, sz, ci);
+        for (UINT i = 0; i < n; i++)
+            if (!wcscmp(ci[i].MimeType, L"image/jpeg")) { *out = ci[i].Clsid; return true; }
+        return false;
+    }
+
+    // 화상 키보드 실행 (C:\Windows\System32\osk.exe). 32비트 프로세스는 System32 가 SysWOW64 로 바뀌므로 Sysnative 로 접근
+    static void RunOsk() {
+        wchar_t win[MAX_PATH], dir[MAX_PATH + 16], exe[MAX_PATH + 32];
+        if (!GetWindowsDirectoryW(win, MAX_PATH)) return;
+        BOOL wow = FALSE;
+        IsWow64Process(GetCurrentProcess(), &wow);
+        lstrcpyW(dir, win);
+        lstrcatW(dir, wow ? L"\\Sysnative" : L"\\System32");
+        lstrcpyW(exe, dir);
+        lstrcatW(exe, L"\\osk.exe");
+        STARTUPINFOW si = {};
+        si.cb = sizeof si;
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessW(exe, NULL, NULL, NULL, FALSE, 0, NULL, dir, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            Log::Put("원격 서버: 화상 키보드(osk.exe) 실행");
+            return;
+        }
+        const int e1 = (int)GetLastError();
+        HINSTANCE r = ShellExecuteW(NULL, L"open", exe, NULL, dir, SW_SHOWNORMAL);       // CreateProcess 가 안 되면 셸로 다시 시도
+        Log::Put("원격 서버: 화상 키보드(osk.exe) 실행 %s (CreateProcess 오류 %d, ShellExecute 결과 %d)", (INT_PTR)r > 32 ? "성공" : "실패", e1, (int)(INT_PTR)r);
+    }
+
+    static BOOL CALLBACK EnumProc(HMONITOR, HDC, LPRECT r, LPARAM lp) {
+        ((std::vector<RECT>*)lp)->push_back(*r);
+        return TRUE;
+    }
+
+    // 클라이언트의 마우스 입력을 이 PC 에 넣음 (a, b = 모니터 m 안의 0..65535 좌표 -> 가상 데스크톱 좌표)
+    static void Inject(const Ev& e, const std::vector<RECT>& mons) {
+        INPUT in = {};
+        switch (e.t) {
+        case EV_MOVE: {
+            if (e.m < 0 || e.m >= (int)mons.size()) return;
+            const RECT& r = mons[e.m];
+            int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            if (vw < 2 || vh < 2) return;
+            int px = r.left + (int)((int64_t)std::clamp(e.a, 0, 65535) * (r.right - r.left - 1) / 65535);
+            int py = r.top + (int)((int64_t)std::clamp(e.b, 0, 65535) * (r.bottom - r.top - 1) / 65535);
+            in.type = INPUT_MOUSE;
+            in.mi.dx = (LONG)((int64_t)(px - vx) * 65535 / (vw - 1));
+            in.mi.dy = (LONG)((int64_t)(py - vy) * 65535 / (vh - 1));
+            in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+            break; }
+        case EV_BTN: {
+            DWORD f = (DWORD)e.a;
+            if (f != MOUSEEVENTF_LEFTDOWN && f != MOUSEEVENTF_LEFTUP && f != MOUSEEVENTF_RIGHTDOWN &&
+                f != MOUSEEVENTF_RIGHTUP && f != MOUSEEVENTF_MIDDLEDOWN && f != MOUSEEVENTF_MIDDLEUP) return;
+            in.type = INPUT_MOUSE;
+            in.mi.dwFlags = f;
+            break; }
+        case EV_WHEEL:
+            in.type = INPUT_MOUSE;
+            in.mi.dwFlags = MOUSEEVENTF_WHEEL;
+            in.mi.mouseData = (DWORD)e.a;
+            break;
+        default: return;
+        }
+        SendInput(1, &in, sizeof(INPUT));
+    }
+
+    // 대기 스레드: 한 번에 클라이언트 한 명
+    void Run() {
+        tg::enableThreadDpiAwareness();         // 실제 해상도로 캡처 / 좌표 계산 (이 스레드만 DPI 인식. 시계 창에는 영향 없음)
+        Gdiplus::GdiplusStartupInput gi;
+        ULONG_PTR tok = 0;
+        Gdiplus::GdiplusStartup(&tok, &gi, NULL);
+        for (;;) {
+            SOCKET ls = ls_;
+            if (stop_ || ls == INVALID_SOCKET) break;
+            sockaddr_in ca = {};
+            int cl = sizeof ca;
+            SOCKET c = accept(ls, (sockaddr*)&ca, &cl);
+            if (stop_) { if (c != INVALID_SOCKET) closesocket(c); break; }
+            if (c == INVALID_SOCKET) { Sleep(50); continue; }
+            std::string ips = inet_ntoa(ca.sin_addr);
+            if (const Cfg cur = Snap(); !cur.allowIp.empty() && cur.allowIp != ips) {
+                Log::Put("원격 서버: 허용 IP 가 아니어서 거부: %s", ips.c_str());
+                closesocket(c);
+                continue;
+            }
+            int nd = 1;
+            setsockopt(c, IPPROTO_TCP, 1 /*TCP_NODELAY*/, (char*)&nd, sizeof nd);
+            cur_ = c;
+            Serve(c, ips);
+            cur_ = INVALID_SOCKET;
+            closesocket(c);
+            SetState(stop_ ? ST_STOPPED : ST_LISTEN, "");
+        }
+        Gdiplus::GdiplusShutdown(tok);
+        done_ = true;
+    }
+
+    void Serve(SOCKET c, const std::string& ips) {
+        DWORD to = 5000;                        // 인증 메시지는 5초 안에 와야 함 (연결만 하고 가만히 있는 상대가 서버를 붙잡지 못하게)
+        setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
+        Hdr h;
+        if (!recvAll(c, &h, sizeof h) || h.type != RM_AUTH || h.len > 256) { Log::Put("원격 서버: 잘못된 인증 메시지 (%s)", ips.c_str()); return; }
+        std::string got(h.len, '\0');
+        if (h.len && !recvAll(c, &got[0], (int)h.len)) { Log::Put("원격 서버: 인증 메시지가 끝까지 오지 않음 (%s)", ips.c_str()); return; }
+        to = 0;
+        setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
+
+        const Cfg cfg = Snap();                 // 접속할 때의 설정 (대화상자에서 [저장] 한 최신 값)
+        uint8_t ok = (got == cfg.pw);
+        SecureZeroMemory(&got[0], got.size());
+        if (!ok) {
+            Log::Put("원격 서버: 비밀번호가 틀림 (%s)", ips.c_str());
+            Sleep(1000);                        // 비밀번호 대입 공격을 늦춤
+        } else if (cfg.accept == 1) {
+            Log::Put("원격 서버: 비밀번호 확인됨 (%s, 묻지 않고 수락)", ips.c_str());
+        } else if (cfg.accept == 2 || !trusted_.count(ips)) {
+            SetState(ST_ASK, ips);
+            Log::Put("원격 서버: 비밀번호 확인됨 (%s), 사용자에게 허용 여부를 묻는 중", ips.c_str());
+            std::string msg = "원격 연결 요청: " + ips + "\n\n허용하시겠습니까?";
+            ok = (Box(msg.c_str(), kAskTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) && !stop_;
+            Log::Put("원격 서버: 사용자가 %s (%s)", ok ? "허용" : "거부", ips.c_str());
+            if (ok) trusted_.insert(ips);
+        } else {
+            Log::Put("원격 서버: 비밀번호 확인됨 (%s, 이미 허용한 IP)", ips.c_str());
+        }
+        sendMsg(c, RM_AUTH, &ok, 1);
+        if (!ok) return;
+
+        CLSID jpg;
+        if (!JpegClsid(&jpg)) { Log::Put("원격 서버: JPEG 인코더를 찾을 수 없어 연결을 끊음"); return; }
+        SetState(ST_CONN, ips);
+        frames_ = 0;
+        Log::Put("원격 서버: 클라이언트 연결 수락: %s", ips.c_str());
+        if (cfg.osk) RunOsk();
+
+        std::vector<RECT> gMons;                // 모니터 (왼쪽 -> 오른쪽)
+        EnumDisplayMonitors(NULL, NULL, EnumProc, (LPARAM)&gMons);
+        std::sort(gMons.begin(), gMons.end(), [](const RECT& a, const RECT& b) {
+            return a.left != b.left ? a.left < b.left : a.top < b.top;
+        });
+        Log::Put("원격 서버: 모니터 %d 개 감지", (int)gMons.size());
+        for (size_t i = 0; i < gMons.size(); i++)
+            Log::Put("원격 서버:   모니터 %d: %dx%d (%d,%d)", (int)i + 1, (int)(gMons[i].right - gMons[i].left),
+                     (int)(gMons[i].bottom - gMons[i].top), (int)gMons[i].left, (int)gMons[i].top);
+        {   // 클라이언트에 모니터 개수와 크기를 알림
+            std::vector<int32_t> info;
+            info.push_back((int32_t)gMons.size());
+            for (auto& r : gMons) { info.push_back(r.right - r.left); info.push_back(r.bottom - r.top); }
+            sendMsg(c, RM_INFO, info.data(), (uint32_t)(info.size() * 4));
+        }
+
+        std::atomic<bool> alive(true);
+        std::thread rx([&] {                    // 클라이언트 -> 서버: 마우스 입력
+            tg::enableThreadDpiAwareness();
+            Hdr h;
+            while (recvAll(c, &h, sizeof h)) {
+                if (h.len > 1024) break;
+                Ev e;
+                if (h.type == RM_INPUT && h.len == sizeof e) {
+                    if (!recvAll(c, &e, sizeof e)) break;
+                    Inject(e, gMons);
+                } else {
+                    std::vector<char> skip(h.len);
+                    if (h.len && !recvAll(c, skip.data(), (int)h.len)) break;
+                }
+            }
+            alive = false;
+        });
+
+        struct Mon { int W, H; HDC mem; HBITMAP dib; HGDIOBJ old; void* bits; size_t bytes; std::vector<uint8_t> prev; };
+        std::vector<Mon> mons(gMons.size());
+        HDC scr = GetDC(NULL);
+        for (size_t i = 0; i < mons.size(); i++) {
+            Mon& m = mons[i];
+            m.W = gMons[i].right - gMons[i].left;
+            m.H = gMons[i].bottom - gMons[i].top;
+            BITMAPINFO bi = {};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = m.W;
+            bi.bmiHeader.biHeight = -m.H;       // top-down
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+            m.bits = nullptr;
+            m.mem = CreateCompatibleDC(scr);
+            m.dib = CreateDIBSection(scr, &bi, DIB_RGB_COLORS, &m.bits, NULL, 0);
+            m.old = SelectObject(m.mem, m.dib);
+            m.bytes = (size_t)m.W * m.H * 4;
+            m.prev.assign(m.bytes, 0);
+        }
+        ULONG quality = 60;
+        unsigned long sentFrames = 0, sentBytes = 0;
+        while (alive && !stop_) {               // 서버 -> 클라이언트: 바뀐 모니터의 화면만 JPEG 로 전송
+            bool sentOk = true;
+            for (size_t i = 0; i < mons.size() && sentOk; i++) {
+                Mon& m = mons[i];
+                if (!m.bits) continue;
+                BitBlt(m.mem, 0, 0, m.W, m.H, scr, gMons[i].left, gMons[i].top, SRCCOPY | CAPTUREBLT);
+                if (memcmp(m.prev.data(), m.bits, m.bytes) == 0) continue;     // 이 모니터는 그대로
+                memcpy(m.prev.data(), m.bits, m.bytes);
+                Gdiplus::Bitmap bmp(m.W, m.H, m.W * 4, PixelFormat32bppRGB, (BYTE*)m.bits);
+                IStream* st = nullptr;
+                CreateStreamOnHGlobal(NULL, TRUE, &st);
+                Gdiplus::EncoderParameters ep;
+                ep.Count = 1;
+                ep.Parameter[0].Guid = Gdiplus::EncoderQuality;
+                ep.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+                ep.Parameter[0].NumberOfValues = 1;
+                ep.Parameter[0].Value = &quality;
+                if (bmp.Save(st, &jpg, &ep) == Gdiplus::Ok) {
+                    STATSTG ss;
+                    st->Stat(&ss, STATFLAG_NONAME);
+                    HGLOBAL hg;
+                    GetHGlobalFromStream(st, &hg);
+                    void* p = GlobalLock(hg);
+                    Hdr fh{RM_FRAME, ss.cbSize.LowPart + 4};         // 내용 = 모니터 번호 + JPEG
+                    int32_t idx = (int32_t)i;
+                    sentOk = sendAll(c, &fh, sizeof fh) && sendAll(c, &idx, 4) && sendAll(c, p, (int)ss.cbSize.LowPart);
+                    GlobalUnlock(hg);
+                    if (sentOk) { sentFrames++; sentBytes += ss.cbSize.LowPart; frames_++; }
+                } else {
+                    Log::Put("원격 서버: JPEG 인코딩 실패 (모니터 %d)", (int)i + 1);
+                }
+                st->Release();
+            }
+            if (!sentOk) { Log::Put("원격 서버: 전송 실패, 세션을 끝냄"); break; }
+            Sleep(60);
+        }
+        shutdown(c, SD_BOTH);
+        rx.join();
+        for (Mon& m : mons) {
+            SelectObject(m.mem, m.old);
+            DeleteObject(m.dib);
+            DeleteDC(m.mem);
+        }
+        ReleaseDC(NULL, scr);
+        Log::Put("원격 서버: 클라이언트 연결 종료: %s (보낸 화면 %lu 장, %lu KB)", ips.c_str(), sentFrames, sentBytes / 1024);
+    }
+
+    Cfg                     cfg_;
+    std::thread             th_;
+    std::atomic<SOCKET>     ls_{INVALID_SOCKET};     // 대기 소켓
+    std::atomic<SOCKET>     cur_{INVALID_SOCKET};    // 지금 처리 중인 클라이언트 소켓
+    std::atomic<bool>       stop_{false};
+    std::atomic<bool>       done_{false};            // Run() 이 끝남
+    std::atomic<unsigned long> frames_{0};
+    std::set<std::string>   trusted_;                // 한 번 허용한 클라이언트 IP (accept=once. 서버를 다시 시작하면 비움)
+    std::mutex              mtx_;
+    int                     state_ = ST_STOPPED;
+    std::string             peer_;
+};
+
+// ================================================================ 클라이언트 (조작하는 PC)
+class Client {
+public:
+    struct Cfg { std::string ip; int port = 7071; std::string pw; };
+
+    static constexpr UINT WM_PROGRESS = WM_APP + 10;    // 대화상자로: wParam = 남은 ms, lParam = 단계 (0 서버 접속, 1 서버 승인 대기)
+    static constexpr UINT WM_DONE     = WM_APP + 11;    // 대화상자로: wParam = 1 이면 연결 성공 (대화상자를 닫음), 0 이면 실패/취소 (오류는 TakeError)
+    static constexpr int CONNECT_SEC = 10, APPROVE_SEC = 60;
+
+    // 연결 시작: 전용 스레드가 접속 -> 인증(진행 상황을 dlg 에 알림) -> 서버 모니터마다 창을 만들고 닫힐 때까지 동작. 이미 연결 중이면 false
+    static bool Start(const Cfg& c, HWND dlg) {
+        if (busy_) return false;
+        if (th_.joinable()) th_.join();
+        cancel_ = false;
+        dlg_ = dlg;
+        { std::lock_guard<std::mutex> g(emtx_); err_.clear(); }
+        busy_ = true;
+        th_ = std::thread([c] { Session(c); busy_ = false; });
+        return true;
+    }
+    static bool Busy() { return busy_; }
+    static void Cancel() { cancel_ = true; }                 // 접속/승인 대기 중인 연결 시도를 취소
+    static void Detach() { dlg_ = NULL; }                    // 대화상자가 닫힘: 더 이상 알리지 않음
+    static std::string TakeError() {                         // 실패 사유 (한 번 읽으면 비움)
+        std::lock_guard<std::mutex> g(emtx_);
+        std::string e;
+        e.swap(err_);
+        return e;
+    }
+
+    // 앱 종료: 진행 중인 연결을 닫고 스레드를 기다림
+    static void Shutdown() {
+        if (!th_.joinable()) return;
+        cancel_ = true;
+        DWORD t = tid_;
+        if (busy_ && t) PostThreadMessageW(t, WM_QUIT, 0, 0);
+        th_.join();
+    }
+
+private:
+    static inline std::thread th_;
+    static inline std::atomic<bool> busy_{false};
+    static inline std::atomic<bool> cancel_{false};
+    static inline std::atomic<DWORD> tid_{0};
+    static inline std::atomic<HWND> dlg_{NULL};     // 진행 상황을 알릴 대화상자
+    static inline std::mutex emtx_;
+    static inline std::string err_;                 // 마지막 실패 사유
+    static inline SOCKET sock_ = INVALID_SOCKET;
+    static inline std::vector<HWND> wnd_;           // 서버 모니터마다 창 1개
+    static inline std::vector<HBITMAP> bmp_;        // 모니터마다 마지막 화면
+    static inline std::mutex mtx_;
+
+    static const char* ErrText(int e) {
+        switch (e) {
+        case WSAETIMEDOUT:     return "응답 없음 (시간 초과)";
+        case WSAECONNREFUSED:  return "서버가 실행 중이 아니거나 port 가 틀림";
+        case WSAENETUNREACH:
+        case WSAEHOSTUNREACH:  return "서버에 도달할 수 없음 (IP 주소 / 네트워크 확인)";
+        default:               return "";
+        }
+    }
+
+    static void Post(UINT m, WPARAM w, LPARAM l = 0) {
+        HWND d = dlg_;
+        if (d) PostMessageW(d, m, w, l);
+    }
+
+    // 실패: 로그에 남기고 사유를 대화상자에 알림 (오류 창은 대화상자가 띄움)
+    static void Fail(const char* msg) {
+        Log::Put("원격 클라이언트: %s", msg);
+        { std::lock_guard<std::mutex> g(emtx_); err_ = msg; }
+        Post(WM_DONE, 0);
+    }
+
+    // 소켓이 쓰기(연결 완료) / 읽기(서버 응답) 가능해질 때까지 기다리며 대화상자의 진행 표시를 갱신.
+    // 실패하면 err = WSA 오류 (사용자가 취소하면 WSAECANCELLED)
+    static bool Wait(SOCKET s, bool write, int sec, int phase, int& err) {
+        DWORD t0 = GetTickCount();
+        for (;;) {
+            int left = sec * 1000 - (int)(GetTickCount() - t0);
+            if (left <= 0) { err = WSAETIMEDOUT; return false; }
+            if (cancel_) { err = WSAECANCELLED; return false; }
+            Post(WM_PROGRESS, (WPARAM)left, (LPARAM)phase);
+            fd_set rf, wf, ef;
+            FD_ZERO(&rf); FD_ZERO(&wf); FD_ZERO(&ef);
+            if (write) FD_SET(s, &wf); else FD_SET(s, &rf);
+            FD_SET(s, &ef);
+            timeval tv = {0, 100000};
+            int n = select(0, write ? NULL : &rf, write ? &wf : NULL, &ef, &tv);
+            if (n < 0) { err = WSAGetLastError(); return false; }
+            if (n > 0) {
+                if (FD_ISSET(s, &ef)) {
+                    int e = 0, l = sizeof e;
+                    getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&e, &l);
+                    err = e ? e : WSAECONNREFUSED;
+                    return false;
+                }
+                return true;
+            }
+        }
+    }
+
+    static void Session(const Cfg& c) {
+        tid_ = GetCurrentThreadId();
+        tg::enableThreadDpiAwareness();
+        WSADATA wd;
+        WSAStartup(MAKEWORD(2, 2), &wd);
+        Gdiplus::GdiplusStartupInput gi;
+        ULONG_PTR tok = 0;
+        Gdiplus::GdiplusStartup(&tok, &gi, NULL);
+        Run(c);
+        Gdiplus::GdiplusShutdown(tok);
+        WSACleanup();
+        tid_ = 0;
+    }
+
+    static void Run(const Cfg& c) {
+        SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in a = {};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = inet_addr(c.ip.c_str());
+        a.sin_port = htons((u_short)c.port);
+        Log::Put("원격 클라이언트: %s:%d 에 연결 요청", c.ip.c_str(), c.port);
+        char m[300];
+        int err = 0;
+        u_long nb = 1;
+        ioctlsocket(s, FIONBIO, &nb);
+        bool ok = false;
+        if (connect(s, (const sockaddr*)&a, sizeof a) == 0) ok = true;
+        else if (WSAGetLastError() != WSAEWOULDBLOCK) err = WSAGetLastError();
+        else ok = Wait(s, true, CONNECT_SEC, 0, err);
+        nb = 0;
+        ioctlsocket(s, FIONBIO, &nb);
+        if (!ok) {
+            closesocket(s);
+            if (err == WSAECANCELLED) { Log::Put("원격 클라이언트: 연결 취소"); Post(WM_DONE, 0); return; }
+            wsprintfA(m, "%s:%d 에 연결할 수 없습니다.\n%s (WSA 오류 %d)", c.ip.c_str(), c.port, ErrText(err), err);
+            Fail(m);
+            return;
+        }
+        Log::Put("원격 클라이언트: 연결됨, 비밀번호 전송");
+        int nd = 1;
+        setsockopt(s, IPPROTO_TCP, 1 /*TCP_NODELAY*/, (char*)&nd, sizeof nd);
+        sendMsg(s, RM_AUTH, c.pw.data(), (uint32_t)c.pw.size());
+        // 서버 사용자가 허용 여부를 누를 때까지 기다림 (최대 APPROVE_SEC 초)
+        if (!Wait(s, false, APPROVE_SEC, 1, err)) {
+            closesocket(s);
+            if (err == WSAECANCELLED) { Log::Put("원격 클라이언트: 승인 대기 취소"); Post(WM_DONE, 0); return; }
+            Fail("서버가 60초 안에 응답하지 않았습니다. 서버 PC 에서 연결 요청을 확인하세요.");
+            return;
+        }
+        DWORD to = 10000;                       // 이후 핸드셰이크는 10초 안에
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
+        Hdr h;
+        uint8_t acc = 0;
+        if (!recvAll(s, &h, sizeof h) || h.len != 1 || !recvAll(s, &acc, 1) || !acc) {
+            closesocket(s);
+            Fail("인증에 실패했거나 서버가 연결을 거부했습니다.\n비밀번호와 서버의 허용 여부를 확인하세요.");
+            return;
+        }
+        Log::Put("원격 클라이언트: 인증됨");
+        if (!recvAll(s, &h, sizeof h) || h.type != RM_INFO || h.len < 12 || h.len > 4096 || h.len % 4) {
+            closesocket(s);
+            Fail("서버의 모니터 정보가 올바르지 않습니다.");
+            return;
+        }
+        std::vector<int32_t> info(h.len / 4);
+        bool bad = !recvAll(s, info.data(), (int)h.len) || info[0] < 1 || info[0] > 16 || (size_t)info[0] * 2 + 1 > info.size();
+        for (int i = 0; !bad && i < info[0]; i++) bad = info[1 + 2 * i] < 1 || info[2 + 2 * i] < 1;
+        if (bad) {
+            closesocket(s);
+            Fail("서버의 모니터 정보가 올바르지 않습니다.");
+            return;
+        }
+        to = 0;
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
+        if (cancel_) { closesocket(s); Post(WM_DONE, 0); return; }
+        sock_ = s;
+        Post(WM_DONE, 1);                       // 대화상자를 닫고 원격 제어 창을 연다
+        View(info);
+        shutdown(sock_, SD_BOTH);
+        closesocket(sock_);
+        sock_ = INVALID_SOCKET;
+    }
+
+    static int MonOf(HWND w) {
+        for (size_t i = 0; i < wnd_.size(); i++) if (wnd_[i] == w) return (int)i;
+        return -1;
+    }
+
+    static void SendEv(int t, int a, int b = 0, int m = 0) {
+        Ev e{t, a, b, m};
+        sendMsg(sock_, RM_INPUT, &e, sizeof e);
+    }
+
+    // 서버 -> 클라이언트: 화면 프레임 수신
+    static void NetThread() {
+        Hdr h;
+        unsigned long frames = 0;
+        while (recvAll(sock_, &h, sizeof h)) {
+            if (h.len > (64u << 20)) { Log::Put("원격 클라이언트: 프레임이 너무 큼 (%u 바이트), 연결을 닫음", (unsigned)h.len); break; }
+            std::vector<char> buf(h.len);
+            if (h.len && !recvAll(sock_, buf.data(), (int)h.len)) break;
+            if (h.type != RM_FRAME || h.len <= 4) continue;
+            int32_t idx;
+            memcpy(&idx, buf.data(), 4);
+            if (idx < 0 || idx >= (int)wnd_.size()) continue;
+            uint32_t n = h.len - 4;
+            HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, n);
+            if (!hg) continue;
+            memcpy(GlobalLock(hg), buf.data() + 4, n);
+            GlobalUnlock(hg);
+            IStream* st = nullptr;
+            CreateStreamOnHGlobal(hg, TRUE, &st);
+            HBITMAP hb = NULL;
+            {
+                Gdiplus::Bitmap bmp(st);
+                bmp.GetHBITMAP(Gdiplus::Color(0, 0, 0), &hb);
+            }
+            st->Release();
+            if (!hb) { Log::Put("원격 클라이언트: 프레임 디코딩 실패 (모니터 %d)", (int)idx + 1); continue; }
+            {
+                std::lock_guard<std::mutex> lk(mtx_);
+                if (bmp_[idx]) DeleteObject(bmp_[idx]);
+                bmp_[idx] = hb;
+            }
+            InvalidateRect(wnd_[idx], NULL, FALSE);
+            frames++;
+        }
+        Log::Put("원격 클라이언트: 서버 또는 네트워크가 연결을 끊음 (받은 화면 %lu 장)", frames);
+        PostMessageW(wnd_[0], WM_CLOSE, 0, 0);
+    }
+
+    static LRESULT CALLBACK ViewProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
+        switch (m) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(w, &ps);
+            std::lock_guard<std::mutex> lk(mtx_);
+            int mi = MonOf(w);
+            HBITMAP cur = mi >= 0 ? bmp_[mi] : NULL;
+            if (cur) {
+                BITMAP bm;
+                GetObjectW(cur, sizeof bm, &bm);
+                RECT rc;
+                GetClientRect(w, &rc);
+                HDC mem = CreateCompatibleDC(dc);
+                HGDIOBJ o = SelectObject(mem, cur);
+                SetStretchBltMode(dc, HALFTONE);
+                StretchBlt(dc, 0, 0, rc.right, rc.bottom, mem, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                SelectObject(mem, o);
+                DeleteDC(mem);
+            }
+            EndPaint(w, &ps);
+            return 0; }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_MOUSEMOVE: {
+            RECT rc;
+            GetClientRect(w, &rc);
+            if (rc.right > 1 && rc.bottom > 1) {
+                int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
+                SendEv(EV_MOVE, (int)((int64_t)x * 65535 / (rc.right - 1)), (int)((int64_t)y * 65535 / (rc.bottom - 1)), MonOf(w));
+            }
+            return 0; }
+        case WM_LBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_LEFTDOWN); return 0;
+        case WM_LBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_LEFTUP); return 0;
+        case WM_RBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_RIGHTDOWN); return 0;
+        case WM_RBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_RIGHTUP); return 0;
+        case WM_MBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_MIDDLEDOWN); return 0;
+        case WM_MBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_MIDDLEUP); return 0;
+        case WM_MOUSEWHEEL:
+            SendEv(EV_WHEEL, (short)HIWORD(wp));
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        }
+        return DefWindowProcW(w, m, wp, lp);
+    }
+
+    // 서버 모니터마다 창을 만들고 닫힐 때까지 메시지 루프 (info = 모니터 개수, (너비, 높이) ...)
+    static void View(const std::vector<int32_t>& info) {
+        int nMon = info[0];
+        Log::Put("원격 클라이언트: 서버 모니터 %d 개", nMon);
+        for (int i = 0; i < nMon; i++) Log::Put("원격 클라이언트:   모니터 %d: %dx%d", i + 1, (int)info[1 + 2 * i], (int)info[2 + 2 * i]);
+        HINSTANCE hi = GetModuleHandleW(NULL);
+        WNDCLASSW wc = {};
+        wc.lpfnWndProc = ViewProc;
+        wc.hInstance = hi;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hIcon = LoadIcon(hi, MAKEINTRESOURCE(1));            // 앱 아이콘 (rc 의 1 ICON)
+        wc.lpszClassName = (LPCWSTR)u"gsHomeManagerRdpView";
+        RegisterClassW(&wc);
+        wnd_.assign(nMon, NULL);
+        bmp_.assign(nMon, NULL);
+        for (int i = 0; i < nMon; i++) {
+            int mw = info[1 + 2 * i], mh = info[2 + 2 * i];
+            int cw = std::min(mw, 1280), ch = (int)((int64_t)mh * cw / mw);
+            RECT rc = {0, 0, cw, ch};
+            AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+            char t[80];
+            wsprintfA(t, "원격 제어 - 모니터 %d (%dx%d)", i + 1, mw, mh);
+            char16_t title[80];
+            title[0] = 0;
+            Utf8::ToUtf16(t, -1, title, 80);
+            wnd_[i] = CreateWindowW((LPCWSTR)u"gsHomeManagerRdpView", (LPCWSTR)title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                                    rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hi, NULL);
+        }
+        for (HWND w : wnd_) if (w) ShowWindow(w, SW_SHOW);
+        std::thread net(NetThread);
+        MSG msg;
+        while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Log::Put("원격 클라이언트: 창을 닫음, 연결 종료");
+        shutdown(sock_, SD_BOTH);
+        net.join();                             // NetThread 는 recv 가 끝나면 빠져나옴 (소켓은 호출한 쪽에서 닫음)
+        for (HWND w : wnd_) if (w && IsWindow(w)) DestroyWindow(w);
+        for (HBITMAP b : bmp_) if (b) DeleteObject(b);
+        wnd_.clear();
+        bmp_.clear();
+    }
+};
+
+}  // namespace rdp
+
+// 서버 설정 (Settings -> rdp::Server::Cfg)
+static rdp::Server::Cfg RdpServerCfg(const Settings& s) {
+    rdp::Server::Cfg c;
+    c.port = s.rsPort;
+    c.pw = s.rsPass;
+    c.allowIp = (!lstrcmpiA(s.rsAllow, "any") || !lstrcmpA(s.rsAllow, "*")) ? "" : s.rsAllow;
+    c.accept = s.rsAccept;
+    c.osk = s.rsOsk;
+    return c;
+}
+
+// 두 원격 제어 대화상자가 함께 쓰는 도우미 (입력 칸 <-> UTF-8, 경고창, 비밀번호 보이기)
+struct RdpDlg {
+    static std::string Get(HWND d, int id) {
+        char16_t u[256];
+        char k[1024];
+        u[0] = 0;
+        GetDlgItemTextW(d, id, (LPWSTR)u, 256);
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)u, -1, k, sizeof(k), NULL, NULL);
+        std::string s = k;
+        SecureZeroMemory(u, sizeof(u));
+        SecureZeroMemory(k, sizeof(k));
+        return s;
+    }
+    static bool Set(HWND d, int id, const std::string& s) {      // 글자가 바뀌었을 때만 쓰고 true (깜빡임 방지)
+        char16_t u[512], cur[512];
+        u[0] = cur[0] = 0;
+        Utf8::ToUtf16(s.c_str(), -1, u, 512);
+        GetDlgItemTextW(d, id, (LPWSTR)cur, 512);
+        if (lstrcmpW((LPCWSTR)u, (LPCWSTR)cur) == 0) return false;
+        SetDlgItemTextW(d, id, (LPCWSTR)u);
+        return true;
+    }
+    static void Warn(HWND d, const char* title, const char* msg, int focusId) {
+        char16_t m[300], t[64];
+        m[0] = t[0] = 0;
+        Utf8::ToUtf16(msg, -1, m, 300);
+        Utf8::ToUtf16(title, -1, t, 64);
+        MessageBoxW(d, (LPCWSTR)m, (LPCWSTR)t, MB_OK | MB_ICONWARNING);
+        if (focusId) SetFocus(GetDlgItem(d, focusId));
+    }
+    static void ShowPw(HWND d, int pwId, bool show) {
+        SendDlgItemMessageW(d, pwId, EM_SETPASSWORDCHAR, show ? 0 : (WPARAM)'*', 0);
+        InvalidateRect(GetDlgItem(d, pwId), NULL, TRUE);
+    }
+    // ini 에 안전하게 저장할 수 있는 비밀번호인지 (앞뒤 공백과 양끝 따옴표는 ini 를 읽을 때 사라진다)
+    static bool PwOk(const std::string& p) {
+        if (p.empty()) return false;
+        if (p.front() == ' ' || p.back() == ' ' || p.front() == '\t' || p.back() == '\t') return false;
+        if (p.size() > 1 && p.front() == p.back() && (p.front() == '"' || p.front() == '\'')) return false;
+        return true;
+    }
+    static bool Port(HWND d, int id, int& port) {
+        BOOL ok = FALSE;
+        UINT p = GetDlgItemInt(d, id, &ok, FALSE);
+        if (!ok || p < 1 || p > 65535) return false;
+        port = (int)p;
+        return true;
+    }
+};
+
+// 다른 PC(서버): ini [RdpServer] 설정 + 서버 시작/중지 + 내 IP 주소와 현재 상태. 대화상자를 닫아도 서버는 계속 동작한다.
+class RdpServerDialog {
+public:
+    static void Show(HINSTANCE hi, HWND owner, Settings& cfg) {
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(24); b.W(0); b.W(0); b.W(300); b.W(210);
+        b.W(0); b.W(0);
+        b.S("다른 PC(서버) - 이 PC 를 원격으로 제어하게 함");
+        b.W(9); b.S("Segoe UI");
+        const DWORD T = WS_CHILD | WS_VISIBLE;
+        const DWORD E = T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL;
+        b.Control(T,                                              10,  10,  70, 10, 0xFFFF, "STATIC", "내 IP 주소");
+        b.Control(T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY, 84, 8, 206, 13, IDC_IP, "EDIT", "");
+        b.Control(T,                                              10,  28,  70, 10, 0xFFFF, "STATIC", "현재 상태");
+        b.Control(T | SS_NOPREFIX,                                84,  28, 206, 10, IDC_STATE, "STATIC", "");
+        b.Control(T | SS_ETCHEDHORZ,                              10,  44, 280,  1, 0xFFFF, "STATIC", "");
+        b.Control(T,                                              10,  54,  70, 10, 0xFFFF, "STATIC", "port 번호");
+        b.Control(E | ES_NUMBER,                                  84,  52,  50, 13, IDC_PORT, "EDIT", "");
+        b.Control(T,                                              10,  72,  70, 10, 0xFFFF, "STATIC", "비밀번호");
+        b.Control(E | ES_PASSWORD,                                84,  70, 120, 13, IDC_PASS, "EDIT", "");
+        b.Button(T | WS_TABSTOP | BS_AUTOCHECKBOX,               212,  71,  70, 12, IDC_SHOWPW, "보이기");
+        b.Control(T,                                              10,  90,  70, 10, 0xFFFF, "STATIC", "허용 IP");
+        b.Control(E,                                              84,  88,  90, 13, IDC_ALLOW, "EDIT", "");
+        b.Control(T,                                             180,  90, 110, 10, 0xFFFF, "STATIC", "any = 모든 IP 허용");
+        b.Control(T,                                              10, 108,  70, 10, 0xFFFF, "STATIC", "연결 요청 확인");
+        b.Button(T | WS_TABSTOP | WS_GROUP | BS_AUTORADIOBUTTON, 84, 106, 206, 12, IDC_ACC0,     "클라이언트 IP 마다 처음 한 번만 묻기");
+        b.Button(T | BS_AUTORADIOBUTTON,                          84, 119, 206, 12, IDC_ACC0 + 1, "묻지 않고 자동 수락");
+        b.Button(T | BS_AUTORADIOBUTTON,                          84, 132, 206, 12, IDC_ACC0 + 2, "접속할 때마다 묻기");
+        b.Button(T | WS_TABSTOP | WS_GROUP | BS_AUTOCHECKBOX,     84, 150, 206, 12, IDC_AUTO, "프로그램을 시작할 때 서버를 자동으로 시작");
+        b.Button(T | WS_TABSTOP | BS_AUTOCHECKBOX,               84, 163, 206, 12, IDC_OSK, "연결되면 화상 키보드(OSK) 실행");
+        b.Control(T | SS_NOPREFIX,                                10, 180, 280, 10, IDC_WARN, "STATIC", "※ 암호화(TLS)가 없습니다. 신뢰하는 내부망에서만 사용하세요.");
+        b.Button(T | WS_TABSTOP | BS_DEFPUSHBUTTON,               20, 192,  55, 14, IDC_SAVE, "저장");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,                  85, 192,  55, 14, IDC_START, "시작");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,                 150, 192,  55, 14, IDC_STOP, "서버 종료");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,                 215, 192,  55, 14, IDCANCEL, "닫기");
+        DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&cfg);
+    }
+
+private:
+    enum { IDC_IP = 101, IDC_STATE = 102, IDC_PORT = 103, IDC_PASS = 104, IDC_SHOWPW = 105, IDC_ALLOW = 106,
+           IDC_ACC0 = 107 /* 107~109 */, IDC_AUTO = 110, IDC_WARN = 111, IDC_SAVE = 112, IDC_START = 113, IDC_STOP = 114, IDC_OSK = 115,
+           TID_REFRESH = 1 };
+    static constexpr const char* TITLE = "다른 PC(서버)";
+
+    // 입력 칸 -> cfg (검사 실패하면 경고 후 false)
+    static bool Collect(HWND d, Settings& cfg) {
+        int port;
+        if (!RdpDlg::Port(d, IDC_PORT, port)) { RdpDlg::Warn(d, TITLE, "port 번호는 1 ~ 65535 사이의 숫자로 입력하세요.", IDC_PORT); return false; }
+        std::string pw = RdpDlg::Get(d, IDC_PASS);
+        if (!RdpDlg::PwOk(pw)) {
+            RdpDlg::Warn(d, TITLE, "비밀번호를 입력하세요. (앞뒤 공백, 양끝 따옴표는 사용할 수 없습니다)", IDC_PASS);
+            SecureZeroMemory(&pw[0], pw.size());
+            return false;
+        }
+        std::string ip = RdpDlg::Get(d, IDC_ALLOW);
+        while (!ip.empty() && (ip.back() == ' ' || ip.back() == '\t')) ip.pop_back();
+        size_t st = 0;
+        while (st < ip.size() && (ip[st] == ' ' || ip[st] == '\t')) st++;
+        ip = ip.substr(st);
+        if (ip.empty() || ip == "*" || !lstrcmpiA(ip.c_str(), "any")) ip = "any";
+        else if (inet_addr(ip.c_str()) == INADDR_NONE) {
+            RdpDlg::Warn(d, TITLE, "허용 IP 는 any 또는 IP address (예: 192.168.0.20) 로 입력하세요.", IDC_ALLOW);
+            SecureZeroMemory(&pw[0], pw.size());
+            return false;
+        }
+        cfg.rsPort = port;
+        lstrcpynA(cfg.rsPass, pw.c_str(), sizeof(cfg.rsPass));
+        lstrcpynA(cfg.rsAllow, ip.c_str(), sizeof(cfg.rsAllow));
+        cfg.rsAccept = IsDlgButtonChecked(d, IDC_ACC0 + 1) == BST_CHECKED ? 1 : IsDlgButtonChecked(d, IDC_ACC0 + 2) == BST_CHECKED ? 2 : 0;
+        cfg.rsAuto = IsDlgButtonChecked(d, IDC_AUTO) == BST_CHECKED;
+        cfg.rsOsk = IsDlgButtonChecked(d, IDC_OSK) == BST_CHECKED;
+        SecureZeroMemory(&pw[0], pw.size());
+        return true;
+    }
+
+    static void Refresh(HWND d) {
+        rdp::Server& sv = rdp::Server::Get();
+        if (RdpDlg::Set(d, IDC_STATE, sv.Status())) InvalidateRect(GetDlgItem(d, IDC_STATE), NULL, TRUE);       // 글자가 바뀌면 색도 다시 그림
+        RdpDlg::Set(d, IDC_START, sv.Running() ? "재시작" : "시작");
+        EnableWindow(GetDlgItem(d, IDC_STOP), sv.Running());
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        switch (msg) {
+        case WM_INITDIALOG: {
+            Settings* c = (Settings*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            SendDlgItemMessageW(d, IDC_PORT, EM_LIMITTEXT, 5, 0);
+            SendDlgItemMessageW(d, IDC_PASS, EM_LIMITTEXT, 60, 0);
+            SendDlgItemMessageW(d, IDC_ALLOW, EM_LIMITTEXT, 15, 0);
+            SetDlgItemInt(d, IDC_PORT, (UINT)c->rsPort, FALSE);
+            RdpDlg::Set(d, IDC_PASS, c->rsPass);
+            RdpDlg::Set(d, IDC_ALLOW, c->rsAllow);
+            CheckRadioButton(d, IDC_ACC0, IDC_ACC0 + 2, IDC_ACC0 + (c->rsAccept >= 0 && c->rsAccept <= 2 ? c->rsAccept : 0));
+            CheckDlgButton(d, IDC_AUTO, c->rsAuto ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(d, IDC_OSK, c->rsOsk ? BST_CHECKED : BST_UNCHECKED);
+            std::string ips = rdp::LocalIps();
+            RdpDlg::Set(d, IDC_IP, ips.empty() ? "(네트워크 연결 없음)" : ips);
+            Refresh(d);
+            SetTimer(d, TID_REFRESH, 500, NULL);
+            return TRUE;
+        }
+        case WM_TIMER:
+            if (w == TID_REFRESH) Refresh(d);
+            return TRUE;
+        case WM_DESTROY:
+            KillTimer(d, TID_REFRESH);
+            break;
+        case WM_CTLCOLORSTATIC:
+            if ((HWND)l == GetDlgItem(d, IDC_STATE) || (HWND)l == GetDlgItem(d, IDC_WARN)) {
+                const bool run = rdp::Server::Get().Running();
+                SetTextColor((HDC)w, (HWND)l == GetDlgItem(d, IDC_WARN) ? RGB(200, 0, 0) : (run ? RGB(0, 130, 0) : RGB(200, 0, 0)));
+                SetBkColor((HDC)w, GetSysColor(COLOR_3DFACE));
+                return (INT_PTR)GetSysColorBrush(COLOR_3DFACE);
+            }
+            break;
+        case WM_COMMAND: {
+            Settings* c = (Settings*)GetWindowLongPtrA(d, GWLP_USERDATA);
+            switch (LOWORD(w)) {
+            case IDC_SHOWPW:
+                RdpDlg::ShowPw(d, IDC_PASS, IsDlgButtonChecked(d, IDC_SHOWPW) == BST_CHECKED);
+                return TRUE;
+            case IDC_SAVE:
+                if (!Collect(d, *c)) return TRUE;
+                c->SaveRdpServer();
+                Log::Put("원격 서버 설정 저장: port %d, 허용 IP %s, 연결 확인 %d, 자동 시작 %d, 화상 키보드 %d", c->rsPort, c->rsAllow, c->rsAccept, (int)c->rsAuto, (int)c->rsOsk);
+                if (rdp::Server::Get().Running()) {                // 실행 중인 서버에도 바로 반영 (다음 접속부터)
+                    const int runPort = rdp::Server::Get().Port();
+                    rdp::Server::Get().Update(RdpServerCfg(*c));
+                    if (runPort != c->rsPort) RdpDlg::Warn(d, TITLE, "port 번호는 [시작](재시작)을 눌러야 적용됩니다. 나머지 설정은 다음 접속부터 적용됩니다.", 0);
+                }
+                EndDialog(d, 1);
+                return TRUE;
+            case IDC_START: {
+                if (!Collect(d, *c)) return TRUE;
+                c->SaveRdpServer();
+                std::string err;
+                if (!rdp::Server::Get().Start(RdpServerCfg(*c), err)) RdpDlg::Warn(d, TITLE, err.c_str(), 0);
+                Refresh(d);
+                return TRUE; }
+            case IDC_STOP:
+                rdp::Server::Get().Stop();
+                Refresh(d);
+                return TRUE;
+            case IDCANCEL:
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break; }
+        }
+        return FALSE;
+    }
+};
+
+// 다른 PC(클라이언트): ini [RdpClient] 설정 + [연결] 버튼으로 서버에 연결 요청
+class RdpClientDialog {
+public:
+    static void Show(HINSTANCE hi, HWND owner, Settings& cfg) {
+        InitCommonControls();                                   // 진행 막대
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(14); b.W(0); b.W(0); b.W(300); b.W(148);
+        b.W(0); b.W(0);
+        b.S("다른 PC(클라이언트) - 다른 PC 를 원격으로 제어");
+        b.W(9); b.S("Segoe UI");
+        const DWORD T = WS_CHILD | WS_VISIBLE;
+        const DWORD E = T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL;
+        b.Control(T,                                              10,  12,  70, 10, 0xFFFF, "STATIC", "서버 IP address");
+        b.Control(E,                                              84,  10, 110, 13, IDC_IP, "EDIT", "");
+        b.Control(T,                                              10,  30,  70, 10, 0xFFFF, "STATIC", "port 번호");
+        b.Control(E | ES_NUMBER,                                  84,  28,  50, 13, IDC_PORT, "EDIT", "");
+        b.Control(T,                                              10,  48,  70, 10, 0xFFFF, "STATIC", "비밀번호");
+        b.Control(E | ES_PASSWORD,                                84,  46, 120, 13, IDC_PASS, "EDIT", "");
+        b.Button(T | WS_TABSTOP | BS_AUTOCHECKBOX,               212,  47,  70, 12, IDC_SHOWPW, "보이기");
+        b.Control(T,                                              10,  70, 280, 10, 0xFFFF, "STATIC", "서버 PC 의 [다른 PC(서버)] 에서 서버를 시작한 뒤 [연결] 을 누르세요.");
+        b.Control(T | SS_NOPREFIX,                                10,  82, 280, 10, IDC_WARN, "STATIC", "※ 암호화(TLS)가 없습니다. 신뢰하는 내부망에서만 사용하세요.");
+        b.Control(WS_CHILD | SS_NOPREFIX,                         10,  98, 280, 10, IDC_PSTAT, "STATIC", "");                 // 연결하는 동안만 보임
+        b.Control(WS_CHILD | PBS_SMOOTH,                          10, 109, 280,  9, IDC_PBAR, "msctls_progress32", "");
+        b.Button(T | WS_TABSTOP | BS_DEFPUSHBUTTON,               50, 126,  55, 14, IDC_CONNECT, "연결");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,                 115, 126,  55, 14, IDC_SAVE, "저장");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,                 180, 126,  55, 14, IDCANCEL, "닫기");
+        DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&cfg);
+    }
+
+private:
+    enum { IDC_IP = 101, IDC_PORT = 102, IDC_PASS = 103, IDC_SHOWPW = 104, IDC_WARN = 105, IDC_CONNECT = 106, IDC_SAVE = 107, IDC_PSTAT = 108, IDC_PBAR = 109 };
+    static constexpr const char* TITLE = "다른 PC(클라이언트)";
+
+    static bool Collect(HWND d, Settings& cfg) {
+        std::string ip = RdpDlg::Get(d, IDC_IP);
+        while (!ip.empty() && (ip.back() == ' ' || ip.back() == '\t')) ip.pop_back();
+        size_t st = 0;
+        while (st < ip.size() && (ip[st] == ' ' || ip[st] == '\t')) st++;
+        ip = ip.substr(st);
+        if (ip.empty() || inet_addr(ip.c_str()) == INADDR_NONE) {
+            RdpDlg::Warn(d, TITLE, "서버의 IP address 를 입력하세요. 예: 192.168.0.118", IDC_IP);
+            return false;
+        }
+        int port;
+        if (!RdpDlg::Port(d, IDC_PORT, port)) { RdpDlg::Warn(d, TITLE, "port 번호는 1 ~ 65535 사이의 숫자로 입력하세요.", IDC_PORT); return false; }
+        std::string pw = RdpDlg::Get(d, IDC_PASS);
+        if (!RdpDlg::PwOk(pw)) {
+            RdpDlg::Warn(d, TITLE, "비밀번호를 입력하세요. (앞뒤 공백, 양끝 따옴표는 사용할 수 없습니다)", IDC_PASS);
+            SecureZeroMemory(&pw[0], pw.size());
+            return false;
+        }
+        lstrcpynA(cfg.rcIp, ip.c_str(), sizeof(cfg.rcIp));
+        cfg.rcPort = port;
+        lstrcpynA(cfg.rcPass, pw.c_str(), sizeof(cfg.rcPass));
+        SecureZeroMemory(&pw[0], pw.size());
+        return true;
+    }
+
+    // 연결하는 동안: 입력/연결/저장을 막고 진행 표시를 보임, [닫기] 는 [취소] 로
+    static void SetBusy(HWND d, bool busy) {
+        static const int ids[] = {IDC_IP, IDC_PORT, IDC_PASS, IDC_SHOWPW, IDC_CONNECT, IDC_SAVE};
+        for (int id : ids) EnableWindow(GetDlgItem(d, id), !busy);
+        ShowWindow(GetDlgItem(d, IDC_PSTAT), busy ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(d, IDC_PBAR), busy ? SW_SHOW : SW_HIDE);
+        RdpDlg::Set(d, IDCANCEL, busy ? "취소" : "닫기");
+        if (busy) SetFocus(GetDlgItem(d, IDCANCEL));
+        else SetFocus(GetDlgItem(d, IDC_CONNECT));
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        switch (msg) {
+        case rdp::Client::WM_PROGRESS: {
+            const int total = (l == 1 ? rdp::Client::APPROVE_SEC : rdp::Client::CONNECT_SEC) * 1000;
+            SendDlgItemMessageW(d, IDC_PBAR, PBM_SETRANGE32, 0, total);
+            SendDlgItemMessageW(d, IDC_PBAR, PBM_SETPOS, w, 0);
+            char t[120];
+            wsprintfA(t, l == 1 ? "서버의 승인을 기다리는 중...  %d 초 남음" : "서버에 연결하는 중...  %d 초 남음", ((int)w + 999) / 1000);
+            RdpDlg::Set(d, IDC_PSTAT, t);
+            return TRUE; }
+        case rdp::Client::WM_DONE: {
+            if (w == 1) { EndDialog(d, 2); return TRUE; }       // 연결 성공: 원격 제어 창이 열림
+            SetBusy(d, false);
+            std::string e = rdp::Client::TakeError();
+            if (!e.empty()) RdpDlg::Warn(d, TITLE, e.c_str(), 0);
+            return TRUE; }
+        case WM_DESTROY:
+            rdp::Client::Detach();
+            break;
+        case WM_INITDIALOG: {
+            Settings* c = (Settings*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            SendDlgItemMessageW(d, IDC_IP, EM_LIMITTEXT, 15, 0);
+            SendDlgItemMessageW(d, IDC_PORT, EM_LIMITTEXT, 5, 0);
+            SendDlgItemMessageW(d, IDC_PASS, EM_LIMITTEXT, 60, 0);
+            RdpDlg::Set(d, IDC_IP, c->rcIp);
+            SetDlgItemInt(d, IDC_PORT, (UINT)c->rcPort, FALSE);
+            RdpDlg::Set(d, IDC_PASS, c->rcPass);
+            return TRUE;
+        }
+        case WM_CTLCOLORSTATIC:
+            if ((HWND)l == GetDlgItem(d, IDC_WARN)) {
+                SetTextColor((HDC)w, RGB(200, 0, 0));
+                SetBkMode((HDC)w, TRANSPARENT);
+                return (INT_PTR)GetSysColorBrush(COLOR_3DFACE);
+            }
+            break;
+        case WM_COMMAND: {
+            Settings* c = (Settings*)GetWindowLongPtrA(d, GWLP_USERDATA);
+            switch (LOWORD(w)) {
+            case IDC_SHOWPW:
+                RdpDlg::ShowPw(d, IDC_PASS, IsDlgButtonChecked(d, IDC_SHOWPW) == BST_CHECKED);
+                return TRUE;
+            case IDC_SAVE:
+                if (!Collect(d, *c)) return TRUE;
+                c->SaveRdpClient();
+                Log::Put("원격 클라이언트 설정 저장: %s:%d", c->rcIp, c->rcPort);
+                EndDialog(d, 1);
+                return TRUE;
+            case IDC_CONNECT: {
+                if (!Collect(d, *c)) return TRUE;
+                c->SaveRdpClient();
+                rdp::Client::Cfg cc;
+                cc.ip = c->rcIp;
+                cc.port = c->rcPort;
+                cc.pw = c->rcPass;
+                if (!rdp::Client::Start(cc, d)) { RdpDlg::Warn(d, TITLE, "이미 원격 연결 중입니다. 열려 있는 원격 제어 창을 닫거나 잠시 뒤에 다시 시도하세요.", 0); return TRUE; }
+                SetBusy(d, true);
+                RdpDlg::Set(d, IDC_PSTAT, "서버에 연결하는 중...");
+                return TRUE; }
+            case IDCANCEL:
+                if (!IsWindowEnabled(GetDlgItem(d, IDC_CONNECT))) rdp::Client::Cancel();     // 연결하는 중이면 취소
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break; }
+        }
+        return FALSE;
+    }
+};
+
 // ---------------------------------------------------------------- ClockWindow
 // 시계 창 1개. owner 가 없으면 본 창(메뉴/ini 위치 저장/랜덤 이동 담당),
 // 있으면 Global 도시 창(본 창의 소유 창). 도시 창은 본 창 아래에 계속 추가되고 본 창과 함께 이동한다.
@@ -4582,8 +10735,10 @@ private:
         CMD_SCAN        = 740,      // WiFiScan 대화상자
         CMD_MYPHONE     = 741,      // 앱 동작 설정 > 내 폰 등록 (WiFiScan 대화상자 + 안내 문구)
         CMD_IPREG       = 742,      // IP cam > IP cam 등록
-        CMD_IPVIEW      = 743,      // IP cam > IP cam 영상
+        CMD_IPVIEW      = 743,      // IP cam > 카메라 영상 (WebCam1 / WebCam2 / IP Cam)
         CMD_PHONE       = 744,      // IP cam / 폰 연결 > 폰 탐색기
+        CMD_RDPSRV      = 745,      // IP cam / 폰 연결 > 다른 PC(서버)
+        CMD_RDPCLI      = 746,      // IP cam / 폰 연결 > 다른 PC(클라이언트)
         CMD_TFMT        = 700,      // 시분초 표시 형식 700~709
         CMD_DFMT        = 720,      // 년월일 표시 형식 720~729
         FMT_COUNT       = 10,
@@ -4601,7 +10756,7 @@ private:
         CMD_CITY        = 300,      // 300 + 도시 인덱스
         CMD_MOVE        = 400,      // 400 + 이동 간격 선택지 인덱스
         CMD_PROG        = 610,      // 610 사용, 611 시각, 612 파일, 613 메모, 614 지우기, 615 테스트
-        CMD_REBOOT      = 600,      // 600 사용, 601 시각 (CMD_ALARM + 10*ALARM_ACTS 이후)
+        CMD_REBOOT      = 600,      // 시스템 재시작 시각 (대화상자: 시각 + 사용)
         CMD_HOMEPROG    = 660,      // 660~679: HomeBack 프로그램(660+동작) / NotHome 프로그램(670+동작). 동작 0 사용, 2 파일, 3 메모, 4 지우기, 5 테스트
         CMD_SCANSCHED   = 640,      // 640~659: ScanOn(640+동작) / ScanOff(650+동작) 예약
         CMD_ALARM       = 500,      // 500 + 알람번호(0~9)*ALARM_ACTS + 동작
@@ -4801,9 +10956,10 @@ private:
         InvalidateRect(hwnd_, NULL, FALSE);
     }
 
-    // 작업 스레드에서 온 알림: 상태줄 문구 갱신 / trigger.txt 갱신 팝업 (5초)
+    // 작업 스레드에서 온 알림: 상태줄 문구 갱신 / 명령 전달 팝업 (5초) / 앱 종료 요청
     void OnScanEvents() {
         for (const ScanEvents::Item& it : ScanEvents::Take()) {
+            if (it.kind == 4) { Log::Put("텔레그램 명령으로 앱 종료"); RequestExit(); return; }   // /stop, /restart (텔레그램에서 이미 Yes 확인함)
             if (it.kind == 1) MemoWindow::Show(hi_, it.text.c_str(), 5);
             else if (it.kind >= 2) RunHomeProg(it.kind - 2);
             else statusText_ = it.text;
@@ -4895,7 +11051,7 @@ private:
     }
 
     void OnDestroy() {
-        if (!owner_ && cam_) { delete cam_; cam_ = NULL; }      // 앱 종료: IP cam 영상 창/스레드 정리
+        if (!owner_) { for (ipcam::Session* c : cams_) delete c; cams_.clear(); }      // 앱 종료: 카메라 영상 창/스레드 모두 정리
         KillTimer(hwnd_, TID_SECOND);
         KillTimer(hwnd_, TID_MOVE);
         KillTimer(hwnd_, TID_SCROLL_TIME);
@@ -5049,10 +11205,7 @@ private:
         menuAlarm_ = CreatePopupMenu();         // 알람1 ~ 알람10 (각각 사용/시각/파일/지우기 서브메뉴)
         for (int i = 0; i < ALARM_COUNT; i++) MakeAlarmSub(i);
         AppendMenuA(menuAlarm_, MF_SEPARATOR, 0, NULL);
-        menuReboot_ = CreatePopupMenu();        // 시스템 재시작 시각 (알람 10개 + 구분선 다음, 위치 ALARM_COUNT+1)
-        AddMenu(menuReboot_, 0, CMD_REBOOT,     "사용(&E)");
-        AddMenu(menuReboot_, 0, CMD_REBOOT + 1, "시각 설정(&T)...");
-        AppendMenuA(menuAlarm_, MF_POPUP | MF_STRING, (UINT_PTR)menuReboot_, "-");
+        AppendMenuA(menuAlarm_, MF_STRING, CMD_REBOOT, "-");     // 시스템 재시작 시각 (알람 10개 + 구분선 다음, 위치 ALARM_COUNT+1). 누르면 시각/사용 대화상자
         UpdateRebootMenu();
         menuProg_ = CreatePopupMenu();          // 프로그램 실행 (위치 ALARM_COUNT+2)
         AddMenu(menuProg_, 0, CMD_PROG,     "사용(&E)");
@@ -5075,10 +11228,13 @@ private:
         MakeHomeProgMenu(1);
         AddMenu(bar, MF_POPUP, (UINT_PTR)menuScan_, "F7) WiFiScan(&W)");
 
-        HMENU ipc = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기
+        HMENU ipc = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기 / 다른 PC(서버) / 다른 PC(클라이언트)
         AddMenu(ipc, 0, CMD_IPREG,  "IP cam 등록(&R)...");
-        AddMenu(ipc, 0, CMD_IPVIEW, "IP cam 영상(&V)");
+        AddMenu(ipc, 0, CMD_IPVIEW, "카메라 영상(&V)");
         AddMenu(ipc, 0, CMD_PHONE,  "폰 탐색기(&E)...");
+        AppendMenuA(ipc, MF_SEPARATOR, 0, NULL);
+        AddMenu(ipc, 0, CMD_RDPSRV, "다른 PC(서버)(&S)...");           // 이 PC 를 원격 제어하게 함 (rdp_server)
+        AddMenu(ipc, 0, CMD_RDPCLI, "다른 PC(클라이언트)(&C)...");     // 다른 PC 를 원격 제어 (rdp_client)
         AddMenu(bar, MF_POPUP, (UINT_PTR)ipc, "F8) IP cam / 폰 연결(&I)");
 
         HMENU help = CreatePopupMenu();         // Help
@@ -5128,7 +11284,7 @@ private:
         CheckMenuItem(menuHomeProg_[i], HomeProgId(i, 3), MF_BYCOMMAND | (h.memo[0] ? MF_CHECKED : MF_UNCHECKED));
     }
 
-    // trigger.txt 에 /HomeBack (i=0) 또는 /NotHome (i=1) 을 쓸 때 호출
+    // /HomeBack (i=0) 또는 /NotHome (i=1) 판정이 날 때 호출
     void RunHomeProg(int i) {
         const Settings::HomeProg& h = cfg_.homeProg[i];
         if (!h.on || (!h.file[0] && !h.memo[0])) return;
@@ -5252,22 +11408,18 @@ private:
         wsprintfA(s, "시스템 재시작 시각   %02d:%02d:%02d", cfg_.rbH, cfg_.rbM, cfg_.rbS);
         char16_t u[96];
         Utf8::ToUtf16(s, -1, u, 96);
-        ModifyMenuW(menuAlarm_, ALARM_COUNT + 1, MF_BYPOSITION | MF_POPUP | MF_STRING,
-                    (UINT_PTR)menuReboot_, (LPCWSTR)u);
-        UINT chk = cfg_.rbOn ? MF_CHECKED : MF_UNCHECKED;
-        CheckMenuItem(menuAlarm_, ALARM_COUNT + 1, MF_BYPOSITION | chk);
-        CheckMenuItem(menuReboot_, CMD_REBOOT, MF_BYCOMMAND | chk);
+        ModifyMenuW(menuAlarm_, ALARM_COUNT + 1, MF_BYPOSITION | MF_STRING | (cfg_.rbOn ? MF_CHECKED : MF_UNCHECKED),
+                    CMD_REBOOT, (LPCWSTR)u);                     // '사용' 이면 메뉴 이름 앞에 체크 표시
     }
 
-    void RebootCommand(int act) {
-        if (act == 0) {
-            cfg_.rbOn = !cfg_.rbOn;
-        } else {
-            modal_ = true;
-            bool ok = TimeDialog::Show(hi_, hwnd_, "시스템 재시작 시각 (시:분:초)", cfg_.rbH, cfg_.rbM, cfg_.rbS);
-            modal_ = false;
-            if (!ok) return;
-        }
+    // 시스템 재시작 시각 메뉴: 시각 + '사용' 체크박스를 한 대화상자에서 설정
+    void RebootCommand() {
+        modal_ = true;
+        bool use = cfg_.rbOn;
+        bool ok = TimeDialog::Show(hi_, hwnd_, "시스템 재시작 시각 (시:분:초)", cfg_.rbH, cfg_.rbM, cfg_.rbS, &use);
+        modal_ = false;
+        if (!ok) return;
+        cfg_.rbOn = use;
         rbFiredYmd_ = 0;
         cfg_.SaveReboot();
         UpdateRebootMenu();
@@ -5748,8 +11900,10 @@ private:
         case CMD_SCAN:      n = "WiFiScan 대화상자"; break;
         case CMD_MYPHONE:   n = "앱 동작 설정 > 내 폰 등록"; break;
         case CMD_IPREG:     n = "IP cam > IP cam 등록"; break;
-        case CMD_IPVIEW:    n = "IP cam > IP cam 영상"; break;
+        case CMD_IPVIEW:    n = "IP cam / 폰 연결 > 카메라 영상"; break;
         case CMD_PHONE:     n = "IP cam / 폰 연결 > 폰 탐색기"; break;
+        case CMD_RDPSRV:    n = "IP cam / 폰 연결 > 다른 PC(서버)"; break;
+        case CMD_RDPCLI:    n = "IP cam / 폰 연결 > 다른 PC(클라이언트)"; break;
         case CMD_SHOWDATE:  n = "년월일 보이기/숨기기 토글"; break;
         case CMD_SHOWLUNAR: n = "음력 보이기/숨기기 토글"; break;
         case CMD_RESET:     n = "설정 초기화"; break;
@@ -5781,8 +11935,8 @@ private:
         else if (id >= CMD_PROG && id <= CMD_PROG + 5) {
             static const char* const A[] = {"사용 토글", "시각 설정", "파일 선택", "메모 설정", "알람 지우기", "알람 테스트"};
             Log::Put("메뉴: 알람 / 다른 앱 호출 > %s", A[id - CMD_PROG]);
-        } else if (id == CMD_REBOOT || id == CMD_REBOOT + 1)
-            Log::Put("메뉴: 시스템 재시작 시각 > %s", id == CMD_REBOOT ? "사용 토글" : "시각 설정");
+        } else if (id == CMD_REBOOT)
+            Log::Put("메뉴: 시스템 재시작 시각 (시각 설정 + 사용)");
         else if (id >= CMD_HOMEPROG && id < CMD_HOMEPROG + 20) {
             static const char* const A[6] = {"사용 토글", "", "파일 선택", "메모 설정", "지우기", "테스트"};
             Log::Put("메뉴: %s > %s", HomeProgTitle((id - CMD_HOMEPROG) / 10), A[id % 10 < 6 ? id % 10 : 1]);
@@ -5804,6 +11958,8 @@ private:
         else if (id == CMD_IPREG)      IpCamRegister();
         else if (id == CMD_IPVIEW)     IpCamView();
         else if (id == CMD_PHONE)      PhoneExplorer();
+        else if (id == CMD_RDPSRV)     RdpServerCommand();
+        else if (id == CMD_RDPCLI)     RdpClientCommand();
         else if (id >= CMD_HELP && id <= CMD_HELP + 4) HelpCommand(id - CMD_HELP);
         else if (id == CMD_SHOWLUNAR) {
             if (!cfg_.LunarReady()) return;
@@ -5888,8 +12044,8 @@ private:
         }
         else if (id >= CMD_PROG && id <= CMD_PROG + 5)
             ProgCommand(id - CMD_PROG);
-        else if (id == CMD_REBOOT || id == CMD_REBOOT + 1)
-            RebootCommand(id - CMD_REBOOT);
+        else if (id == CMD_REBOOT)
+            RebootCommand();
         else if (DecodeAlarm(id, ai, aact))
             AlarmCommand(ai, aact);
         else if (id >= CMD_HOMEPROG && id < CMD_HOMEPROG + 20 && id % 10 != 1 && id % 10 < 6)
@@ -6555,7 +12711,7 @@ private:
     }
 
     // ---- WiFiScan 메뉴: 대화상자 (모달. 열려 있는 동안 창 자동 이동만 멈추고 scan 은 계속 동작)
-    // ---- IP cam 메뉴: 등록(대화상자 -> ini) / 영상(별도 창, 앱은 계속 실행)
+    // ---- IP cam 메뉴: 등록(대화상자 -> ini) / 카메라 영상(별도 창에서 WebCam1 / WebCam2 / IP Cam 선택 후 [실행], 앱은 계속 실행)
     bool IpCamRegister() {
         char h[64];
         lstrcpynA(h, cfg_.ipHost, sizeof(h));
@@ -6568,6 +12724,7 @@ private:
         cfg_.ipPort = port;
         cfg_.SaveIpCam();
         Log::Put("IP cam 등록: %s:%d", cfg_.ipHost, cfg_.ipPort);
+        for (ipcam::Session* c : cams_) c->SetIp(cfg_.ipHost, std::to_string(cfg_.ipPort));      // 열려 있는 카메라 영상 창들에도 반영 (다음 [실행] 부터)
         return true;
     }
 
@@ -6613,36 +12770,37 @@ private:
         Log::Put("폰 탐색기 실행: ftp://%s%s%s:%d (결과코드 %d)", user, user[0] ? "@" : "", host, port, (int)(INT_PTR)r);   // 비밀번호는 기록하지 않음
     }
 
-    void IpCamView() {
+    void IpCamView() {                           // 누를 때마다 새 영상 창 (웹캠 / IP cam 을 각각 다른 창에서 동시에 실행 가능)
         if (owner_) return;
-        if (cam_) {                              // 이미 열려 있으면 앞으로
-            HWND w = cam_->Hwnd();
-            if (w && IsWindow(w)) { ShowWindow(w, SW_RESTORE); SetForegroundWindow(w); return; }
-            delete cam_;
-            cam_ = NULL;
-        }
-        if (!cfg_.ipHost[0]) {                   // 등록된 주소가 없으면 먼저 등록
-            char16_t m[160], t[32];
-            Utf8::ToUtf16("먼저 IP cam 의 IP address 와 port 번호를 등록하세요.", -1, m, 160);
-            Utf8::ToUtf16("IP cam", -1, t, 32);
-            modal_ = true;
-            MessageBoxW(hwnd_, (LPCWSTR)m, (LPCWSTR)t, MB_OK | MB_ICONINFORMATION);
-            modal_ = false;
-            if (!IpCamRegister()) return;
-        }
-        Log::Put("IP cam 영상 열기: %s:%d", cfg_.ipHost, cfg_.ipPort);
+        Log::Put("카메라 영상 열기 (IP cam 등록값: %s:%d, 열린 창 %d개)", cfg_.ipHost, cfg_.ipPort, (int)cams_.size());      // IP cam 이 미등록이어도 창은 열림 (웹캠만 쓸 수 있음)
         ipcam::Session* s = new ipcam::Session(hi_, hwnd_, cfg_.ipHost, std::to_string(cfg_.ipPort));
         if (!s->Open()) { delete s; return; }
-        cam_ = s;
+        cams_.push_back(s);
     }
 
-    void IpCamClosed() {                         // 영상 창이 닫힘: 수신 스레드 정지 + 정리 (ipcam.log 도 여기서 닫힘)
-        if (!cam_) return;
-        HWND w = cam_->Hwnd();
-        if (w && IsWindow(w)) return;            // 이미 새 창이 열려 있음
-        Log::Put("IP cam 영상 닫힘");
-        delete cam_;
-        cam_ = NULL;
+    void IpCamClosed() {                         // 영상 창이 닫힘: 창이 없어진 세션의 수신 스레드 정지 + 정리 (마지막 창이 닫히면 ipcam.log 도 닫힘)
+        for (size_t i = cams_.size(); i-- > 0; ) {
+            HWND w = cams_[i]->Hwnd();
+            if (w && IsWindow(w)) continue;
+            Log::Put("카메라 영상 닫힘");
+            delete cams_[i];
+            cams_.erase(cams_.begin() + i);
+        }
+    }
+
+    // ---- 다른 PC(서버 / 클라이언트): 대화상자 (서버는 전용 스레드라 대화상자를 닫아도 계속 동작, 클라이언트는 [연결] 후 자기 창에서 동작)
+    void RdpServerCommand() {
+        if (owner_) return;
+        modal_ = true;
+        RdpServerDialog::Show(hi_, hwnd_, cfg_);
+        modal_ = false;
+    }
+
+    void RdpClientCommand() {
+        if (owner_) return;
+        modal_ = true;
+        RdpClientDialog::Show(hi_, hwnd_, cfg_);
+        modal_ = false;
     }
 
     void ScanCommand(bool myPhone = false) {
@@ -7093,7 +13251,6 @@ private:
     HMENU        menuAlarm_    = NULL;
     HMENU        menuScan_     = NULL;
     HMENU        menuBack_     = NULL;
-    HMENU        menuReboot_   = NULL;
     HMENU        menuProg_     = NULL;
     int          pgFiredYmd_   = 0;     // 프로그램 실행을 마지막으로 한 날짜
     int          rbFiredYmd_   = 0;     // 시스템 재시작을 마지막으로 실행한 날짜
@@ -7111,7 +13268,7 @@ private:
     POINT        preFull_      = {0, 0};  // 전체화면 켜기 직전의 창 위치
     bool         modal_        = false; // 메뉴/대화상자 사용 중 (자동 이동 일시 정지)
     ScanEngine*  scan_         = NULL;  // 본 창: scan 엔진 (WinMain 소유)
-    ipcam::Session* cam_       = NULL;  // 본 창: 열려 있는 IP cam 영상 세션
+    std::vector<ipcam::Session*> cams_;  // 본 창: 열려 있는 카메라 영상 세션들 (메뉴를 누를 때마다 새 창, 중복 실행 가능)
     std::string  statusText_;           // 본 창: 맨 아래 상태줄 문구 (scan On/Off 등)
     HFONT        statusFont_   = NULL;
     ClockWindow* head_         = NULL;  // 본 창: 도시 창 목록
@@ -7157,6 +13314,32 @@ static void RunBootingAlert() {
     Log::Put("booting_alert: .\\booting_alert\\booting_Alert_RUN.BAT 실행 %s (결과코드 %d)", (INT_PTR)r > 32 ? "성공" : "실패", (int)(INT_PTR)r);
 }
 
+// 텔레그램 /restart: 같은 exe 를 같은 인자로 다시 실행한다. 호출하기 전에 SingleInstance 뮤텍스를 풀어 두어야
+// 새 프로세스가 "이미 실행 중" 으로 취급되어 (자기 자신 대신) 이 프로세스를 강제 종료하는 일이 없다.
+static void RestartSelf() {
+    wchar_t exe[MAX_PATH * 2] = {0};
+    GetModuleFileNameW(NULL, exe, MAX_PATH * 2);
+    std::wstring cmdLine = L"\"" + std::wstring(exe) + L"\"";
+    const wchar_t* args = GetCommandLineW();                  // 원래 인자를 유지 (첫 토큰은 exe 경로)
+    if (args) {
+        if (*args == L'"') { ++args; while (*args && *args != L'"') ++args; if (*args) ++args; }
+        else while (*args && *args != L' ') ++args;
+        cmdLine += args;
+    }
+    std::wstring dir = exe;
+    dir.resize(dir.find_last_of(L"\\/") + 1);
+    STARTUPINFOW si = {};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi = {};
+    if (CreateProcessW(exe, &cmdLine[0], NULL, NULL, FALSE, 0, NULL, dir.c_str(), &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Log::Put("재시작: 새 프로세스를 실행했습니다 (pid=%d)", (int)pi.dwProcessId);
+    } else {
+        Log::Put("재시작 실패: CreateProcess 오류 %d", (int)GetLastError());
+    }
+}
+
 // ini [Option] companion_app1~5 가 있으면 각각: cmd /c start "" "<경로>" 로 실행 (작업 폴더는 그 파일이 있는 폴더, cmd 창은 숨김)
 static void RunCompanionApp(const char* utf8Path, bool asInvoker) {
     if (!utf8Path[0]) return;
@@ -7178,6 +13361,7 @@ static void RunCompanionApp(const char* utf8Path, bool asInvoker) {
 
 int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
     Log::Init();
+    tg::InstallCrashHandlers();                 // 처리되지 않은 예외는 원인을 log.txt 에 남기고 종료
     SingleInstance guard("gsHomeManager_SingleInstance");   // 중복 실행 방지
     if (!guard.IsFirst()) {                     // 이미 실행 중이면 기존 앱을 종료시키고 이 프로세스가 대신 실행
         Log::Put("기존 실행 중인 앱 감지: 기존 프로세스를 종료하고 새로 시작");
@@ -7208,12 +13392,25 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
     }
     scan.Start("프로그램 시작");                               // 시작할 때 자동으로 scan On
     Log::Put("WiFiScan: 시작할 때 자동으로 scan On");
+    tg::Start();                                // Telegram 모듈 (전용 스레드). ini [Telegram] 에 토큰/chat id 가 없으면 스스로 사용 안 함
+    Log::Put("Telegram 모듈 시작 (ini [Telegram], 로그 log.txt)");
+    if (cfg.rsAuto) {                           // ini [RdpServer] autostart=1: 다른 PC(서버) 자동 시작
+        std::string err;
+        if (!rdp::Server::Get().Start(RdpServerCfg(cfg), err)) Log::Put("원격 서버 자동 시작 실패: %s", err.c_str());
+    }
     if (cfg.trayStart) MemoWindow::Show(hi, "gsHomeManager 를 트레이로 보냅니다", 5);     // ini tray_start=TRUE: 트레이로 시작 안내 (5초)
     for (int i = 0; i < Settings::COMPANION_MAX; i++) RunCompanionApp(cfg.companionApp[i], cfg.companionInvoker);   // ini companion_app1~5: 동반 실행 앱 (start "" 경로)
     if (cfg.bootingAlert) RunBootingAlert();    // ini booting_alert=TRUE: 시작 알림 BAT 실행
     int rc = win.Run();
+    rdp::Client::Shutdown();                    // 원격 제어 창/연결 정리
+    rdp::Server::Get().Stop();                  // 원격 서버 중지
+    tg::RequestStop();                          // Telegram 모듈에 종료 요청 (바로 반환)
     bool clean = scan.Shutdown();               // scan 작업을 취소하고 최대 2초 기다림
-    Log::Put("===== 앱 종료%s", clean ? "" : " (scan 작업이 아직 끝나지 않아 바로 종료)");
+    const bool restart = tg::RestartRequested();   // 텔레그램 /restart: 종료한 뒤 같은 exe 를 다시 실행
+    // 명령 수신(롱폴링) 중이면 최대 10초쯤 걸린다. 일반 종료는 3초만 기다리고, 재시작은 새 프로세스와 겹치지 않게 충분히 기다린다.
+    if (!tg::WaitStopped(restart ? 12000 : 3000)) clean = false;
+    Log::Put("===== 앱 종료%s", clean ? "" : " (scan / Telegram 작업이 아직 끝나지 않아 바로 종료)");
+    if (restart) { guard.Release(); RestartSelf(); }
     if (!clean) ExitProcess((UINT)rc);          // 도는 스레드가 남아 있으면 정리 없이 종료 (결과 파일은 임시 파일 교체 방식이라 안전)
     return rc;
 }
