@@ -492,6 +492,7 @@ public:
     char     homeIp[24]   = "";         // HomeIp: 폰 고정 IP (선택)
     int      scanSec      = 15;         // WiFiScanWatchInterval: scan(감시) 주기 (초, 최소 5)
     int      notHomeSec   = 60;         // NotHome: 외출 판정 (초)
+    int      notHomeFails = 3;          // NotHomeFails: 외출 판정에 필요한 연속 미확인 횟수 (0 이면 3)
 
     void Init() {
         InitPath();
@@ -774,6 +775,7 @@ public:
         WritePrivateProfileStringA("WiFiScan", "HomeIp", homeIp, ini_);
         WriteInt("WiFiScan", "WiFiScanWatchInterval", scanSec);
         WriteInt("WiFiScan", "NotHome", notHomeSec);
+        WriteInt("WiFiScan", "NotHomeFails", notHomeFails);
     }
 
 private:
@@ -909,6 +911,8 @@ private:
             "WiFiScanWatchInterval=15\r\n"
             "; 외출 판정 시간 (초): 블루투스, Wi-Fi 둘 다 이 시간 동안 연속으로 확인되지 않으면 /NotHome (0 이면 60)\r\n"
             "NotHome=60\r\n"
+            "; 외출 판정에 필요한 연속 미확인 횟수: 감시 주기마다 블루투스, Wi-Fi 둘 다 확인되지 않은 횟수가 이 값 이상이고 위 외출 판정 시간도 지나야 /NotHome (0 이면 3)\r\n"
+            "NotHomeFails=3\r\n"
             "; --- scan 예약 (메뉴 WiFiScan > Wifi공유기 자동감시 On / Off). 아래 키가 없으면 scan 에 아무 영향이 없습니다. 매일 반복됩니다.\r\n"
             "; ScanOnUse / ScanOffUse = 1(사용), 0(해제).  ScanOnTime / ScanOffTime = HH:MM:SS (24시간제, 이 PC 시각)\r\n"
             "; ScanOnFile / ScanOffFile = 그 시각에 시스템 기본 플레이어로 재생할 동영상/음악 파일 경로,  ScanOnMemo / ScanOffMemo = 모니터 중앙에 30초 표시할 메모\r\n"
@@ -1136,6 +1140,7 @@ private:
         ReadStr("WiFiScan", "HomeIp", homeIp, sizeof(homeIp));
         scanSec    = ReadSec("WiFiScan", "WiFiScanWatchInterval", scanSec, 5);
         notHomeSec = ReadSec("WiFiScan", "NotHome", notHomeSec, 1);
+        notHomeFails = ReadSec("WiFiScan", "NotHomeFails", notHomeFails, 1);
         LoadRdp();
     }
 
@@ -2838,6 +2843,7 @@ public:
     static std::string logFile()    { return dir() + "WiFiScan_watch.log"; }
     static std::string resultFile() { return dir() + "WiFiScan_result.txt"; }
     static std::string ouiFile()    { return dir() + "oui.txt"; }
+    static std::string homeStateFile() { return dir() + "home.state"; }      // 마지막 집 안팎 상태 (HOME / AWAY)
 };
 
 // ======================================================================
@@ -3542,6 +3548,7 @@ struct ScanCfg {
     bool bt = true, wifi = true;                              // scan 대상 (체크박스)
     std::string btMac, mac, ip;                               // 폰 블루투스 주소 / 폰 Wi-Fi(LAN 카드) MAC / 폰 고정 IP (선택)
     int interval = 15, awaySec = 60;                          // 감시 주기(초), 외출 판정(초)
+    int failN = 3;                                            // 외출 판정에 필요한 연속 미확인 횟수 (NotHomeFails)
 };
 
 class ScanCfgBox {
@@ -3566,15 +3573,16 @@ public:
 
     // 취소될 때까지 감시한다 (scan Off / 재시작 / 앱 종료 때 끝남)
     void run() {
+        startTime_ = time(0);
         apply(cfg_.get());
         Logger::log("설정: gsHomeManager.ini [WiFiScan] / /HomeBack, /NotHome 은 같은 프로세스의 Telegram 모듈로 전달");
         Logger::log("감시 시작: 블루투스 " + (haveBt() ? btMac_ : std::string("(없음)")) + " -> Wi-Fi " + (haveWifi() ? mac_ : std::string("(없음)")) +
-                    " (간격 " + std::to_string(interval_) + "초, 외출 판정 " + std::to_string(awaySec_) + "초)");
+                    " (간격 " + std::to_string(interval_) + "초, 외출 판정 " + std::to_string(awaySec_) + "초, 연속 미확인 " + std::to_string(failN_) + "회)");
         for (;;) try {
             if (cancel_()) return;
             if (apply(cfg_.get()))
                 Logger::log("설정 변경: 블루투스 " + (haveBt() ? btMac_ : std::string("(없음)")) + " / Wi-Fi " + (haveWifi() ? mac_ : std::string("(없음)")) +
-                            " (간격 " + std::to_string(interval_) + "초, 외출 판정 " + std::to_string(awaySec_) + "초)");
+                            " (간격 " + std::to_string(interval_) + "초, 외출 판정 " + std::to_string(awaySec_) + "초, 연속 미확인 " + std::to_string(failN_) + "회)");
             if (!haveBt() && !haveWifi()) {            // 확인할 대상이 없어도 멈추지 않고, 설정이 저장되면 자동으로 시작
                 if (!warned_) { Logger::log("HomeBluetooth 와 HomeMac 이 없거나 스캔 대상이 아닙니다. 설정을 기다리는 중"); warned_ = true; }
                 view_.setPhase("감시 대기 중: 블루투스 / LAN 카드 MAC 주소를 입력하고 저장하세요");
@@ -3584,6 +3592,8 @@ public:
             warned_ = false;
             if (state_ == -1) view_.setPhase("감시 중 - 블루투스 / Wi-Fi 확인 중...");
             std::string via;
+            bt_ = Chk{false, false, "확인 안 함"};
+            wf_ = Chk{false, false, "블루투스 응답으로 확인 생략"};
             const bool present = checkBluetooth(via) || checkWifi(via);   // 1) 블루투스 우선  2) 확인되지 않으면 Wi-Fi
             if (cancel_()) return;
             update(present, via);
@@ -3595,6 +3605,7 @@ public:
     }
 
 private:
+    struct Chk { bool used; bool ok; std::string info; };     // 한 주기의 확인 결과 (used: 확인 수단으로 쓰였는가)
     // interval 초 동안 쉬면서 취소를 본다. 멈춰야 하면 true
     bool sleepOrStop(int seconds) {
         for (int i = 0; i < seconds * 10; i++) {
@@ -3611,9 +3622,10 @@ private:
         if (!StrUtil::parseIp(c.ip, ip)) ip = 0;                                       // 선택: 폰 고정 IP
         const int iv = c.interval > 0 ? std::max(5, c.interval) : 15;
         const int as = c.awaySec > 0 ? c.awaySec : 60;
-        const bool changed = bm != btMac_ || m != mac_ || ip != homeIp_ || c.bt != useBt_ || c.wifi != useWifi_ || iv != interval_ || as != awaySec_;
+        const int fn = c.failN > 0 ? c.failN : 3;
+        const bool changed = bm != btMac_ || m != mac_ || ip != homeIp_ || c.bt != useBt_ || c.wifi != useWifi_ || iv != interval_ || as != awaySec_ || fn != failN_;
         if (!changed) return false;
-        btMac_ = bm; mac_ = m; homeIp_ = ip; useBt_ = c.bt; useWifi_ = c.wifi; interval_ = iv; awaySec_ = as;
+        btMac_ = bm; mac_ = m; homeIp_ = ip; useBt_ = c.bt; useWifi_ = c.wifi; interval_ = iv; awaySec_ = as; failN_ = fn;
         btAddr_ = btMac_.empty() ? 0 : Bluetooth::addrOf(btMac_);
         ip_ = 0; lastBtInfo_.clear(); lastWifiInfo_.clear();
         return true;
@@ -3622,49 +3634,140 @@ private:
     bool haveWifi() const { return useWifi_ && !mac_.empty(); }
 
     bool checkBluetooth(std::string& via) {
-        if (!haveBt()) return false;
+        if (!haveBt()) {
+            bt_ = Chk{false, false, useBt_ ? "블루투스 MAC 미지정" : "블루투스 scan 대상 아님(체크 해제)"};
+            return false;
+        }
         std::string info;
         const bool ok = Bluetooth::present(btAddr_, info, cancel_);
+        bt_ = Chk{true, ok, info};
         if (ok) via = "Bluetooth";
         if (info != lastBtInfo_) { Logger::log("Bluetooth: " + info); lastBtInfo_ = info; }
         return ok;
     }
 
     bool checkWifi(std::string& via) {
-        if (!haveWifi()) return false;
+        if (!haveWifi()) {
+            wf_ = Chk{false, false, useWifi_ ? "LAN 카드 MAC 미지정" : "Wi-Fi scan 대상 아님(체크 해제)"};
+            return false;
+        }
         if (!sn_.valid() && sn_.detect())     // 시작할 때 네트워크가 없었다면 다시 찾는다
             Logger::log("네트워크 어댑터 감지: Wi-Fi 확인 시작 (" + sn_.range() + ")");
-        if (!sn_.valid()) return false;
+        if (!sn_.valid()) {
+            wf_ = Chk{true, false, "PC 의 네트워크 어댑터/IP 범위를 찾지 못함 (PC 의 LAN/Wi-Fi 연결 끊김?)"};
+            return false;
+        }
         bool ok = false;
-        if (homeIp_ && Arp::check(homeIp_, mac_)) { ip_ = homeIp_; ok = true; }
-        if (!ok && ip_ && ip_ != homeIp_) ok = Arp::check(ip_, mac_);
-        if (!ok) { ip_ = Arp::find(sn_, mac_, cancel_); ok = (ip_ != 0); }
+        std::string tried;                         // 무응답일 때 어디까지 확인했는지
+        if (homeIp_) {
+            if (Arp::check(homeIp_, mac_)) { ip_ = homeIp_; ok = true; }
+            else tried += "고정 IP " + StrUtil::ipStr(homeIp_) + " ARP/ping 무응답, ";
+        }
+        if (!ok && ip_ && ip_ != homeIp_) {
+            ok = Arp::check(ip_, mac_);
+            if (!ok) tried += "이전 IP " + StrUtil::ipStr(ip_) + " 무응답, ";
+        }
+        if (!ok) {
+            ip_ = Arp::find(sn_, mac_, cancel_); ok = (ip_ != 0);
+            if (!ok) tried += "범위 " + sn_.range() + " 전체 ARP 검색에서 해당 MAC 없음";
+        }
         if (ok) via = "Wi-Fi " + StrUtil::ipStr(ip_);
         const std::string wi = ok ? "확인됨 (" + StrUtil::ipStr(ip_) + ")"
-                                  : "응답 없음 (HomeMac " + mac_ + ", 범위 " + sn_.range() + ")";
+                                  : "응답 없음 (HomeMac " + mac_ + ": " + tried + ")";
+        wf_ = Chk{true, ok, wi};
         if (wi != lastWifiInfo_) { Logger::log("Wi-Fi: " + wi); lastWifiInfo_ = wi; }
         return ok;
     }
 
-    // 상태 판정: -1 미정 -> 알림, 0(AWAY) -> 1(HOME) 이면 /HomeBack, 1 -> 0 은 awaySec_ 초 연속 미확인일 때 /NotHome
+    // ---- 사유 기록 (/HomeBack, /NotHome 판정 때 WiFiScan_watch.log 에 남김)
+    static std::string hms(time_t t) {
+        if (!t) return "-";
+        struct tm tmv; localtime_s(&tmv, &t);
+        char s[16]; strftime(s, sizeof s, "%H:%M:%S", &tmv);
+        return s;
+    }
+    static std::string dur(long long sec) {
+        if (sec < 0) sec = 0;
+        if (sec < 60) return std::to_string(sec) + "초";
+        if (sec < 3600) return std::to_string(sec / 60) + "분 " + std::to_string(sec % 60) + "초";
+        return std::to_string(sec / 3600) + "시간 " + std::to_string(sec % 3600 / 60) + "분 " + std::to_string(sec % 60) + "초";
+    }
+    static std::string chkText(const char* name, const Chk& c) {
+        return std::string(name) + ": " + (c.used ? (c.ok ? "응답 - " : "무응답 - ") : "확인 안 함 - ") + c.info;
+    }
+    // 마지막 확인 결과로 만든 사유 (present: 집에서 확인됨)
+    std::string reason(bool present) const {
+        std::string head;
+        if (present) {
+            if (bt_.used && bt_.ok) head = "블루투스 응답";
+            else if (wf_.used && wf_.ok) head = bt_.used ? "블루투스 무응답이었으나 LAN 카드 응답" : "LAN 카드 응답";
+            else head = "확인됨";
+        } else {
+            const bool btFail = bt_.used && !bt_.ok, wfFail = wf_.used && !wf_.ok;
+            if (btFail && wfFail) head = "블루투스와 LAN 카드 둘 다 무응답";
+            else if (wfFail)      head = "LAN 카드 무응답 (블루투스는 확인 수단 아님)";
+            else if (btFail)      head = "블루투스 무응답 (LAN 카드는 확인 수단 아님)";
+            else                  head = "확인 수단 없음";
+        }
+        return head + " | " + chkText("블루투스", bt_) + " | " + chkText("LAN 카드", wf_);
+    }
+
+    // 마지막 집 안팎 상태 저장/읽기 (home.state): 앱을 다시 시작해도 같은 상태를 다시 알리지 않기 위함
+    static int loadSaved() {
+        std::ifstream f(AppDir::homeStateFile());
+        std::string s; f >> s;
+        return s == "HOME" ? 1 : s == "AWAY" ? 0 : -1;
+    }
+    static void saveState(int st) {
+        std::ofstream f(AppDir::homeStateFile(), std::ios::trunc);
+        f << (st ? "HOME" : "AWAY") << "\r\n";
+    }
+    // 판정 알림: 사유를 남기고 명령을 전달. 시작 직후의 첫 판정이 저장된 이전 상태와 같으면 명령은 다시 보내지 않는다.
+    void announce(int st, const std::string& text, bool initial) {
+        const int saved = loadSaved();
+        saveState(st);
+        Logger::log("[사유] " + text);
+        if (initial && saved == st) {
+            Logger::log(std::string("이전 저장 상태와 같음 (") + (st ? "HOME" : "AWAY") + "): 텔레그램 명령 전달 생략");
+            return;
+        }
+        trigger_.send(st ? "/HomeBack" : "/NotHome");
+    }
+
+    // 상태 판정: -1 미정, 1 HOME, 0 AWAY.
+    //   AWAY 판정(/NotHome): 연속 failN_ 회 미확인 그리고 awaySec_ 초 이상 미확인. 시작 직후의 첫 판정에도 같은 유예를 적용한다.
+    //   (한 번도 확인 못 했으면 감시 시작 시각부터 센다. 그 전에 확인되면 /HomeBack)
     void update(bool present, const std::string& via) {
         const time_t now = time(0);
-        if (present) lastSeen_ = now;
+        if (present) { lastSeen_ = now; lastVia_ = via; fails_ = 0; } else fails_++;
+        const time_t ref = lastSeen_ ? lastSeen_ : startTime_;
+        const long long miss = (long long)(now - ref);
+        const bool awayDue = !present && fails_ >= failN_ && miss >= awaySec_;
+        const std::string cond = "연속 " + std::to_string(fails_) + "회 / " + dur(miss) + " 미확인 (외출 판정: 연속 " + std::to_string(failN_) + "회, " + std::to_string(awaySec_) + "초)";
         if (state_ == -1) {
-            state_ = present ? 1 : 0;
-            Logger::log(std::string("초기 상태: ") + (present ? "HOME (" + via + ")" : "AWAY"));
-            trigger_.send(present ? "/HomeBack" : "/NotHome");     // 시작 시 현재 상태도 전송
+            if (present) {
+                state_ = 1;
+                Logger::log("초기 상태: HOME (" + via + ")");
+                announce(1, "/HomeBack - 감시 시작 시점에 집에서 확인됨: " + reason(true), true);
+            } else if (awayDue) {
+                state_ = 0; awaySince_ = now;
+                Logger::log("초기 상태: AWAY");
+                announce(0, "/NotHome - 감시 시작 후 " + cond + ": " + reason(false), true);
+            } else {
+                Logger::log("초기 상태 판정 보류 (바로 NotHome 으로 보지 않고 유예): " + cond + " - " + reason(false));
+            }
         } else if (state_ == 0 && present) {
             state_ = 1;
             Logger::log("HOME (" + via + ")");
-            trigger_.send("/HomeBack");
-        } else if (state_ == 1 && !present && now - lastSeen_ >= awaySec_) {
-            state_ = 0;
-            Logger::log("AWAY (" + std::to_string(awaySec_) + "초 연속 미확인: 블루투스, Wi-Fi)");
-            trigger_.send("/NotHome");
+            announce(1, "/HomeBack - 외출 상태에서 복귀 (NotHome 판정 후 " + dur((long long)(now - awaySince_)) + " 경과): " + reason(true), false);
+        } else if (state_ == 1 && awayDue) {
+            state_ = 0; awaySince_ = now;
+            Logger::log("AWAY (" + cond + ")");
+            announce(0, "/NotHome - 마지막 확인 " + hms(lastSeen_) + " (" + lastVia_ + "), " + cond + ": " + reason(false), false);
         }
-        if (state_ == 1) view_.setPhase("감시 중 - 집에 있음 (" + (present ? via : "미확인 " + std::to_string((long long)(now - lastSeen_)) + "초 / 외출 판정 " + std::to_string(awaySec_) + "초") + ")");
-        else             view_.setPhase("감시 중 - 외출 중 (집에서 확인되지 않음)");
+        if (state_ == 1) view_.setPhase("감시 중 - 집에 있음 (" + (present ? via : "미확인 " + std::to_string(fails_) + "회 / " + std::to_string((long long)(now - lastSeen_)) + "초 / 외출 판정 " + std::to_string(failN_) + "회, " + std::to_string(awaySec_) + "초") + ")");
+        else if (state_ == 0) view_.setPhase("감시 중 - 외출 중 (집에서 확인되지 않음)");
+        else view_.setPhase("감시 중 - 초기 상태 확인 중 (미확인 " + std::to_string(fails_) + "회)");
     }
 
     Subnet sn_;
@@ -3672,6 +3775,10 @@ private:
     ScanView& view_;
     const Cancel& cancel_;
     TriggerFile trigger_;
+    Chk bt_{false, false, ""}, wf_{false, false, ""};
+    std::string lastVia_;
+    time_t awaySince_ = 0, startTime_ = 0;
+    int failN_ = 3, fails_ = 0;                               // 외출 판정에 필요한 연속 미확인 횟수 / 현재 연속 미확인 횟수
     std::string mac_, btMac_, lastBtInfo_, lastWifiInfo_;
     ULONGLONG btAddr_ = 0;
     uint32_t homeIp_ = 0, ip_ = 0;
@@ -3692,7 +3799,7 @@ public:
         ScanCfg c;
         c.bt = s.scanBt; c.wifi = s.scanWifi;
         c.btMac = s.homeBt; c.mac = s.homeMac; c.ip = s.homeIp;
-        c.interval = s.scanSec; c.awaySec = s.notHomeSec;
+        c.interval = s.scanSec; c.awaySec = s.notHomeSec; c.failN = s.notHomeFails;
         return c;
     }
     void SetConfig(const ScanCfg& c) { cfg_.set(c); }          // 실행 중인 감시도 다음 확인부터 이 값을 쓴다
@@ -14433,6 +14540,7 @@ static void WriteVersionFile() {
     Log::Put("version.txt 생성: %s", APP_VERSION_STR);
 }
 
+/*  2026-11-15  17:35
 // ini [Option] booting_alert=TRUE 일 때: 앱 폴더의 booting_alert\booting_Alert_RUN.BAT 실행 (창 숨김, 작업 폴더는 그 BAT 가 있는 폴더)
 static void RunBootingAlert() {
     wchar_t dir[MAX_PATH], bat[MAX_PATH];
@@ -14449,6 +14557,7 @@ static void RunBootingAlert() {
     HINSTANCE r = ShellExecuteW(NULL, L"open", bat, NULL, dir, SW_HIDE);       // BAT 창 숨김
     Log::Put("booting_alert: .\\booting_alert\\booting_Alert_RUN.BAT 실행 %s (결과코드 %d)", (INT_PTR)r > 32 ? "성공" : "실패", (int)(INT_PTR)r);
 }
+*/  // 2026-11-15  17:35
 
 // 텔레그램 /restart: 같은 exe 를 같은 인자로 다시 실행한다. 호출하기 전에 SingleInstance 뮤텍스를 풀어 두어야
 // 새 프로세스가 "이미 실행 중" 으로 취급되어 (자기 자신 대신) 이 프로세스를 강제 종료하는 일이 없다.
@@ -14620,9 +14729,13 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
         if (!rdp::Server::Get().Start(RdpServerCfg(cfg), err)) Log::Put("원격 서버 자동 시작 실패: %s", err.c_str());
     }
     if (cfg.trayStart) MemoWindow::Show(hi, "gsHomeManager 를 트레이로 보냅니다", 5);     // ini tray_start=TRUE: 트레이로 시작 안내 (5초)
-    for (int i = 0; i < Settings::COMPANION_MAX; i++) RunCompanionApp(cfg.companionApp[i], cfg.companionInvoker);   // ini companion_app1~5: 동반 실행 앱 (start "" 경로)
+    for (int i = 0; i < Settings::COMPANION_MAX; i++) RunCompanionApp(cfg.companionApp[i], cfg.companionInvoker);   // ini companion_app1~5: 동반 실행 앱 start "" 경로)
+
+/*  2026-11-15  17:35		
     if (cfg.bootingAlert) RunBootingAlert();    // ini booting_alert=TRUE: 시작 알림 BAT 실행
-    int rc = win.Run();
+*/  // 2026-11-15  17:35		
+
+	int rc = win.Run();
     rdp::Client::Shutdown();                    // 원격 제어 창/연결 정리
     rdp::Server::Get().Stop();                  // 원격 서버 중지
     tg::RequestStop();                          // Telegram 모듈에 종료 요청 (바로 반환)

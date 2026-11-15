@@ -45,7 +45,7 @@ gsHomeManager.ini ............ 설정 (없으면 자동 생성. [Telegram] 섹�
 README.md .................... 이 안내문
 ```
 
-실행 중에 exe 폴더에 생기는 파일: `gsHomeManager.log`(시계/WiFiScan/IP cam), `log.txt`(Telegram 모듈), `WiFiScan_result.txt`, `WiFiScan_watch.log`, `oui.txt`, `ipcam.log`, `detect.state`, `pinned.id`, `image\`, `upload\`, `IPCam\`
+실행 중에 exe 폴더에 생기는 파일: `gsHomeManager.log`(시계/WiFiScan/IP cam), `log.txt`(Telegram 모듈), `WiFiScan_result.txt`, `WiFiScan_watch.log`, `home.state`, `oui.txt`, `ipcam.log`, `detect.state`, `pinned.id`, `image\`, `upload\`, `IPCam\`
 
 ## 빌드
 
@@ -157,7 +157,7 @@ WiFiScan 메뉴의 한 항목으로 열리는 하나의 대화상자입니다 (�
 
 - **HomeBack / NotHome 탐지 사용**: 끄면 시작할 때 scan 을 켜지 않고 개시/종료 시각도 무시합니다 (`ScanUse`, 기본 사용). 저장하면 바로 현재 상태에 맞게 scan 을 켜거나 끕니다.
 - **항상**: 켜면 프로그램을 시작할 때부터 계속 scan 합니다 (`ScanAlways`). 끄면 **개시 시각** 에 scan 을 켜고 **종료 시각** 에 끄며, 시작했을 때 이미 그 시간대 안이면 바로 켭니다. 종료가 개시보다 이르면 자정을 넘깁니다. 시각은 `[WiFiScan]` 의 `ScanOnTime` / `ScanOffTime` 에 저장되며 매일 반복됩니다.
-- **실행될 프로그램 지정**: HomeBack / NotHome 줄마다 `사용`(체크), 파일(`...` 로 BAT / CMD / EXE 선택), `테스트`(현재 입력값으로 1회 실행, 저장하지 않음), `삭제`(사용·파일·메모를 비움) 가 있고, `저장` 을 눌러야 반영됩니다. `/HomeBack` 또는 `/NotHome` 판정이 날 때마다 해당 프로그램을 실행하며, 앱이 시작될 때 현재 상태를 한 번 전달하므로 그때도 실행됩니다. 메모(`...ProgMemo`)가 ini 에 있으면 모니터 중앙에 30초 표시합니다 (이 대화상자에서는 바꾸지 않고 그대로 보존).
+- **실행될 프로그램 지정**: HomeBack / NotHome 줄마다 `사용`(체크), 파일(`...` 로 BAT / CMD / EXE 선택), `테스트`(현재 입력값으로 1회 실행, 저장하지 않음), `삭제`(사용·파일·메모를 비움) 가 있고, `저장` 을 눌러야 반영됩니다. `/HomeBack` 또는 `/NotHome` 판정이 날 때마다 해당 프로그램을 실행합니다. 앱이 시작될 때의 첫 판정은 마지막으로 저장된 상태(`home.state`)와 다를 때만 전달·실행합니다 (아래 WiFiScan > 판정 조건 참고). 메모(`...ProgMemo`)가 ini 에 있으면 모니터 중앙에 30초 표시합니다 (이 대화상자에서는 바꾸지 않고 그대로 보존).
 - 예전에 ini 의 `ScanOn*` / `ScanOff*` 에 설정해 둔 음악/동영상·메모·플레이어 자동 닫기 값은 지우지 않으며, 개시/종료 시각이 되면 예전처럼 실행됩니다 (이 대화상자에서는 바꿀 수 없고 ini 를 직접 고칩니다).
 - ini 에 `ScanOnTime` 이 이미 있던 사용자는 `ScanAlways` 가 꺼진 상태(예전 예약 유지)로, 없던 사용자는 켜진 상태(예전처럼 시작할 때 항상 scan)로 시작합니다.
 - ini 키: `[WiFiScan]` 의 `ScanUse`, `ScanAlways`, `ScanOnTime`, `ScanOffTime`, `HomeBackProgOn/File/Memo`, `NotHomeProgOn/File/Memo`.
@@ -183,6 +183,30 @@ WiFiScan 메뉴의 한 항목으로 열리는 하나의 대화상자입니다 (�
 - 생성 파일은 기존 WiFiScan 과 동일: `WiFiScan_result.txt`, `WiFiScan_watch.log`, `oui.txt`(제조사 조회)
 - 집에 있는지(HomeBack) / 없는지(NotHome) 판정은 `trigger.txt` 파일이 아니라 같은 프로세스의 Telegram 모듈로 직접 전달됩니다 (아래 Telegram 의 로컬 트리거). 예전의 `trigger.txt`, `wifiscanTriger.txt` 는 더 이상 쓰지 않습니다.
 - 기존 WiFiScan.exe 는 중복되므로 함께 실행하지 마세요.
+
+### 판정 조건 (집 안팎)
+
+- **확인 방법**: 감시 주기(`WiFiScanWatchInterval`)마다 블루투스를 먼저 확인하고, 확인되지 않으면 LAN 카드(Wi-Fi) 를 확인합니다. 둘 중 하나라도 확인되면 집에 있는 것으로 봅니다.
+- **`/NotHome`**: 둘 다 확인되지 않은 횟수가 연속 `NotHomeFails` 회 이상이고(기본 3), 미확인 시간도 `NotHome` 초 이상(기본 60)일 때만 판정합니다. 두 조건을 모두 채워야 하므로 일시적인 무응답(폰 절전 등)으로는 판정되지 않습니다. 한 번이라도 확인되면 횟수는 0 으로 돌아갑니다.
+- **시작 직후에도 같은 유예**: 앱/scan 을 (재)시작한 뒤 첫 확인이 실패해도 바로 `/NotHome` 으로 보지 않습니다. 같은 조건(연속 횟수 + 시간, 한 번도 확인 못 했으면 감시 시작 시각부터 계산)을 채울 때까지 `초기 상태 판정 보류` 로 기록하고, 그 전에 확인되면 `/HomeBack` 입니다.
+- **재시작해도 같은 상태는 다시 알리지 않음**: 마지막 판정 상태를 exe 폴더의 `home.state`(`HOME` / `AWAY`) 에 저장합니다. 시작 직후의 첫 판정이 저장된 상태와 같으면 로그에만 남기고 텔레그램 명령과 HomeBack / NotHome 프로그램은 실행하지 않습니다. 상태가 바뀐 판정, 또는 `home.state` 가 없을 때(처음 실행)는 전달합니다. 상태를 강제로 다시 알리고 싶으면 `home.state` 를 지우고 다시 시작하세요.
+- `NotHomeFails` 는 `[WiFiScan]` 에 있고 ini 를 직접 고칩니다 (0 이면 3, 이 값이 클수록 외출 판정이 늦고 오탐이 줄어듭니다). 실행 중에는 scan 재시작 때 반영됩니다.
+
+### 판정 사유 기록 (`WiFiScan_watch.log`)
+
+`/HomeBack`, `/NotHome` 판정이 날 때마다 `[사유]` 줄을 한 줄 남깁니다 (`텔레그램 모듈에 명령 전달` 줄 바로 앞). 판정 요약 | 블루투스 확인 결과 | LAN 카드 확인 결과 순서입니다.
+
+```
+AWAY (60초 연속 미확인)
+[사유] /NotHome - 마지막 확인 17:48:06 (Bluetooth), 60초 연속 미확인 (외출 판정 60초): 블루투스와 LAN 카드 둘 다 무응답 | 블루투스: 무응답 - 응답 없음 (8초 시간 초과) | LAN 카드: 무응답 - 응답 없음 (HomeMac F0-F5-64-13-CF-32: 범위 192.168.0.1 ~ 192.168.0.254 전체 ARP 검색에서 해당 MAC 없음)
+```
+
+- **`/NotHome` 요약**: `블루투스와 LAN 카드 둘 다 무응답` / `LAN 카드 무응답 (블루투스는 확인 수단 아님)` / `블루투스 무응답 (LAN 카드는 확인 수단 아님)`. 마지막 확인 시각과 방식, 연속 미확인 시간도 함께 남깁니다.
+- **`/HomeBack` 요약**: `블루투스 응답` / `블루투스 무응답이었으나 LAN 카드 응답` / `LAN 카드 응답`. 외출 상태에서 복귀한 경우 외출 경과 시간(`NotHome 판정 후 N분 M초 경과`)을 남깁니다. 앱을 시작할 때의 첫 판정은 `감시 시작 시점에 …` 로 구분됩니다.
+- **블루투스 상세**: 연결 상태 / 호출 응답 없음(8초 시간 초과, 오류 번호) / PC 에 페어링되어 있지 않음 / 어댑터 없음·꺼짐 / MAC 미지정 / scan 대상 아님(체크 해제)
+- **LAN 카드 상세**: 고정 IP ARP·ping 무응답 / 이전 IP 무응답 / 전체 범위 ARP 검색에서 해당 MAC 없음 / PC 의 네트워크 어댑터·IP 범위 없음(PC 의 LAN 끊김) / MAC 미지정 / scan 대상 아님(체크 해제)
+- 블루투스가 응답하면 LAN 카드는 확인하지 않으므로(블루투스 우선) 이때 LAN 카드 칸은 `확인 안 함 - 블루투스 응답으로 확인 생략` 으로 표시됩니다.
+- `/NotHome` 은 블루투스와 LAN 카드가 모두 무응답인 상태가 위 판정 조건(연속 `NotHomeFails` 회 + `NotHome` 초)을 채울 때만 판정되므로, 한쪽만 무응답이면 판정되지 않습니다. 감시 대상이 한쪽뿐이면 그쪽만 무응답이어도 판정됩니다. 로그에는 `연속 N회 / M초 미확인 (외출 판정: 연속 X회, Y초)` 가 함께 남습니다.
 
 ## Telegram
 
@@ -415,7 +439,7 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 | `[Lunar]` | `ApiUrl`, `ApiKey` (음력 조회용 공공API 주소/인증키. 둘 다 있어야 '음력 보이기' 사용 가능) |
 | `[Global]` | `BaseCity`, `Cities` |
 | `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작), `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (침입 탐지 시간), `ChimeOn`/`ChimeFile`/`ChimeMinute` (시보) |
-| `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `ScanUse`(기본 1), `ScanAlways`(기본 1, 단 `ScanOnTime` 이 이미 있으면 0), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
+| `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `NotHomeFails`(0=3회), `ScanUse`(기본 1), `ScanAlways`(기본 1, 단 `ScanOnTime` 이 이미 있으면 0), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
 | `[IPCam]` | `Host` (IP address), `Port` (기본 4747). 카메라 영상 창의 IP Cam 용 (WebCam1/2 는 설정 없음) |
 | `[PhoneFtp]` | `Host`, `Port`, `User` (폰 탐색기. 비밀번호는 저장하지 않음) |
 | `[RdpServer]` | `port`(7071), `password`(평문), `allowed_ip`(`any`), `accept`(`once` / `auto` / `always`), `autostart`(0/1), `osk`(0/1) (다른 PC(서버)) |
@@ -430,6 +454,7 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
   - 기록할 때만 파일을 열고 바로 닫으므로 상주 메모리/핸들이 없습니다.
   - 1MB 를 넘으면 `gsHomeManager.log.old` 로 넘기고 새로 시작합니다.
 - `log.txt`: Telegram 모듈의 로그 (위 Telegram 참고)
+- `WiFiScan_watch.log`: WiFiScan 감시 로그. `/HomeBack`, `/NotHome` 판정마다 `[사유]` 줄 포함 (위 WiFiScan > 판정 사유 기록 참고)
 - `ipcam.log`: 카메라 영상 창 로그 (IP Cam / 웹캠)
 
 ## 참고
