@@ -454,6 +454,18 @@ public:
     HomeProg homeProg[2];               // [0] HomeBack 프로그램, [1] NotHome 프로그램 (/HomeBack, /NotHome 판정이 날 때 실행)
     bool     rbOn = false;              // 시스템 재시작 사용
     int      rbH = 0, rbM = 0, rbS = 0; // 시스템 재시작 시각
+    // 침입 탐지 시간 ([Alarm] DetectUse / DetectAlways / DetectStart / DetectEnd). 텔레그램 모듈의 /detectOn /detectOff 를 시각에 맞춰 실행
+    bool     dtUse = false;             // 침입 탐지 사용
+    bool     dtAlways = true;           // 항상: 프로그램 시작과 동시에 /detectOn (끄면 매일 개시/종료 시각에 /detectOn, /detectOff)
+    int      dtSh = 22, dtSm = 0, dtSs = 0;   // 매일 개시 시각
+    int      dtEh = 6,  dtEm = 0, dtEs = 0;   // 매일 종료 시각
+    // 시보 ([Alarm] ChimeOn / ChimeFile): 매시 정각에 .\wav\wavplayer.exe 로 wav 파일 재생
+    bool     chOn = false;              // 시보 사용
+    char     chFile[784] = "";          // 재생할 wav 파일 경로 (UTF-8). ini 에 값이 없으면 C:\Windows\Media\ring10.wav
+    int      chMin = 0;                 // 울릴 분 (0~59, 기본 0 = 정각)
+    // HomeBack / NotHome 탐지 ([WiFiScan] ScanUse / ScanAlways + ScanOn*/ScanOff* 의 시각 = 개시/종료 시각)
+    bool     scUse = true;              // 탐지(scan) 사용. 끄면 시작할 때 scan 을 켜지 않고 예약도 무시
+    bool     scAlways = true;           // 항상: 시작할 때부터 계속 scan. 끄면 개시~종료 시각 동안에만 scan (ini 에 예약 시각이 있던 사용자는 기본 끔)
     // [IPCam] 폰 카메라 앱(DroidCam, IP Webcam 등)의 주소
     char     ipHost[64] = "";           // IP address (없으면 카메라 영상 창에서 IP Cam 을 실행하기 전에 등록)
     int      ipPort     = 4747;         // port 번호 (DroidCam 4747, IP Webcam 8080)
@@ -643,6 +655,64 @@ public:
     }
 
     // 시스템 재시작 시각 저장: RebootOn / RebootTime
+    void SaveDetect() {
+        char t[16];
+        WriteInt("Alarm", "DetectUse", dtUse);
+        WriteInt("Alarm", "DetectAlways", dtAlways);
+        wsprintfA(t, "%02d:%02d:%02d", dtSh, dtSm, dtSs);
+        WritePrivateProfileStringA("Alarm", "DetectStart", t, ini_);
+        wsprintfA(t, "%02d:%02d:%02d", dtEh, dtEm, dtEs);
+        WritePrivateProfileStringA("Alarm", "DetectEnd", t, ini_);
+    }
+
+    // HomeBack / NotHome 탐지 저장 (scan 개시/종료 시각은 ScanOn / ScanOff 칸, 프로그램은 homeProg)
+    void SaveScanSet() {
+        WriteInt("WiFiScan", "ScanUse", scUse);
+        WriteInt("WiFiScan", "ScanAlways", scAlways);
+        SaveScanSched(ALARM_SCAN_ON);
+        SaveScanSched(ALARM_SCAN_OFF);
+        SaveHomeProg(0);
+        SaveHomeProg(1);
+    }
+
+    // 지금 scan 이 켜져 있어야 하는가 (사용 + [항상 또는 개시 <= 지금 < 종료]. 종료가 개시보다 이르면 자정을 넘김)
+    bool ScanWantedNow() const {
+        if (!scUse) return false;
+        if (scAlways) return true;
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        const int now = t.wHour * 3600 + t.wMinute * 60 + t.wSecond;
+        const Alarm& a = alarms[ALARM_SCAN_ON];
+        const Alarm& b = alarms[ALARM_SCAN_OFF];
+        const int st = a.h * 3600 + a.m * 60 + a.s, en = b.h * 3600 + b.m * 60 + b.s;
+        if (st < en) return now >= st && now < en;
+        if (st > en) return now >= st || now < en;
+        return false;
+    }
+
+    void SaveChime() {
+        WriteInt("Alarm", "ChimeOn", chOn);
+        WritePrivateProfileStringA("Alarm", "ChimeFile", chFile, ini_);
+        WriteInt("Alarm", "ChimeMinute", chMin);
+    }
+
+    // 지금(초 단위 시각)이 침입 탐지 시간대 안인지: 개시 <= 지금 < 종료 (종료가 개시보다 이르면 자정을 넘김)
+    bool DetectInWindow(int now) const {
+        const int s = dtSh * 3600 + dtSm * 60 + dtSs, e = dtEh * 3600 + dtEm * 60 + dtEs;
+        if (s < e) return now >= s && now < e;
+        if (s > e) return now >= s || now < e;
+        return false;
+    }
+
+    // 프로그램을 시작할 때 / 설정을 저장할 때 바로 /detectOn 이 필요한가 (항상, 또는 지금이 시간대 안)
+    bool DetectWantedNow() const {
+        if (!dtUse) return false;
+        if (dtAlways) return true;
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        return DetectInWindow(t.wHour * 3600 + t.wMinute * 60 + t.wSecond);
+    }
+
     void SaveReboot() {
         char t[16];
         WriteInt("Alarm", "RebootOn", rbOn);
@@ -822,6 +892,7 @@ private:
             "; AlarmNMemo=알람 시각에 모니터 중앙에 30초 동안 표시할 메모 (최대 100자, 파일 없이 메모만 써도 됨)\r\n"
             "; ProgOn=1 이면 매일 ProgTime(HH:MM:SS) 에 ProgFile(BAT/CMD/EXE) 을 실행하고, ProgMemo 가 있으면 모니터 중앙에 30초 표시합니다\r\n"
             "; RebootOn=1 이면 매일 RebootTime(HH:MM:SS) 에 재시작 확인창(300초)을 띄웁니다. Yes 또는 무응답이면 재시작 (shutdown /r /f /t 0, 앱 강제 종료), No 이면 재시작하지 않습니다\r\n"
+            "; ChimeOn=1 이면 매시 ChimeMinute 분(0~59, 기본 0=정각)에 ChimeFile(wav) 을 .\\wav\\wavplayer.exe 로 재생합니다 (시보). ChimeFile 이 없으면 C:\\Windows\\Media\\ring10.wav\r\n"
             "\r\n"
             "[WiFiScan]\r\n"
             "; 집 안팎 감시 (블루투스 / Wi-Fi 스캔). 앱을 시작하면 자동으로 scan 을 시작합니다. 메뉴 'WiFiScan' 대화상자에서도 바꿀 수 있습니다.\r\n"
@@ -1020,8 +1091,25 @@ private:
             rbOn = GetPrivateProfileIntA("Alarm", "RebootOn", 0, ini_) != 0;
             GetPrivateProfileStringA("Alarm", "RebootTime", "00:00:00", t, sizeof(t), ini_);
             ParseTime(t, rbH, rbM, rbS);
+            dtUse = GetPrivateProfileIntA("Alarm", "DetectUse", 0, ini_) != 0;
+            dtAlways = GetPrivateProfileIntA("Alarm", "DetectAlways", 1, ini_) != 0;
+            GetPrivateProfileStringA("Alarm", "DetectStart", "22:00:00", t, sizeof(t), ini_);
+            ParseTime(t, dtSh, dtSm, dtSs);
+            GetPrivateProfileStringA("Alarm", "DetectEnd", "06:00:00", t, sizeof(t), ini_);
+            ParseTime(t, dtEh, dtEm, dtEs);
+            chOn = GetPrivateProfileIntA("Alarm", "ChimeOn", 0, ini_) != 0;
+            GetPrivateProfileStringA("Alarm", "ChimeFile", "C:\\Windows\\Media\\ring10.wav", chFile, sizeof(chFile), ini_);   // 키가 없으면 기본값
+            Utf8::Normalize(chFile, sizeof(chFile));
+            chMin = (int)GetPrivateProfileIntA("Alarm", "ChimeMinute", 0, ini_);
+            if (chMin < 0 || chMin > 59) chMin = 0;
         }
 
+        scUse = GetPrivateProfileIntA("WiFiScan", "ScanUse", 1, ini_) != 0;      // 없으면 사용 (예전처럼 시작할 때 scan On)
+        {
+            char t[16];
+            GetPrivateProfileStringA("WiFiScan", "ScanOnTime", "", t, sizeof(t), ini_);
+            scAlways = GetPrivateProfileIntA("WiFiScan", "ScanAlways", t[0] ? 0 : 1, ini_) != 0;   // 예약 시각이 이미 있으면 '항상' 끔 (예전 예약 동작 유지)
+        }
         for (int i = 0; i < 2; i++) {               // HomeBack / NotHome 프로그램 (없으면 사용 안 함)
             const char* p = i == 0 ? "HomeBackProg" : "NotHomeProg";
             char k[40];
@@ -1617,6 +1705,742 @@ private:
                 return TRUE;
             }
             break;
+        }
+        return FALSE;
+    }
+};
+
+// 알람 1~10 통합 설정 대화상자: 탭 10개 (탭 N = 알람N). 사용 / 시각 / 파일 / 메모 / 플레이어 자동 닫기 / 지우기 / 테스트
+// 탭 머리만 탭 컨트롤로 만들고, 내용 컨트롤은 한 벌을 공유한다 (탭을 바꾸면 현재 탭 값을 보관하고 새 탭 값을 채움)
+class AlarmDialog {
+public:
+    typedef void (*TestFn)(void* ctx, int idx, const Alarm& a);     // 알람 테스트 (현재 입력값으로 메모 표시 + 파일 실행)
+    // a[0..ALARM_COUNT-1] 를 입출력 (확인(저장)이면 true). tab = 처음 열 탭 (0~9)
+    static bool Show(HINSTANCE hi, HWND owner, Alarm* a, int tab, TestFn fn, void* fctx) {
+        INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_TAB_CLASSES | ICC_DATE_CLASSES};
+        InitCommonControlsEx(&ic);
+
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(20); b.W(0); b.W(0); b.W(270); b.W(226);
+        b.W(0); b.W(0);
+        b.S("알람 설정 (알람1 ~ 알람10)");
+        b.W(9); b.S("Segoe UI");
+        const DWORD ST = WS_CHILD | WS_VISIBLE;
+        const DWORD TS = ST | WS_TABSTOP;
+        b.Control(TS | WS_CLIPSIBLINGS | TCS_FIXEDWIDTH, 6, 6, 258, 16, IDC_TAB, "SysTabControl32", "");
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 32, 140, 12, IDC_USE, "사용");
+        b.Control(ST | SS_LEFT, 14, 52, 30, 10, IDC_STATIC, "STATIC", "시각");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 48, 49, 80, 14, IDC_TIME, "SysDateTimePick32", "");
+        b.Control(ST | SS_LEFT, 14, 72, 200, 10, IDC_STATIC, "STATIC", "알람 음악(또는 동영상) 파일");
+        b.Control(ST | SS_LEFT | SS_PATHELLIPSIS | WS_BORDER, 14, 84, 242, 12, IDC_FILE, "STATIC", "");
+        b.Button(TS | BS_PUSHBUTTON, 14, 100, 80, 14, IDC_PICK, "파일 선택...");
+        b.Button(TS | BS_PUSHBUTTON, 100, 100, 70, 14, IDC_NOFILE, "파일 지우기");
+        b.Control(ST | SS_LEFT, 14, 126, 30, 10, IDC_STATIC, "STATIC", "메모");
+        b.Control(TS | WS_BORDER | ES_AUTOHSCROLL, 48, 124, 208, 14, IDC_MEMO, "EDIT", "");
+        b.Control(ST | SS_LEFT, 14, 148, 140, 10, IDC_STATIC, "STATIC", "플레이어 자동 닫기");
+        b.Button(TS | BS_RADIOBUTTON, 24, 161, 100, 12, IDC_CLOSE0, "끔");
+        b.Button(TS | BS_RADIOBUTTON, 24, 174, 100, 12, IDC_CLOSE0 + 1, "재생이 끝나면");
+        b.Button(TS | BS_RADIOBUTTON, 24, 187, 100, 12, IDC_CLOSE0 + 2, "지정 시간 후");
+        b.Control(ST | SS_LEFT, 136, 175, 50, 10, IDC_STATIC, "STATIC", "닫기 시간");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 188, 172, 68, 14, IDC_CLOSET, "SysDateTimePick32", "");
+        b.Button(TS | BS_PUSHBUTTON, 6, 208, 60, 14, IDC_TEST, "알람 테스트");
+        b.Button(TS | BS_PUSHBUTTON, 70, 208, 70, 14, IDC_CLEAR, "이 알람 지우기");
+        b.Button(TS | BS_DEFPUSHBUTTON, 160, 208, 48, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 214, 208, 50, 14, IDCANCEL, "닫기");
+
+        Ctx c = {a, tab < 0 || tab >= ALARM_COUNT ? 0 : tab, fn, fctx};
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+    }
+
+private:
+    enum { IDC_TAB = 100, IDC_USE, IDC_TIME, IDC_FILE, IDC_PICK, IDC_NOFILE, IDC_MEMO,
+           IDC_CLOSE0 = 110, IDC_CLOSET = 113, IDC_TEST, IDC_CLEAR, IDC_STATIC = -1 };
+    struct Ctx { Alarm* a; int cur; TestFn fn; void* fctx; };
+
+    static void SetTime(HWND d, int id, int h, int m, int s) {
+        SYSTEMTIME st = {};
+        GetLocalTime(&st);
+        st.wHour = (WORD)h;
+        st.wMinute = (WORD)m;
+        st.wSecond = (WORD)s;
+        SendDlgItemMessageW(d, id, DTM_SETFORMATW, 0, (LPARAM)u"HH:mm:ss");
+        SendDlgItemMessageW(d, id, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st);
+    }
+    static void GetTime(HWND d, int id, int& h, int& m, int& s) {
+        SYSTEMTIME st = {};
+        SendDlgItemMessageW(d, id, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
+        h = st.wHour;
+        m = st.wMinute;
+        s = st.wSecond;
+    }
+    static void ShowFile(HWND d, const Alarm& a) {
+        char16_t u[MAX_PATH + 8];
+        u[0] = 0;
+        Utf8::ToUtf16(a.file, -1, u, MAX_PATH + 8);
+        SetDlgItemTextW(d, IDC_FILE, (LPCWSTR)u);
+    }
+    // 현재 탭의 알람 값을 화면에 채움
+    static void Load(HWND d, Ctx* c) {
+        const Alarm& a = c->a[c->cur];
+        CheckDlgButton(d, IDC_USE, a.on ? BST_CHECKED : BST_UNCHECKED);
+        SetTime(d, IDC_TIME, a.h, a.m, a.s);
+        ShowFile(d, a);
+        char16_t u[320];
+        u[0] = 0;
+        Utf8::ToUtf16(a.memo, -1, u, 320);
+        SetDlgItemTextW(d, IDC_MEMO, (LPCWSTR)u);
+        CheckRadioButton(d, IDC_CLOSE0, IDC_CLOSE0 + 2, IDC_CLOSE0 + (a.closeMode >= 0 && a.closeMode <= 2 ? a.closeMode : 0));
+        SetTime(d, IDC_CLOSET, a.closeSec / 3600 % 24, a.closeSec % 3600 / 60, a.closeSec % 60);
+    }
+    // 화면 값을 현재 탭의 알람에 보관 (파일 경로는 선택할 때 이미 a.file 에 들어 있음)
+    static void Collect(HWND d, Ctx* c) {
+        Alarm& a = c->a[c->cur];
+        a.on = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED;
+        GetTime(d, IDC_TIME, a.h, a.m, a.s);
+        char16_t u[128];
+        GetDlgItemTextW(d, IDC_MEMO, (LPWSTR)u, 128);
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)u, -1, a.memo, sizeof(a.memo), NULL, NULL);
+        for (int k = 0; k < 3; k++)
+            if (IsDlgButtonChecked(d, IDC_CLOSE0 + k) == BST_CHECKED) a.closeMode = k;
+        int h, m, s;
+        GetTime(d, IDC_CLOSET, h, m, s);
+        a.closeSec = h * 3600 + m * 60 + s;
+    }
+    static void SelectTab(HWND d, Ctx* c, int t) {
+        c->cur = t;
+        SendDlgItemMessageW(d, IDC_TAB, TCM_SETCURSEL, t, 0);
+        Load(d, c);
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG: {
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            SendDlgItemMessageW(d, IDC_MEMO, EM_LIMITTEXT, 100, 0);
+            for (int i = 0; i < ALARM_COUNT; i++) {
+                char16_t t[16] = u"알람";
+                t[2] = i + 1 >= 10 ? u'1' : (char16_t)(u'0' + i + 1);
+                t[3] = i + 1 >= 10 ? u'0' : 0;
+                t[4] = 0;
+                TCITEMW ti = {};
+                ti.mask = TCIF_TEXT;
+                ti.pszText = (LPWSTR)t;
+                SendDlgItemMessageW(d, IDC_TAB, TCM_INSERTITEMW, i, (LPARAM)&ti);
+            }
+            RECT rc;                                            // 탭 10개가 한 줄에 들어가도록 같은 너비로
+            GetClientRect(GetDlgItem(d, IDC_TAB), &rc);
+            SendDlgItemMessageW(d, IDC_TAB, TCM_SETITEMSIZE, 0, MAKELPARAM((rc.right - 4) / ALARM_COUNT, rc.bottom - 2));
+            SelectTab(d, c, c->cur);
+            return TRUE;
+        }
+        case WM_NOTIFY: {
+            NMHDR* nh = (NMHDR*)l;
+            if (c && nh->idFrom == IDC_TAB && nh->code == TCN_SELCHANGE) {
+                Collect(d, c);                                  // 떠나는 탭 값 보관
+                SelectTab(d, c, (int)SendDlgItemMessageW(d, IDC_TAB, TCM_GETCURSEL, 0, 0));
+                return TRUE;
+            }
+            break;
+        }
+        case WM_COMMAND: {
+            const int id = LOWORD(w);
+            if (id >= IDC_CLOSE0 && id <= IDC_CLOSE0 + 2 && HIWORD(w) == BN_CLICKED) {
+                CheckRadioButton(d, IDC_CLOSE0, IDC_CLOSE0 + 2, id);
+                return TRUE;
+            }
+            if (id == IDC_PICK) {
+                static const char16_t filter[] =
+                    u"동영상/음악 파일\0*.mp3;*.wav;*.wma;*.flac;*.m4a;*.aac;*.ogg;*.mp4;*.mkv;*.avi;*.wmv;*.mov;*.webm;*.mpg;*.mpeg\0"
+                    u"모든 파일 (*.*)\0*.*\0";
+                char16_t file[MAX_PATH] = {};
+                OPENFILENAMEW ofn = {};
+                ofn.lStructSize = sizeof(ofn);
+                ofn.hwndOwner   = d;
+                ofn.lpstrFilter = (LPCWSTR)filter;
+                ofn.lpstrFile   = (LPWSTR)file;
+                ofn.nMaxFile    = MAX_PATH;
+                ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+                if (GetOpenFileNameW(&ofn)) {
+                    Alarm& a = c->a[c->cur];
+                    WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)file, -1, a.file, sizeof(a.file), NULL, NULL);
+                    ShowFile(d, a);
+                }
+                return TRUE;
+            }
+            if (id == IDC_NOFILE) {
+                c->a[c->cur].file[0] = 0;
+                ShowFile(d, c->a[c->cur]);
+                return TRUE;
+            }
+            if (id == IDC_CLEAR) {                              // 이 탭의 알람 전체 지우기 (저장을 눌러야 반영)
+                Alarm& a = c->a[c->cur];
+                a.on = false;
+                a.file[0] = 0;
+                a.memo[0] = 0;
+                Load(d, c);
+                return TRUE;
+            }
+            if (id == IDC_TEST) {
+                Collect(d, c);
+                if (c->fn) c->fn(c->fctx, c->cur, c->a[c->cur]);
+                return TRUE;
+            }
+            if (id == IDOK) {
+                Collect(d, c);
+                for (int i = 0; i < ALARM_COUNT; i++) {         // 사용 중인데 파일도 메모도 없으면 울릴 것이 없음
+                    if (c->a[i].on && !c->a[i].file[0] && !c->a[i].memo[0]) {
+                        SelectTab(d, c, i);
+                        char16_t m[96] = u"알람";
+                        const int n = i + 1;
+                        int p = 2;
+                        if (n >= 10) m[p++] = u'1';
+                        m[p++] = (char16_t)(u'0' + n % 10);
+                        const char16_t* tail = u" : '사용'을 켜려면 파일 또는 메모를 지정하세요.";
+                        while (*tail) m[p++] = *tail++;
+                        m[p] = 0;
+                        MessageBoxW(d, (LPCWSTR)m, (LPCWSTR)u"알람 설정", MB_OK | MB_ICONINFORMATION);
+                        return TRUE;
+                    }
+                }
+                EndDialog(d, 1);
+                return TRUE;
+            }
+            if (id == IDCANCEL) {
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        }
+        }
+        return FALSE;
+    }
+};
+
+// 다른 앱 호출 설정 대화상자: 사용 / 시각 / BAT·CMD·EXE 파일 / 메모 / 지우기 / 테스트
+struct ProgData {
+    bool on = false;
+    int  h = 0, m = 0, s = 0;
+    char file[784] = "";
+    char memo[320] = "";
+};
+
+class ProgDialog {
+public:
+    typedef void (*TestFn)(void* ctx, const ProgData& d);           // 테스트: 현재 입력값으로 메모 표시 + 파일 실행
+    static bool Show(HINSTANCE hi, HWND owner, ProgData& pd, TestFn fn, void* fctx) {
+        INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_DATE_CLASSES};
+        InitCommonControlsEx(&ic);
+
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(13); b.W(0); b.W(0); b.W(270); b.W(148);
+        b.W(0); b.W(0);
+        b.S("다른 앱 호출 설정");
+        b.W(9); b.S("Segoe UI");
+        const DWORD ST = WS_CHILD | WS_VISIBLE;
+        const DWORD TS = ST | WS_TABSTOP;
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 10, 140, 12, IDC_USE, "사용");
+        b.Control(ST | SS_LEFT, 14, 30, 30, 10, IDC_STATIC, "STATIC", "시각");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 48, 27, 80, 14, IDC_TIME, "SysDateTimePick32", "");
+        b.Control(ST | SS_LEFT, 14, 52, 200, 10, IDC_STATIC, "STATIC", "실행할 파일 (BAT / CMD / EXE)");
+        b.Control(ST | SS_LEFT | SS_PATHELLIPSIS | WS_BORDER, 14, 64, 242, 12, IDC_FILE, "STATIC", "");
+        b.Button(TS | BS_PUSHBUTTON, 14, 80, 80, 14, IDC_PICK, "파일 선택...");
+        b.Button(TS | BS_PUSHBUTTON, 100, 80, 70, 14, IDC_NOFILE, "파일 지우기");
+        b.Control(ST | SS_LEFT, 14, 106, 30, 10, IDC_STATIC, "STATIC", "메모");
+        b.Control(TS | WS_BORDER | ES_AUTOHSCROLL, 48, 104, 208, 14, IDC_MEMO, "EDIT", "");
+        b.Button(TS | BS_PUSHBUTTON, 6, 128, 60, 14, IDC_TEST, "알람 테스트");
+        b.Button(TS | BS_PUSHBUTTON, 70, 128, 70, 14, IDC_CLEAR, "알람 지우기");
+        b.Button(TS | BS_DEFPUSHBUTTON, 160, 128, 48, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 214, 128, 50, 14, IDCANCEL, "닫기");
+
+        Ctx c = {pd, fn, fctx};
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+    }
+
+private:
+    enum { IDC_USE = 101, IDC_TIME, IDC_FILE, IDC_PICK, IDC_NOFILE, IDC_MEMO, IDC_TEST, IDC_CLEAR, IDC_STATIC = -1 };
+    struct Ctx { ProgData& d; TestFn fn; void* fctx; };
+
+    static void ShowFile(HWND d, const ProgData& p) {
+        char16_t u[MAX_PATH + 8];
+        u[0] = 0;
+        Utf8::ToUtf16(p.file, -1, u, MAX_PATH + 8);
+        SetDlgItemTextW(d, IDC_FILE, (LPCWSTR)u);
+    }
+    static void Load(HWND d, const ProgData& p) {
+        CheckDlgButton(d, IDC_USE, p.on ? BST_CHECKED : BST_UNCHECKED);
+        SYSTEMTIME st = {};
+        GetLocalTime(&st);
+        st.wHour = (WORD)p.h;
+        st.wMinute = (WORD)p.m;
+        st.wSecond = (WORD)p.s;
+        SendDlgItemMessageW(d, IDC_TIME, DTM_SETFORMATW, 0, (LPARAM)u"HH:mm:ss");
+        SendDlgItemMessageW(d, IDC_TIME, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st);
+        ShowFile(d, p);
+        char16_t u[320];
+        u[0] = 0;
+        Utf8::ToUtf16(p.memo, -1, u, 320);
+        SetDlgItemTextW(d, IDC_MEMO, (LPCWSTR)u);
+    }
+    static void Collect(HWND d, ProgData& p) {
+        p.on = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED;
+        SYSTEMTIME st = {};
+        SendDlgItemMessageW(d, IDC_TIME, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
+        p.h = st.wHour;
+        p.m = st.wMinute;
+        p.s = st.wSecond;
+        char16_t u[128];
+        GetDlgItemTextW(d, IDC_MEMO, (LPWSTR)u, 128);
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)u, -1, p.memo, sizeof(p.memo), NULL, NULL);
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG:
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            SendDlgItemMessageW(d, IDC_MEMO, EM_LIMITTEXT, 100, 0);
+            Load(d, c->d);
+            return TRUE;
+        case WM_COMMAND:
+            switch (LOWORD(w)) {
+            case IDC_PICK: {
+                static const char16_t filter[] =
+                    u"실행 파일 (BAT, CMD, EXE)\0*.bat;*.cmd;*.exe\0"
+                    u"모든 파일 (*.*)\0*.*\0";
+                char16_t file[MAX_PATH] = {};
+                OPENFILENAMEW ofn = {};
+                ofn.lStructSize = sizeof(ofn);
+                ofn.hwndOwner   = d;
+                ofn.lpstrFilter = (LPCWSTR)filter;
+                ofn.lpstrFile   = (LPWSTR)file;
+                ofn.nMaxFile    = MAX_PATH;
+                ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+                if (GetOpenFileNameW(&ofn)) {
+                    WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)file, -1, c->d.file, sizeof(c->d.file), NULL, NULL);
+                    ShowFile(d, c->d);
+                }
+                return TRUE;
+            }
+            case IDC_NOFILE:
+                c->d.file[0] = 0;
+                ShowFile(d, c->d);
+                return TRUE;
+            case IDC_CLEAR:                                     // 전체 지우기 (저장을 눌러야 반영)
+                c->d.on = false;
+                c->d.file[0] = 0;
+                c->d.memo[0] = 0;
+                Load(d, c->d);
+                return TRUE;
+            case IDC_TEST:
+                Collect(d, c->d);
+                if (c->fn) c->fn(c->fctx, c->d);
+                return TRUE;
+            case IDOK:
+                Collect(d, c->d);
+                if (c->d.on && !c->d.file[0] && !c->d.memo[0]) {
+                    MessageBoxW(d, (LPCWSTR)u"'사용'을 켜려면 파일 또는 메모를 지정하세요.", (LPCWSTR)u"다른 앱 호출", MB_OK | MB_ICONINFORMATION);
+                    return TRUE;
+                }
+                EndDialog(d, 1);
+                return TRUE;
+            case IDCANCEL:
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        }
+        return FALSE;
+    }
+};
+
+// 침입 탐지 시간 설정 대화상자: 사용 / 항상 / 매일 개시 시각 / 매일 종료 시각
+struct DetectData {
+    bool use = false;                           // 침입 탐지 사용
+    bool always = true;                         // 항상: 프로그램 시작과 동시에 /detectOn
+    int  sh = 22, sm = 0, ss = 0;               // 매일 개시 시각 (항상 off 일 때 /detectOn)
+    int  eh = 6,  em = 0, es = 0;               // 매일 종료 시각 (항상 off 일 때 /detectOff)
+};
+
+class DetectDialog {
+public:
+    static bool Show(HINSTANCE hi, HWND owner, DetectData& dd) {
+        INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_DATE_CLASSES};
+        InitCommonControlsEx(&ic);
+
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(9); b.W(0); b.W(0); b.W(270); b.W(130);
+        b.W(0); b.W(0);
+        b.S("침입 탐지 시간");
+        b.W(9); b.S("Segoe UI");
+        const DWORD ST = WS_CHILD | WS_VISIBLE;
+        const DWORD TS = ST | WS_TABSTOP;
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 10, 240, 12, IDC_USE, "침입 탐지 사용");
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 26, 250, 12, IDC_ALWAYS, "항상 (프로그램 시작과 동시에 /detectOn)");
+        b.Control(ST | SS_LEFT, 14, 46, 244, 24, IDC_STATIC, "STATIC",
+                  "'항상'을 끄면 매일 개시 시각에 /detectOn, 매일 종료 시각에 /detectOff 를 실행합니다. (종료 시각이 개시 시각보다 이르면 자정을 넘깁니다)");
+        b.Control(ST | SS_LEFT, 14, 80, 70, 10, IDC_STATIC, "STATIC", "매일 개시 시각");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 90, 77, 80, 14, IDC_START, "SysDateTimePick32", "");
+        b.Control(ST | SS_LEFT, 14, 98, 70, 10, IDC_STATIC, "STATIC", "매일 종료 시각");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 90, 95, 80, 14, IDC_END, "SysDateTimePick32", "");
+        b.Button(TS | BS_DEFPUSHBUTTON, 160, 112, 48, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 214, 112, 50, 14, IDCANCEL, "닫기");
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&dd) == 1;
+    }
+
+private:
+    enum { IDC_USE = 101, IDC_ALWAYS, IDC_START, IDC_END, IDC_STATIC = -1 };
+
+    static void SetT(HWND d, int id, int h, int m, int s) {
+        SYSTEMTIME st = {};
+        GetLocalTime(&st);
+        st.wHour = (WORD)h;
+        st.wMinute = (WORD)m;
+        st.wSecond = (WORD)s;
+        SendDlgItemMessageW(d, id, DTM_SETFORMATW, 0, (LPARAM)u"HH:mm:ss");
+        SendDlgItemMessageW(d, id, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st);
+    }
+    static void GetT(HWND d, int id, int& h, int& m, int& s) {
+        SYSTEMTIME st = {};
+        SendDlgItemMessageW(d, id, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
+        h = st.wHour;
+        m = st.wMinute;
+        s = st.wSecond;
+    }
+    static void Sync(HWND d) {                          // 항상 이면 개시/종료 시각은 쓰지 않음
+        const BOOL en = IsDlgButtonChecked(d, IDC_ALWAYS) != BST_CHECKED;
+        EnableWindow(GetDlgItem(d, IDC_START), en);
+        EnableWindow(GetDlgItem(d, IDC_END), en);
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        DetectData* p = (DetectData*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG:
+            p = (DetectData*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            CheckDlgButton(d, IDC_USE, p->use ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(d, IDC_ALWAYS, p->always ? BST_CHECKED : BST_UNCHECKED);
+            SetT(d, IDC_START, p->sh, p->sm, p->ss);
+            SetT(d, IDC_END, p->eh, p->em, p->es);
+            Sync(d);
+            return TRUE;
+        case WM_COMMAND:
+            switch (LOWORD(w)) {
+            case IDC_ALWAYS:
+                Sync(d);
+                return TRUE;
+            case IDOK: {
+                DetectData t = *p;
+                t.use = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED;
+                t.always = IsDlgButtonChecked(d, IDC_ALWAYS) == BST_CHECKED;
+                GetT(d, IDC_START, t.sh, t.sm, t.ss);
+                GetT(d, IDC_END, t.eh, t.em, t.es);
+                if (t.use && !t.always && t.sh == t.eh && t.sm == t.em && t.ss == t.es) {
+                    MessageBoxW(d, (LPCWSTR)u"개시 시각과 종료 시각이 같습니다. 서로 다르게 지정하세요.", (LPCWSTR)u"침입 탐지 시간", MB_OK | MB_ICONINFORMATION);
+                    return TRUE;
+                }
+                *p = t;
+                EndDialog(d, 1);
+                return TRUE;
+            }
+            case IDCANCEL:
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        }
+        return FALSE;
+    }
+};
+
+// 시보 설정 대화상자: 사용 / wav 파일 선택 (기본 C:\Windows\Media) / 테스트 / 저장
+struct ChimeData {
+    bool on = false;
+    char file[784] = "C:\\Windows\\Media\\ring10.wav";
+    int  min = 0;                               // 울릴 분 (0~59)
+};
+
+class ChimeDialog {
+public:
+    typedef void (*TestFn)(void* ctx, const ChimeData& d);          // 테스트: 현재 입력값(저장 전)으로 재생
+    static bool Show(HINSTANCE hi, HWND owner, ChimeData& cd, TestFn fn, void* fctx) {
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(10); b.W(0); b.W(0); b.W(270); b.W(106);
+        b.W(0); b.W(0);
+        b.S("시보 설정");
+        b.W(9); b.S("Segoe UI");
+        const DWORD ST = WS_CHILD | WS_VISIBLE;
+        const DWORD TS = ST | WS_TABSTOP;
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 10, 240, 12, IDC_USE, "사용 (매시 지정한 분에 재생)");
+        b.Control(ST | SS_LEFT, 14, 28, 200, 10, IDC_STATIC, "STATIC", "음악 파일 (*.wav)");
+        b.Control(ST | SS_LEFT | SS_PATHELLIPSIS | WS_BORDER, 14, 40, 242, 12, IDC_FILE, "STATIC", "");
+        b.Button(TS | BS_PUSHBUTTON, 14, 56, 90, 14, IDC_PICK, "음악파일 선택...");
+        b.Button(TS | BS_PUSHBUTTON, 110, 56, 50, 14, IDC_TEST, "테스트");
+        b.Control(ST | SS_LEFT, 14, 78, 24, 10, IDC_STATIC, "STATIC", "매시");
+        b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 40, 75, 40, 100, IDC_MIN, "COMBOBOX", "");
+        b.Control(ST | SS_LEFT, 86, 78, 100, 10, IDC_STATIC, "STATIC", "분에 울림");
+        b.Button(TS | BS_DEFPUSHBUTTON, 160, 88, 48, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 214, 88, 50, 14, IDCANCEL, "닫기");
+        Ctx c = {cd, cd, fn, fctx};
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+    }
+
+private:
+    enum { IDC_USE = 101, IDC_FILE, IDC_PICK, IDC_TEST, IDC_MIN, IDC_STATIC = -1 };
+    struct Ctx { ChimeData& out; ChimeData cur; TestFn fn; void* fctx; };      // cur = 대화상자에서 편집 중인 값 (저장해야 out 에 반영)
+
+    static void ShowFile(HWND d, const ChimeData& p) {
+        char16_t u[MAX_PATH + 8];
+        u[0] = 0;
+        Utf8::ToUtf16(p.file, -1, u, MAX_PATH + 8);
+        SetDlgItemTextW(d, IDC_FILE, (LPCWSTR)u);
+    }
+
+    static void Pick(HWND d, ChimeData& p) {
+        static const char16_t filter[] = u"WAV 파일 (*.wav)\0*.wav\0";
+        char16_t file[MAX_PATH] = {};
+        char16_t dir[MAX_PATH] = {};
+        UINT n = GetWindowsDirectoryW((LPWSTR)dir, MAX_PATH - 8);
+        if (n > 0 && n < MAX_PATH - 8) lstrcatW((LPWSTR)dir, L"\\media");      // 기본 폴더: C:\Windows\Media
+        else dir[0] = 0;
+        if (p.file[0]) Utf8::ToUtf16(p.file, -1, file, MAX_PATH);               // 이미 고른 파일이 있으면 그 폴더에서 시작
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize     = sizeof(ofn);
+        ofn.hwndOwner       = d;
+        ofn.lpstrFilter     = (LPCWSTR)filter;
+        ofn.lpstrFile       = (LPWSTR)file;
+        ofn.nMaxFile        = MAX_PATH;
+        ofn.lpstrInitialDir = dir[0] ? (LPCWSTR)dir : NULL;
+        ofn.lpstrDefExt     = L"wav";
+        ofn.Flags           = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+        if (GetOpenFileNameW(&ofn)) {
+            WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)file, -1, p.file, sizeof(p.file), NULL, NULL);
+            ShowFile(d, p);
+        }
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG:
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            CheckDlgButton(d, IDC_USE, c->cur.on ? BST_CHECKED : BST_UNCHECKED);
+            ShowFile(d, c->cur);
+            for (int i = 0; i < 60; i++) {                      // 분: 00 ~ 59
+                wchar_t t[8];
+                wsprintfW(t, L"%02d", i);
+                SendDlgItemMessageW(d, IDC_MIN, CB_ADDSTRING, 0, (LPARAM)t);
+            }
+            SendDlgItemMessageW(d, IDC_MIN, CB_SETCURSEL, c->cur.min, 0);
+            return TRUE;
+        case WM_COMMAND:
+            switch (LOWORD(w)) {
+            case IDC_PICK:
+                Pick(d, c->cur);
+                return TRUE;
+            case IDC_TEST:
+                c->cur.on = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED;
+                if (c->fn) c->fn(c->fctx, c->cur);
+                return TRUE;
+            case IDOK:
+                c->cur.on = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED;
+                {
+                    int m = (int)SendDlgItemMessageW(d, IDC_MIN, CB_GETCURSEL, 0, 0);
+                    c->cur.min = m >= 0 && m <= 59 ? m : 0;
+                }
+                if (c->cur.on && !c->cur.file[0]) {
+                    MessageBoxW(d, (LPCWSTR)u"'사용'을 켜려면 음악 파일을 선택하세요.", (LPCWSTR)u"시보 설정", MB_OK | MB_ICONINFORMATION);
+                    return TRUE;
+                }
+                c->out = c->cur;
+                EndDialog(d, 1);
+                return TRUE;
+            case IDCANCEL:
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        }
+        return FALSE;
+    }
+};
+
+// HomeBack / NotHome 탐지 시간 및 프로그램 설정 대화상자 (WiFiScan 메뉴): 탐지 사용 / 항상 / 개시·종료 시각 / HomeBack·NotHome 실행 프로그램
+struct ScanSetData {
+    bool use = true;                            // 탐지(scan) 사용
+    bool always = true;                         // 항상 (끄면 개시~종료 시각 동안에만)
+    int  sh = 22, sm = 0, ss = 0;               // 개시 시각 (scan On)
+    int  eh = 6,  em = 0, es = 0;               // 종료 시각 (scan Off)
+    struct Prog { bool on = false; char file[784] = ""; char memo[320] = ""; };
+    Prog prog[2];                               // [0] HomeBack, [1] NotHome (메모는 이 대화상자에서 바꾸지 않고 그대로 보존)
+};
+
+class ScanSetDialog {
+public:
+    typedef void (*TestFn)(void* ctx, int idx, const ScanSetData::Prog& p);     // 테스트: 현재 입력값으로 프로그램 1회 실행
+    static bool Show(HINSTANCE hi, HWND owner, ScanSetData& dd, TestFn fn, void* fctx) {
+        INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_DATE_CLASSES};
+        InitCommonControlsEx(&ic);
+
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(23); b.W(0); b.W(0); b.W(300); b.W(200);
+        b.W(0); b.W(0);
+        b.S("HomeBack / NotHome 탐지 시간 및 프로그램 설정");
+        b.W(9); b.S("Segoe UI");
+        const DWORD ST = WS_CHILD | WS_VISIBLE;
+        const DWORD TS = ST | WS_TABSTOP;
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 10, 130, 12, IDC_USE, "HomeBack / NotHome 탐지 사용");
+        b.Control(ST | SS_LEFT, 150, 11, 140, 10, IDC_STATIC, "STATIC", "(Wifi 공유기와 사용자 스마트폰의 연결 상태)");
+        b.Button(TS | BS_AUTOCHECKBOX, 14, 28, 60, 12, IDC_ALWAYS, "항상");
+        b.Control(ST | SS_LEFT, 24, 42, 266, 24, IDC_STATIC, "STATIC",
+                  "(이 프로그램이 시작하면 항상, WiFi 공유기 스캐닝을 해서, 사용자 스마트폰이 WiFi 공유기에 연결되어 있는지 상태 여부를 체크합니다.)");
+        b.Control(ST | SS_LEFT, 14, 72, 270, 10, IDC_STATIC, "STATIC", "또는 아래 지정된 시간 동안에만 체크합니다. (종료 시각이 개시 시각보다 이르면 자정을 넘깁니다)");
+        b.Control(ST | SS_LEFT, 14, 90, 60, 22, IDC_STATIC, "STATIC", "공유기 탐지 (WiFi 스캔)");
+        b.Control(ST | SS_LEFT, 80, 90, 40, 10, IDC_STATIC, "STATIC", "개시 시각");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 124, 87, 80, 14, IDC_START, "SysDateTimePick32", "");
+        b.Control(ST | SS_LEFT, 80, 108, 40, 10, IDC_STATIC, "STATIC", "종료 시각");
+        b.Control(TS | DTS_TIMEFORMAT | DTS_UPDOWN, 124, 105, 80, 14, IDC_END, "SysDateTimePick32", "");
+        b.Control(ST | SS_LEFT, 14, 130, 200, 10, IDC_STATIC, "STATIC", "실행될 프로그램 지정 (BAT / CMD / EXE)");
+        for (int i = 0; i < 2; i++) {
+            const int y = 144 + i * 18, base = ROW0 + i * 10;
+            b.Button(TS | BS_AUTOCHECKBOX, 14, y + 1, 52, 12, base + 0, i == 0 ? "HomeBack" : "NotHome");
+            b.Control(TS | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY, 68, y, 150, 14, base + 1, "EDIT", "");
+            b.Button(TS | BS_PUSHBUTTON, 222, y, 16, 14, base + 2, "...");
+            b.Button(TS | BS_PUSHBUTTON, 242, y, 28, 14, base + 3, "테스트");
+            b.Button(TS | BS_PUSHBUTTON, 274, y, 20, 14, base + 4, "삭제");
+        }
+        b.Button(TS | BS_DEFPUSHBUTTON, 170, 182, 58, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 234, 182, 58, 14, IDCANCEL, "닫기");
+        Ctx c = {dd, dd, fn, fctx};
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+    }
+
+private:
+    enum { IDC_USE = 101, IDC_ALWAYS, IDC_START, IDC_END, ROW0 = 110, IDC_STATIC = -1 };    // 프로그램 줄 i: ROW0 + i*10 + (0 사용, 1 파일, 2 찾기, 3 테스트, 4 삭제)
+    struct Ctx { ScanSetData& out; ScanSetData cur; TestFn fn; void* fctx; };           // cur = 편집 중인 값 (저장해야 out 에 반영)
+
+    static void SetT(HWND d, int id, int h, int m, int s) {
+        SYSTEMTIME st = {};
+        GetLocalTime(&st);
+        st.wHour = (WORD)h;
+        st.wMinute = (WORD)m;
+        st.wSecond = (WORD)s;
+        SendDlgItemMessageW(d, id, DTM_SETFORMATW, 0, (LPARAM)u"HH:mm:ss");
+        SendDlgItemMessageW(d, id, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st);
+    }
+    static void GetT(HWND d, int id, int& h, int& m, int& s) {
+        SYSTEMTIME st = {};
+        SendDlgItemMessageW(d, id, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
+        h = st.wHour;
+        m = st.wMinute;
+        s = st.wSecond;
+    }
+    static void Sync(HWND d) {                          // 항상 이면 개시/종료 시각은 쓰지 않음
+        const BOOL en = IsDlgButtonChecked(d, IDC_ALWAYS) != BST_CHECKED;
+        EnableWindow(GetDlgItem(d, IDC_START), en);
+        EnableWindow(GetDlgItem(d, IDC_END), en);
+    }
+    static void ShowProg(HWND d, int i, const ScanSetData::Prog& p) {
+        const int base = ROW0 + i * 10;
+        CheckDlgButton(d, base + 0, p.on ? BST_CHECKED : BST_UNCHECKED);
+        char16_t u[MAX_PATH + 8];
+        u[0] = 0;
+        Utf8::ToUtf16(p.file, -1, u, MAX_PATH + 8);
+        SetDlgItemTextW(d, base + 1, (LPCWSTR)u);
+    }
+    static bool Pick(HWND d, char* out, int cap) {
+        static const char16_t filter[] =
+            u"실행 파일 (BAT, CMD, EXE)\0*.bat;*.cmd;*.exe\0"
+            u"모든 파일 (*.*)\0*.*\0";
+        char16_t file[MAX_PATH] = {};
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner   = d;
+        ofn.lpstrFilter = (LPCWSTR)filter;
+        ofn.lpstrFile   = (LPWSTR)file;
+        ofn.nMaxFile    = MAX_PATH;
+        ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+        if (!GetOpenFileNameW(&ofn)) return false;
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)file, -1, out, cap, NULL, NULL);
+        return true;
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG:
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            CheckDlgButton(d, IDC_USE, c->cur.use ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(d, IDC_ALWAYS, c->cur.always ? BST_CHECKED : BST_UNCHECKED);
+            SetT(d, IDC_START, c->cur.sh, c->cur.sm, c->cur.ss);
+            SetT(d, IDC_END, c->cur.eh, c->cur.em, c->cur.es);
+            for (int i = 0; i < 2; i++) ShowProg(d, i, c->cur.prog[i]);
+            Sync(d);
+            return TRUE;
+        case WM_COMMAND: {
+            const int id = LOWORD(w);
+            if (id == IDC_ALWAYS) { Sync(d); return TRUE; }
+            if (id >= ROW0 && id < ROW0 + 20) {
+                const int i = (id - ROW0) / 10, act = (id - ROW0) % 10;
+                ScanSetData::Prog& p = c->cur.prog[i];
+                if (act == 2) {                                 // 찾기: 고르면 자동으로 사용 체크
+                    if (Pick(d, p.file, (int)sizeof(p.file))) { p.on = true; ShowProg(d, i, p); }
+                    return TRUE;
+                }
+                if (act == 3) {                                 // 테스트: 현재 입력값(저장 전)으로 1회 실행
+                    p.on = IsDlgButtonChecked(d, ROW0 + i * 10) == BST_CHECKED;
+                    if (c->fn) c->fn(c->fctx, i, p);
+                    return TRUE;
+                }
+                if (act == 4) {                                 // 삭제: 사용/파일/메모 모두 비움 (저장해야 반영)
+                    p.on = false;
+                    p.file[0] = 0;
+                    p.memo[0] = 0;
+                    ShowProg(d, i, p);
+                    return TRUE;
+                }
+                break;
+            }
+            if (id == IDOK) {
+                ScanSetData t = c->cur;
+                t.use = IsDlgButtonChecked(d, IDC_USE) == BST_CHECKED;
+                t.always = IsDlgButtonChecked(d, IDC_ALWAYS) == BST_CHECKED;
+                GetT(d, IDC_START, t.sh, t.sm, t.ss);
+                GetT(d, IDC_END, t.eh, t.em, t.es);
+                for (int i = 0; i < 2; i++) t.prog[i].on = IsDlgButtonChecked(d, ROW0 + i * 10) == BST_CHECKED;
+                if (t.use && !t.always && t.sh == t.eh && t.sm == t.em && t.ss == t.es) {
+                    MessageBoxW(d, (LPCWSTR)u"개시 시각과 종료 시각이 같습니다. 서로 다르게 지정하세요.", (LPCWSTR)u"HomeBack / NotHome 탐지", MB_OK | MB_ICONINFORMATION);
+                    return TRUE;
+                }
+                for (int i = 0; i < 2; i++) {
+                    if (t.prog[i].on && !t.prog[i].file[0] && !t.prog[i].memo[0]) {
+                        MessageBoxW(d, i == 0 ? (LPCWSTR)u"HomeBack 프로그램 '사용'을 켜려면 파일을 지정하세요." : (LPCWSTR)u"NotHome 프로그램 '사용'을 켜려면 파일을 지정하세요.",
+                                    (LPCWSTR)u"HomeBack / NotHome 탐지", MB_OK | MB_ICONINFORMATION);
+                        return TRUE;
+                    }
+                }
+                c->out = t;
+                EndDialog(d, 1);
+                return TRUE;
+            }
+            if (id == IDCANCEL) { EndDialog(d, 0); return TRUE; }
+            break;
+        }
         }
         return FALSE;
     }
@@ -3010,23 +3834,23 @@ public:
         b.D(0);
         b.W(15); b.W(0); b.W(0); b.W(430); b.W(248);        // 항목 수, x, y, cx, cy (대화상자 단위)
         b.W(0); b.W(0);
-        b.S(notice ? "내 폰 등록" : "WiFiScan (블루투스 / Wi-Fi 스캔, 집 안팎 감시)");
+        b.S(notice ? "내 폰 등록" : "WiFi (및 블루투쓰) 스캔");
         b.W(9); b.S("Segoe UI");
         const DWORD T = WS_CHILD | WS_VISIBLE;
         const DWORD E = T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL;
         const DWORD C = T | WS_TABSTOP | BS_AUTOCHECKBOX;
-        b.Control(T,                 10,  10,  82, 10, 110, "STATIC", "블루투스 MAC 주소");
-        b.Control(E,                 96,   8,  96, 13, IDC_BTMAC, "EDIT", "");
-        b.Control(T,                204,  10,  82, 10, 111, "STATIC", "LAN 카드 MAC 주소");
-        b.Control(E,                290,   8,  96, 13, IDC_LANMAC, "EDIT", "");
+        b.Control(T,                 10,  10, 102, 10, 110, "STATIC", "사용자 폰 블루투쓰 MAC");
+        b.Control(E,                114,   8,  92, 13, IDC_BTMAC, "EDIT", "");
+        b.Control(T,                214,  10, 112, 10, 111, "STATIC", "사용자 폰 LAN 카드 MAC");
+        b.Control(E,                328,   8,  92, 13, IDC_LANMAC, "EDIT", "");
         b.Control(T,                 10,  28,  82, 10, 112, "STATIC", "scan 주기 (초)");
-        b.Control(E | ES_NUMBER,     96,  26,  40, 13, IDC_SEC, "EDIT", "");
-        b.Button(C,                 204,  27,  76, 12, IDC_CHKWIFI, "Wi-Fi 스캔");
-        b.Button(C,                 290,  27,  80, 12, IDC_CHKBT, "블루투스 스캔");
+        b.Control(E | ES_NUMBER,    114,  26,  40, 13, IDC_SEC, "EDIT", "");
+        b.Button(C,                 214,  27,  76, 12, IDC_CHKWIFI, "Wi-Fi 스캔");
+        b.Button(C,                 328,  27,  80, 12, IDC_CHKBT, "블루투스 스캔");
         b.Button(T | WS_TABSTOP | BS_DEFPUSHBUTTON,  10, 46, 50, 14, IDOK, "저장");
         b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,     64, 46, 50, 14, IDCANCEL, "취소");
-        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,    204, 46, 76, 14, IDC_RESTART, "scan 재시작");
-        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,    290, 46, 60, 14, IDC_OFF, "scan Off");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,    214, 46, 76, 14, IDC_RESTART, "scan 재시작");
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,    328, 46, 60, 14, IDC_OFF, "scan Off");
         b.Control(T | SS_ENDELLIPSIS,                10, 65, 410, 10, IDC_NOTICE, "STATIC", "");      // 안내 문구 (내 폰 등록)
         b.Control(T | SS_ENDELLIPSIS,                10, 76, 410, 10, IDC_STATUS, "STATIC", "");
         b.Control(T | WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_OWNERDATA | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
@@ -4534,7 +5358,11 @@ public:
         return true;
     }
     HWND Hwnd() const { return window_.Hwnd(); }
-    void SetIp(const std::string& host, const std::string& port) { host_ = host; port_ = port; }   // 'IP cam 등록' 으로 바뀐 주소 (다음 [실행] 부터 적용)
+    void SetIp(const std::string& host, const std::string& port) {       // 'IP cam 등록' 으로 바뀐 주소 (다음 [실행] 부터 적용). 다른 스레드에서 호출됨
+        std::lock_guard<std::mutex> g(tmu_);
+        host_ = host;
+        port_ = port;
+    }
 
 private:
     static constexpr const char* kIdle = "카메라를 선택하고 [실행] 을 누르세요";
@@ -4553,17 +5381,19 @@ private:
     // [실행]: 이전 카메라를 멈추고 src (0=WebCam1, 1=WebCam2, 2=IP Cam) 를 시작. 성공하면 res = 제목줄 이름, 실패하면 res = 사유
     bool Run(int src, std::string& res) {
         StopCam();
+        std::string host, port;
+        { std::lock_guard<std::mutex> g(tmu_); host = host_; port = port_; }
         if (src == 2) {
-            if (host_.empty()) {
+            if (host.empty()) {
                 store_.Clear(kIdle);
                 res = "IP cam 주소가 없습니다. 메뉴 'IP cam 등록' 으로 먼저 등록하세요";
                 return false;
             }
             store_.Clear("Connecting...");
-            ip_.reset(new MjpegClient(Make(host_, port_), store_, [this] { window_.NotifyFrame(); },
+            ip_.reset(new MjpegClient(Make(host, port), store_, [this] { window_.NotifyFrame(); },
                                       [this](const char* d, size_t n, Gdiplus::Bitmap* b) { rec_.Add(d, n, b); }));
             ip_->Start();
-            res = "IP Cam " + host_ + ":" + port_;
+            res = "IP Cam " + host + ":" + port;
         } else {
             store_.Clear("Opening camera...");
             cam_.reset(new WebcamClient(src, store_, [this] { window_.NotifyFrame(); },
@@ -4581,8 +5411,10 @@ private:
     // 로그 파일: exe 와 같은 폴더의 ipcam.log (이름은 예전 그대로), 시작할 때마다 새로 작성. 크래시 시 예외 코드를 기록
     struct LogScope {
         LONG (WINAPI *prev)(EXCEPTION_POINTERS*) = nullptr;
-        static inline int refs = 0;                       // 열려 있는 영상 창(세션) 수. 첫 세션이 로그를 열고 마지막 세션이 닫음 (UI 스레드에서만 증감)
+        static inline int refs = 0;                       // 열려 있는 영상 창(세션) 수. 첫 세션이 로그를 열고 마지막 세션이 닫음
+        static std::mutex& Mu() { static std::mutex m; return m; }     // 세션마다 전용 스레드라 증감/열기/닫기를 보호
         LogScope() {
+            std::lock_guard<std::mutex> g(Mu());
             if (refs++ > 0) { IPLOG("---- another camera window opened (%d)", refs); return; }
             char exe[MAX_PATH] = "";
             std::string path = "ipcam.log";
@@ -4600,6 +5432,7 @@ private:
             IPLOG("pid=%lu", GetCurrentProcessId());
         }
         ~LogScope() {
+            std::lock_guard<std::mutex> g(Mu());
             if (--refs > 0) { IPLOG("---- a camera window closed (%d left)", refs); return; }
             IPLOG("==== ipcam exit ====");
             SetUnhandledExceptionFilter(prev);
@@ -4626,6 +5459,7 @@ private:
     }
 
     LogScope        log_;                 // 가장 먼저 만들어지고 가장 나중에 없어짐
+    std::mutex      tmu_;                 // host_/port_ 보호 (영상 창 스레드와 본 창이 함께 접근)
     std::string     host_, port_;         // IP Cam 주소 (등록값)
     Config          cfg_;
     WinsockSession  ws_;
@@ -4635,6 +5469,78 @@ private:
     ViewerWindow    window_;
     std::unique_ptr<MjpegClient>  ip_;    // IP Cam 수신 스레드 ([실행] 때 만들고 [종료] 때 없앰)
     std::unique_ptr<WebcamClient> cam_;   // WebCam1 / WebCam2 수신 스레드
+};
+
+// 카메라 영상 창 하나를 전용 스레드(자체 메시지 루프)에서 돌린다. 창, 카메라 시작/정지, 그리기가 본 창(시계)의 UI 스레드와 완전히 분리되어
+// 카메라가 느리거나 멈춰도 시계가 멈추지 않는다. Session 은 이 스레드에서 만들고 이 스레드에서 없어진다.
+class SessionThread {
+public:
+    static SessionThread* Start(HINSTANCE inst, HWND notify, const std::string& host, const std::string& port) {
+        SessionThread* t = new SessionThread(inst, notify, host, port);
+        t->th_ = CreateThread(nullptr, 0, &SessionThread::Proc, t, 0, nullptr);
+        if (!t->th_) { delete t; return nullptr; }
+        return t;
+    }
+    // 스레드가 완전히 끝났는가 (끝나면 delete 는 즉시 반환)
+    bool Done() const { return done_ != 0; }
+    // 'IP cam 등록' 으로 바뀐 주소 전달 (다음 [실행] 부터 적용)
+    void SetIp(const std::string& host, const std::string& port) {
+        std::lock_guard<std::mutex> g(mu_);
+        host_ = host;
+        port_ = port;
+        if (s_) s_->SetIp(host, port);
+    }
+    // 창 닫기 요청 (기다리지 않음)
+    void RequestClose() {
+        HWND h;
+        { std::lock_guard<std::mutex> g(mu_); h = hwnd_; }
+        if (h && IsWindow(h)) PostMessage(h, WM_CLOSE, 0, 0);
+    }
+    ~SessionThread() {
+        if (th_) {
+            if (WaitForSingleObject(th_, 5000) == WAIT_TIMEOUT) IPLOG("camera thread did not stop within 5s");
+            CloseHandle(th_);
+        }
+    }
+    SessionThread(const SessionThread&) = delete;
+    SessionThread& operator=(const SessionThread&) = delete;
+
+private:
+    SessionThread(HINSTANCE inst, HWND notify, const std::string& host, const std::string& port)
+        : inst_(inst), notify_(notify), host_(host), port_(port) {}
+
+    static DWORD WINAPI Proc(LPVOID p) { static_cast<SessionThread*>(p)->Run(); return 0; }
+
+    void Run() {
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);          // 폴더 열기 등 셸 기능용
+        {
+            std::string host, port;
+            { std::lock_guard<std::mutex> g(mu_); host = host_; port = port_; }
+            Session s(inst_, notify_, host, port);
+            if (s.Open()) {
+                { std::lock_guard<std::mutex> g(mu_); s_ = &s; hwnd_ = s.Hwnd(); }
+                MSG m;
+                while (GetMessage(&m, nullptr, 0, 0) > 0) {
+                    TranslateMessage(&m);
+                    DispatchMessage(&m);
+                    if (!IsWindow(s.Hwnd())) break;                  // 창이 닫힘 (Hwnd 는 파괴되면 null)
+                }
+                { std::lock_guard<std::mutex> g(mu_); s_ = nullptr; hwnd_ = nullptr; }
+            }
+        }                                                           // ~Session: 수신 스레드 정지 + 정리 (이 스레드에서)
+        CoUninitialize();
+        InterlockedExchange(&done_, 1);
+        if (notify_) PostMessage(notify_, Session::MSG_CLOSED, 0, 0);   // 본 창이 이 스레드를 정리하게 함
+    }
+
+    HINSTANCE   inst_;
+    HWND        notify_;
+    HANDLE      th_ = nullptr;
+    std::mutex  mu_;                                                // host_ / port_ / s_ / hwnd_ 보호
+    std::string host_, port_;
+    Session*    s_ = nullptr;
+    HWND        hwnd_ = nullptr;
+    volatile LONG done_ = 0;
 };
 
 }  // namespace ipcam
@@ -7963,7 +8869,7 @@ private:
     // ---- 로컬 트리거 (LocalTrigger 큐) ----
     // 같은 프로세스의 WiFiScan 감시(HomeWatcher)가 텔레그램을 거치지 않고 /HomeBack, /NotHome 을 전달하는 통로.
     // (봇이 sendMessage 로 보낸 글은 봇 자신이 getUpdates 로 받지 못해서 텔레그램 경유로는 동작하지 않는다.)
-    // 허용 명령은 /homeback, /nothome 두 개뿐이다 (다른 명령은 이 통로로 실행되지 않는다).
+    // 허용 명령은 /homeback, /nothome, /detecton, /detectoff (침입 탐지 시간) 뿐이다 (다른 명령은 이 통로로 실행되지 않는다).
     struct TriggerCtx {
         ScreenTelegramApp* app = nullptr;
         const TelegramClient* telegram = nullptr;
@@ -7998,7 +8904,7 @@ private:
     void triggerLoop(const TelegramClient& telegram)
     {
         // 시작할 때 이미 큐에 있는 트리거(부팅 직후 WiFiScan 이 먼저 넘긴 첫 판정)도 처리한다. 오래된 것은 아래 나이 검사에서 버려진다.
-        Logger::log("로컬 트리거 수신 시작 (WiFiScan 감시 -> 텔레그램 명령, 허용: /HomeBack /NotHome, %lld초 안의 것만)", kTriggerMaxAgeSec);
+        Logger::log("로컬 트리거 수신 시작 (WiFiScan 감시 -> 텔레그램 명령, 허용: /HomeBack /NotHome /detectOn /detectOff, %lld초 안의 것만)", kTriggerMaxAgeSec);
         while (!stop_.wait(1000)) {
             LocalTrigger::Item it;
             while (!stop_.requested() && LocalTrigger::take(it)) {
@@ -8007,7 +8913,7 @@ private:
                     Logger::log("로컬 트리거 무시: 오래된 요청 (%lld초 전) %s", ageSec, it.cmd.c_str());
                     continue;
                 }
-                if (it.cmd != "/homeback" && it.cmd != "/nothome") {
+                if (it.cmd != "/homeback" && it.cmd != "/nothome" && it.cmd != "/detecton" && it.cmd != "/detectoff") {
                     Logger::log("로컬 트리거 무시: 허용되지 않은 내용 (%.40s)", it.cmd.c_str());
                     continue;
                 }
@@ -10747,6 +11653,7 @@ private:
         CMD_SHOWDATE    = 112,      // 년월일 보이기/숨기기 토글
         CMD_SHOWCLOCK   = 111,      // 시계 보이기/숨기기 토글 (트레이 메뉴에서도 사용)
         WM_TRAY         = WM_APP + 1,   // 트레이 아이콘 콜백
+        WM_REBOOT_ASK   = WM_APP + 20,  // 시스템 재시작 확인창 표시 (타이머 처리가 끝난 뒤 띄워서 시계가 멈추지 않게 함)
         CMD_OPACITY     = 200,      // 200 + (투명도/10) : 201~210
         CMD_ASEC        = 853,      // F4) 아나로그 시계 디자인 > 초침 생략 on/off
         CMD_AMATCH      = 852,      // F4) 아나로그 시계 디자인 > 배경색 일치 on/off
@@ -10756,6 +11663,9 @@ private:
         CMD_CITY        = 300,      // 300 + 도시 인덱스
         CMD_MOVE        = 400,      // 400 + 이동 간격 선택지 인덱스
         CMD_PROG        = 610,      // 610 사용, 611 시각, 612 파일, 613 메모, 614 지우기, 615 테스트
+        CMD_DETECT      = 747,      // 작동시간 및 알람 설정 > 침입 탐지 시간
+        CMD_CHIME       = 748,      // 작동시간 및 알람 설정 > 시보 설정
+        CMD_SCANSET     = 749,      // WiFiScan > HomeBack / NotHome 탐지 시간 및 프로그램 설정
         CMD_REBOOT      = 600,      // 시스템 재시작 시각 (대화상자: 시각 + 사용)
         CMD_HOMEPROG    = 660,      // 660~679: HomeBack 프로그램(660+동작) / NotHome 프로그램(670+동작). 동작 0 사용, 2 파일, 3 메모, 4 지우기, 5 테스트
         CMD_SCANSCHED   = 640,      // 640~659: ScanOn(640+동작) / ScanOff(650+동작) 예약
@@ -10902,6 +11812,11 @@ private:
             break;
         case WM_ENTERMENULOOP: modal_ = true;                    return 0;   // 메뉴/대화상자 중에는
         case WM_EXITMENULOOP:  modal_ = false;                   return 0;   // 창 자동 이동 멈춤
+        case WM_REBOOT_ASK:
+            InvalidateRect(hwnd_, NULL, FALSE);
+            UpdateWindow(hwnd_);                                  // 확인창(모달)이 뜨기 전에 이번 초의 시계를 먼저 그림
+            ConfirmReboot();
+            return 0;
         case WM_DESTROY:    OnDestroy();                         return 0;
         }
         return DefWindowProcA(hwnd_, m, w, l);
@@ -11051,7 +11966,7 @@ private:
     }
 
     void OnDestroy() {
-        if (!owner_) { for (ipcam::Session* c : cams_) delete c; cams_.clear(); }      // 앱 종료: 카메라 영상 창/스레드 모두 정리
+        if (!owner_) { for (ipcam::SessionThread* c : cams_) c->RequestClose(); for (ipcam::SessionThread* c : cams_) delete c; cams_.clear(); }      // 앱 종료: 카메라 영상 창/스레드 모두 정리 (닫기 요청을 먼저 모두 보낸 뒤 기다림)
         KillTimer(hwnd_, TID_SECOND);
         KillTimer(hwnd_, TID_MOVE);
         KillTimer(hwnd_, TID_SCROLL_TIME);
@@ -11207,25 +12122,19 @@ private:
         AppendMenuA(menuAlarm_, MF_SEPARATOR, 0, NULL);
         AppendMenuA(menuAlarm_, MF_STRING, CMD_REBOOT, "-");     // 시스템 재시작 시각 (알람 10개 + 구분선 다음, 위치 ALARM_COUNT+1). 누르면 시각/사용 대화상자
         UpdateRebootMenu();
-        menuProg_ = CreatePopupMenu();          // 프로그램 실행 (위치 ALARM_COUNT+2)
-        AddMenu(menuProg_, 0, CMD_PROG,     "사용(&E)");
-        AddMenu(menuProg_, 0, CMD_PROG + 1, "시각 설정(&T)...");
-        AddMenu(menuProg_, 0, CMD_PROG + 2, "BAT / CMD / EXE 파일 선택(&F)...");
-        AddMenu(menuProg_, 0, CMD_PROG + 3, "메모 설정(&M)...");
-        AppendMenuA(menuProg_, MF_SEPARATOR, 0, NULL);
-        AddMenu(menuProg_, 0, CMD_PROG + 4, "알람 지우기(&C)");
-        AddMenu(menuProg_, 0, CMD_PROG + 5, "알람 테스트(&R)");
-        AppendMenuA(menuAlarm_, MF_POPUP | MF_STRING, (UINT_PTR)menuProg_, "-");
+        AppendMenuA(menuAlarm_, MF_STRING, CMD_PROG, "-");       // 다른 앱 호출 (위치 ALARM_COUNT+2). 누르면 설정 대화상자
         UpdateProgMenu();
-        AddMenu(bar, MF_POPUP, (UINT_PTR)menuAlarm_, "F6) 알람(&A)");
+        AppendMenuA(menuAlarm_, MF_STRING, CMD_DETECT, "-");     // 침입 탐지 시간 (위치 ALARM_COUNT+3). 누르면 설정 대화상자
+        UpdateDetectMenu();
+        AppendMenuA(menuAlarm_, MF_STRING, CMD_CHIME, "-");      // 시보 설정 (위치 ALARM_COUNT+4). 누르면 설정 대화상자
+        UpdateChimeMenu();
+        AddMenu(bar, MF_POPUP, (UINT_PTR)menuAlarm_, "F6) 작동시간 및 알람 설정(&A)");
 
         menuScan_ = CreatePopupMenu();          // WiFiScan: 모니터링 대화상자 / 자동감시 On·Off 예약 / HomeBack·NotHome 프로그램
         AddMenu(menuScan_, 0, CMD_SCAN, "WifiScan모니터링(&M)...");   // 블루투스/Wi-Fi 스캔 설정 + 진행 상황 대화상자
         AppendMenuA(menuScan_, MF_SEPARATOR, 0, NULL);
-        MakeAlarmSub(ALARM_SCAN_ON);            // 위치 2, 3
-        MakeAlarmSub(ALARM_SCAN_OFF);
-        MakeHomeProgMenu(0);                    // 위치 4, 5
-        MakeHomeProgMenu(1);
+        AddMenu(menuScan_, 0, CMD_SCANSET, "HomeBack / NotHome 탐지 시간 및 프로그램 설정(&H)...");   // 예전 자동감시 On/Off + HomeBack/NotHome 프로그램 메뉴 4개를 통합
+        UpdateScanSetMenu();
         AddMenu(bar, MF_POPUP, (UINT_PTR)menuScan_, "F7) WiFiScan(&W)");
 
         HMENU ipc = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기 / 다른 PC(서버) / 다른 PC(클라이언트)
@@ -11266,6 +12175,7 @@ private:
     }
 
     void UpdateHomeProgMenu(int i) {
+        if (!menuHomeProg_[i]) return;              // 통합 대화상자로 바뀌어 서브메뉴를 만들지 않음
         const Settings::HomeProg& h = cfg_.homeProg[i];
         const char* name = h.file;
         for (const char* p = h.file; *p; p++)
@@ -11282,6 +12192,66 @@ private:
         CheckMenuItem(menuScan_, pos, MF_BYPOSITION | chk);
         CheckMenuItem(menuHomeProg_[i], HomeProgId(i, 0), MF_BYCOMMAND | chk);
         CheckMenuItem(menuHomeProg_[i], HomeProgId(i, 3), MF_BYCOMMAND | (h.memo[0] ? MF_CHECKED : MF_UNCHECKED));
+    }
+
+    void UpdateScanSetMenu() {
+        CheckMenuItem(menuScan_, CMD_SCANSET, MF_BYCOMMAND | (cfg_.scUse ? MF_CHECKED : MF_UNCHECKED));     // 체크 = 탐지 사용
+    }
+
+    // 지금 상태에 맞게 scan 을 켜거나 끈다 (사용 + [항상 또는 개시~종료 시각 안] 이면 On, 아니면 Off)
+    void ApplyScanState(const char* why) {
+        if (!scan_) return;
+        char w[64];
+        lstrcpynA(w, why, sizeof(w));
+        const bool want = cfg_.ScanWantedNow();
+        if (want && !scan_->IsOn()) scan_->Start(w);
+        else if (!want && scan_->IsOn()) scan_->Stop(w);
+    }
+
+    static void ScanSetTestCb(void* self, int i, const ScanSetData::Prog& p) {
+        ((ClockWindow*)self)->RunProgFile(HomeProgTitle(i), p.file, p.memo);
+    }
+
+    // WiFiScan > HomeBack / NotHome 탐지 시간 및 프로그램 설정: 탐지 사용 / 항상 / 개시·종료 시각 / HomeBack·NotHome 프로그램
+    void ScanSetCommand() {
+        ScanSetData d;
+        d.use = cfg_.scUse;
+        d.always = cfg_.scAlways;
+        const Alarm& a = cfg_.alarms[ALARM_SCAN_ON];
+        const Alarm& b = cfg_.alarms[ALARM_SCAN_OFF];
+        d.sh = a.h; d.sm = a.m; d.ss = a.s;
+        d.eh = b.h; d.em = b.m; d.es = b.s;
+        if (!a.on && !b.on && a.h == 0 && a.m == 0 && a.s == 0 && b.h == 0 && b.m == 0 && b.s == 0) {   // 예약이 없었으면 기본 22:00 ~ 06:00 로 시작
+            d.sh = 22; d.sm = 0; d.ss = 0;
+            d.eh = 6;  d.em = 0; d.es = 0;
+        }
+        for (int i = 0; i < 2; i++) {
+            d.prog[i].on = cfg_.homeProg[i].on;
+            lstrcpynA(d.prog[i].file, cfg_.homeProg[i].file, sizeof(d.prog[i].file));
+            lstrcpynA(d.prog[i].memo, cfg_.homeProg[i].memo, sizeof(d.prog[i].memo));
+        }
+        modal_ = true;
+        bool ok = ScanSetDialog::Show(hi_, hwnd_, d, ScanSetTestCb, this);
+        modal_ = false;
+        if (!ok) return;
+        cfg_.scUse = d.use;
+        cfg_.scAlways = d.always;
+        Alarm& na = cfg_.alarms[ALARM_SCAN_ON];
+        Alarm& nb = cfg_.alarms[ALARM_SCAN_OFF];
+        na.h = d.sh; na.m = d.sm; na.s = d.ss; na.on = true;       // 개시/종료 시각은 항상 저장 (쓰는지는 '항상' 이 결정)
+        nb.h = d.eh; nb.m = d.em; nb.s = d.es; nb.on = true;
+        firedYmd_[ALARM_SCAN_ON] = firedYmd_[ALARM_SCAN_OFF] = 0;
+        for (int i = 0; i < 2; i++) {
+            cfg_.homeProg[i].on = d.prog[i].on;
+            lstrcpynA(cfg_.homeProg[i].file, d.prog[i].file, sizeof(cfg_.homeProg[i].file));
+            lstrcpynA(cfg_.homeProg[i].memo, d.prog[i].memo, sizeof(cfg_.homeProg[i].memo));
+        }
+        cfg_.SaveScanSet();
+        UpdateScanSetMenu();
+        Log::Put("HomeBack/NotHome 탐지 저장: 사용 %d, 항상 %d, 개시 %02d:%02d:%02d, 종료 %02d:%02d:%02d, HomeBack %d(%s), NotHome %d(%s)",
+                 (int)d.use, (int)d.always, d.sh, d.sm, d.ss, d.eh, d.em, d.es,
+                 (int)d.prog[0].on, d.prog[0].file[0] ? d.prog[0].file : "-", (int)d.prog[1].on, d.prog[1].file[0] ? d.prog[1].file : "-");
+        ApplyScanState("설정 저장");
     }
 
     // /HomeBack (i=0) 또는 /NotHome (i=1) 판정이 날 때 호출
@@ -11326,12 +12296,8 @@ private:
         wsprintfA(s, "다른 앱 호출   %02d:%02d:%02d   %s", cfg_.pgH, cfg_.pgM, cfg_.pgS, cfg_.pgFile[0] ? nm : "__");
         char16_t u[160];
         Utf8::ToUtf16(s, -1, u, 160);
-        ModifyMenuW(menuAlarm_, ALARM_COUNT + 2, MF_BYPOSITION | MF_POPUP | MF_STRING,
-                    (UINT_PTR)menuProg_, (LPCWSTR)u);
-        UINT chk = cfg_.pgOn ? MF_CHECKED : MF_UNCHECKED;
-        CheckMenuItem(menuAlarm_, ALARM_COUNT + 2, MF_BYPOSITION | chk);
-        CheckMenuItem(menuProg_, CMD_PROG, MF_BYCOMMAND | chk);
-        CheckMenuItem(menuProg_, CMD_PROG + 3, MF_BYCOMMAND | (cfg_.pgMemo[0] ? MF_CHECKED : MF_UNCHECKED));
+        ModifyMenuW(menuAlarm_, ALARM_COUNT + 2, MF_BYPOSITION | MF_STRING | (cfg_.pgOn ? MF_CHECKED : MF_UNCHECKED),
+                    CMD_PROG, (LPCWSTR)u);
     }
 
     // BAT / CMD / EXE 파일 선택
@@ -11373,34 +12339,133 @@ private:
         Log::Put("%s 결과: %s (결과코드 %d)", title, (INT_PTR)x > 32 ? "성공" : "실패", (int)(INT_PTR)x);
     }
 
-    void ProgCommand(int act) {
-        if (act == 5) { RunProg(); return; }    // 알람 테스트: 1회 실행 (설정 변경 없음)
-        if (act == 0) {
-            if (!cfg_.pgOn && !cfg_.pgFile[0] && !PickProgFile()) return;   // 파일이 없으면 먼저 고르게 함
-            cfg_.pgOn = !cfg_.pgOn;
-        } else if (act == 1) {
-            modal_ = true;
-            bool ok = TimeDialog::Show(hi_, hwnd_, "다른 앱 호출 시각 (시:분:초)", cfg_.pgH, cfg_.pgM, cfg_.pgS);
-            modal_ = false;
-            if (!ok) return;
-        } else if (act == 2) {
-            if (!PickProgFile()) return;
-        } else if (act == 3) {
-            char m[sizeof(cfg_.pgMemo)];
-            lstrcpynA(m, cfg_.pgMemo, sizeof(m));
-            modal_ = true;
-            bool ok = MemoDialog::Show(hi_, hwnd_, m, sizeof(m));
-            modal_ = false;
-            if (!ok) return;
-            lstrcpynA(cfg_.pgMemo, m, sizeof(cfg_.pgMemo));
-        } else {                                // 4: 알람 지우기
-            cfg_.pgOn = false;
-            cfg_.pgFile[0] = 0;
-            cfg_.pgMemo[0] = 0;
-        }
+    static void ProgTestCb(void* self, const ProgData& p) {
+        ((ClockWindow*)self)->RunProgFile("다른 앱 호출 테스트", p.file, p.memo);
+    }
+
+    // 다른 앱 호출 통합 대화상자 (사용 / 시각 / 파일 / 메모 / 지우기 / 테스트)
+    void ProgCommand(int) {
+        ProgData p;
+        p.on = cfg_.pgOn;
+        p.h = cfg_.pgH;
+        p.m = cfg_.pgM;
+        p.s = cfg_.pgS;
+        lstrcpynA(p.file, cfg_.pgFile, sizeof(p.file));
+        lstrcpynA(p.memo, cfg_.pgMemo, sizeof(p.memo));
+        modal_ = true;
+        bool ok = ProgDialog::Show(hi_, hwnd_, p, ProgTestCb, this);
+        modal_ = false;
+        if (!ok) return;
+        cfg_.pgOn = p.on;
+        cfg_.pgH = p.h;
+        cfg_.pgM = p.m;
+        cfg_.pgS = p.s;
+        lstrcpynA(cfg_.pgFile, p.file, sizeof(cfg_.pgFile));
+        lstrcpynA(cfg_.pgMemo, p.memo, sizeof(cfg_.pgMemo));
         pgFiredYmd_ = 0;
         cfg_.SaveProg();
         UpdateProgMenu();
+        Log::Put("다른 앱 호출 설정 저장: 사용 %d, %02d:%02d:%02d, 파일=%s", (int)p.on, p.h, p.m, p.s, p.file[0] ? p.file : "(없음)");
+    }
+
+    void UpdateDetectMenu() {
+        char s[96];
+        if (cfg_.dtAlways) lstrcpyA(s, "침입 탐지 시간   항상");
+        else wsprintfA(s, "침입 탐지 시간   %02d:%02d:%02d ~ %02d:%02d:%02d", cfg_.dtSh, cfg_.dtSm, cfg_.dtSs, cfg_.dtEh, cfg_.dtEm, cfg_.dtEs);
+        char16_t u[96];
+        Utf8::ToUtf16(s, -1, u, 96);
+        ModifyMenuW(menuAlarm_, ALARM_COUNT + 3, MF_BYPOSITION | MF_STRING | (cfg_.dtUse ? MF_CHECKED : MF_UNCHECKED),
+                    CMD_DETECT, (LPCWSTR)u);                     // '사용' 이면 메뉴 이름 앞에 체크 표시
+    }
+
+    // 텔레그램 모듈에 /detectOn 또는 /detectOff 를 넘긴다 (카메라/텔레그램 설정이 없으면 모듈이 무시하거나 안내만 함)
+    void PostDetect(bool on, const char* why) {
+        Log::Put("침입 탐지 시간: %s -> %s", why, on ? "/detectOn" : "/detectOff");
+        tg::PostTrigger(on ? "/detectOn" : "/detectOff");
+    }
+
+    // 침입 탐지 시간 메뉴: 사용 / 항상 / 매일 개시·종료 시각
+    void DetectCommand() {
+        DetectData d;
+        d.use = cfg_.dtUse;
+        d.always = cfg_.dtAlways;
+        d.sh = cfg_.dtSh; d.sm = cfg_.dtSm; d.ss = cfg_.dtSs;
+        d.eh = cfg_.dtEh; d.em = cfg_.dtEm; d.es = cfg_.dtEs;
+        modal_ = true;
+        bool ok = DetectDialog::Show(hi_, hwnd_, d);
+        modal_ = false;
+        if (!ok) return;
+        cfg_.dtUse = d.use;
+        cfg_.dtAlways = d.always;
+        cfg_.dtSh = d.sh; cfg_.dtSm = d.sm; cfg_.dtSs = d.ss;
+        cfg_.dtEh = d.eh; cfg_.dtEm = d.em; cfg_.dtEs = d.es;
+        dtStartYmd_ = dtEndYmd_ = 0;
+        cfg_.SaveDetect();
+        UpdateDetectMenu();
+        Log::Put("침입 탐지 시간 저장: 사용 %d, 항상 %d, 개시 %02d:%02d:%02d, 종료 %02d:%02d:%02d", (int)d.use, (int)d.always, d.sh, d.sm, d.ss, d.eh, d.em, d.es);
+        if (cfg_.DetectWantedNow()) PostDetect(true, "설정 저장 (지금 켜야 하는 상태)");
+    }
+
+    void UpdateChimeMenu() {
+        const char* name = cfg_.chFile;
+        for (const char* p = cfg_.chFile; *p; p++)
+            if (*p == '\\' || *p == '/') name = p + 1;
+        char nm[48];
+        lstrcpynA(nm, name, sizeof(nm));
+        char s[96];
+        wsprintfA(s, "시보 설정   매시 %02d분   %s", cfg_.chMin, cfg_.chFile[0] ? nm : "__");
+        char16_t u[96];
+        Utf8::ToUtf16(s, -1, u, 96);
+        ModifyMenuW(menuAlarm_, ALARM_COUNT + 4, MF_BYPOSITION | MF_STRING | (cfg_.chOn ? MF_CHECKED : MF_UNCHECKED),
+                    CMD_CHIME, (LPCWSTR)u);                      // '사용' 이면 메뉴 이름 앞에 체크 표시
+    }
+
+    // CMD 모드에서 start "" .\wav\wavplayer.exe "<wav 파일>" 실행 (작업 폴더는 exe 폴더, cmd 창은 숨김). 실행을 시도했으면 true
+    bool RunChime(const char* why, const char* file) {
+        if (!file[0]) { Log::Put("시보(%s): 파일이 없어 실행하지 않음", why); return false; }
+        wchar_t dir[MAX_PATH], player[MAX_PATH + 16], wav[MAX_PATH], args[2 * MAX_PATH + 48];
+        GetModuleFileNameW(NULL, dir, MAX_PATH);
+        wchar_t* sl = wcsrchr(dir, L'\\');
+        if (sl) *sl = 0;
+        wsprintfW(player, L"%s\\wav\\wavplayer.exe", dir);
+        if (GetFileAttributesW(player) == INVALID_FILE_ATTRIBUTES) {
+            Log::Put("시보(%s): .\\wav\\wavplayer.exe 가 없어 실행하지 않음 (%s)", why, file);
+            return false;
+        }
+        if (!MultiByteToWideChar(CP_UTF8, 0, file, -1, wav, MAX_PATH)) return false;
+        wsprintfW(args, L"/c start \"\" \".\\wav\\wavplayer.exe\" \"%s\"", wav);
+        HINSTANCE r = ShellExecuteW(NULL, L"open", L"cmd.exe", args, dir, SW_HIDE);
+        Log::Put("시보(%s): wavplayer 실행 %s (결과코드 %d): %s", why, (INT_PTR)r > 32 ? "성공" : "실패", (int)(INT_PTR)r, file);
+        return true;
+    }
+
+    static void ChimeTestCb(void* self, const ChimeData& p) {
+        ClockWindow* w = (ClockWindow*)self;
+        if (!p.file[0]) {
+            MessageBoxW(w->hwnd_, (LPCWSTR)u"음악 파일을 먼저 선택하세요.", (LPCWSTR)u"시보 설정", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        if (!w->RunChime("테스트", p.file))
+            MessageBoxW(w->hwnd_, (LPCWSTR)u".\\wav\\wavplayer.exe 를 찾을 수 없습니다.", (LPCWSTR)u"시보 설정", MB_OK | MB_ICONWARNING);
+    }
+
+    // 시보 설정 메뉴: 사용 / 음악(wav) 파일 / 테스트 / 저장
+    void ChimeCommand() {
+        ChimeData d;
+        d.on = cfg_.chOn;
+        d.min = cfg_.chMin;
+        lstrcpynA(d.file, cfg_.chFile, sizeof(d.file));
+        modal_ = true;
+        bool ok = ChimeDialog::Show(hi_, hwnd_, d, ChimeTestCb, this);
+        modal_ = false;
+        if (!ok) return;
+        cfg_.chOn = d.on;
+        cfg_.chMin = d.min;
+        lstrcpynA(cfg_.chFile, d.file, sizeof(cfg_.chFile));
+        chFiredKey_ = 0;
+        cfg_.SaveChime();
+        UpdateChimeMenu();
+        Log::Put("시보 설정 저장: 사용 %d, 매시 %02d분, 파일=%s", (int)d.on, d.min, d.file[0] ? d.file : "(없음)");
     }
 
     void UpdateRebootMenu() {
@@ -11429,6 +12494,11 @@ private:
     // 알람 / ScanOn / ScanOff 한 칸의 서브메뉴 만들기 (사용, 시각, 파일, 메모, 자동 닫기, 지우기, 테스트)
     void MakeAlarmSub(int i) {
         const bool sc = i >= ALARM_COUNT;
+        if (!sc) {                              // 알람1~10: 서브메뉴 없이 일반 항목. 누르면 통합 알람 대화상자의 해당 탭이 열림
+            AppendMenuA(menuAlarm_, MF_STRING, AlarmId(i, 0), "-");
+            UpdateAlarmMenu(i);
+            return;
+        }
         HMENU sub = menuAlarmSub_[i] = CreatePopupMenu();
         AddMenu(sub, 0, AlarmId(i, 0), "사용(&E)");
         AddMenu(sub, 0, AlarmId(i, 1), "시각 설정(&T)...");
@@ -11468,6 +12538,7 @@ private:
     static int AlarmPos(int i) { return i < ALARM_COUNT ? i : 2 + (i - ALARM_COUNT); }     // 알람 메뉴(0~9) / WiFiScan 메뉴(모니터링, 구분선 다음 2, 3) 안의 위치
 
     void UpdateAlarmMenu(int i) {
+        if (i >= ALARM_COUNT && !menuAlarmSub_[i]) return;     // scan 예약은 통합 대화상자로 바뀌어 서브메뉴를 만들지 않음
         const Alarm& a = cfg_.alarms[i];
         const char* name = a.file;
         for (const char* p = a.file; *p; p++)
@@ -11480,9 +12551,13 @@ private:
         char16_t u[160];
         Utf8::ToUtf16(s, -1, u, 160);
         HMENU pm = i < ALARM_COUNT ? menuAlarm_ : menuScan_;
+        UINT chk = a.on ? MF_CHECKED : MF_UNCHECKED;
+        if (i < ALARM_COUNT) {                  // 일반 항목 (이름 + 체크)
+            ModifyMenuW(pm, AlarmPos(i), MF_BYPOSITION | MF_STRING | chk, AlarmId(i, 0), (LPCWSTR)u);
+            return;
+        }
         ModifyMenuW(pm, AlarmPos(i), MF_BYPOSITION | MF_POPUP | MF_STRING,
                     (UINT_PTR)menuAlarmSub_[i], (LPCWSTR)u);
-        UINT chk = a.on ? MF_CHECKED : MF_UNCHECKED;
         CheckMenuItem(pm, AlarmPos(i), MF_BYPOSITION | chk);
         HMENU sub = menuAlarmSub_[i];
         CheckMenuItem(sub, AlarmId(i, 0), MF_BYCOMMAND | chk);
@@ -11495,7 +12570,37 @@ private:
                     AlarmId(i, 7), (LPCWSTR)u);
     }
 
+    // 알람 테스트 콜백 (대화상자의 현재 입력값으로 실행. cfg_ 의 값은 실행 직후 원래대로 되돌림)
+    static void AlarmTestCb(void* self, int i, const Alarm& e) {
+        ClockWindow* w = (ClockWindow*)self;
+        Alarm keep = w->cfg_.alarms[i];
+        w->cfg_.alarms[i] = e;
+        Log::Put("%s 테스트 실행 파일=%s", AlarmName(i), e.file[0] ? e.file : "(없음)");
+        if (e.memo[0]) MemoWindow::Show(w->hi_, e.memo, 30);
+        if (e.file[0]) w->LaunchAlarm(i);
+        w->cfg_.alarms[i] = keep;
+    }
+
+    // 알람1~10 통합 대화상자 (tab = 처음 열 탭). 저장하면 바뀐 알람만 ini 에 기록
+    void AlarmDialogCommand(int tab) {
+        Alarm e[ALARM_COUNT];
+        for (int i = 0; i < ALARM_COUNT; i++) e[i] = cfg_.alarms[i];
+        modal_ = true;
+        bool ok = AlarmDialog::Show(hi_, hwnd_, e, tab, AlarmTestCb, this);
+        modal_ = false;
+        if (!ok) return;
+        for (int i = 0; i < ALARM_COUNT; i++) {
+            if (memcmp(&e[i], &cfg_.alarms[i], sizeof(Alarm)) == 0) continue;
+            cfg_.alarms[i] = e[i];
+            firedYmd_[i] = 0;                   // 오늘 울릴 기회를 다시 허용
+            cfg_.SaveAlarm(i);
+            UpdateAlarmMenu(i);
+            Log::Put("%s 설정 저장: 사용 %d, %02d:%02d:%02d, 파일=%s", AlarmName(i), (int)e[i].on, e[i].h, e[i].m, e[i].s, e[i].file[0] ? e[i].file : "(없음)");
+        }
+    }
+
     void AlarmCommand(int i, int act) {
+        if (i < ALARM_COUNT) { AlarmDialogCommand(i); return; }
         Alarm& a = cfg_.alarms[i];
         if (act == 8) {                         // 알람 테스트: 메모 표시 + 선택된 파일 1회 실행 (설정/사용 여부 변경 없음)
             Log::Put("%s 테스트 실행 파일=%s", AlarmName(i), a.file[0] ? a.file : "(없음)");
@@ -11578,6 +12683,7 @@ private:
         for (int i = 0; i < ALARM_TOTAL; i++) {
             const Alarm& a = cfg_.alarms[i];
             const bool sc = i >= ALARM_COUNT;   // ScanOn / ScanOff 는 파일/메모 없이 시각만 있어도 동작
+            if (sc && (!cfg_.scUse || cfg_.scAlways)) continue;     // 탐지 사용 + '항상' 꺼짐일 때만 개시/종료 시각 예약이 동작
             if (!a.on || (!sc && !a.file[0] && !a.memo[0]) || firedYmd_[i] == ymd) continue;
             int d = now - (a.h * 3600 + a.m * 60 + a.s);
             if (d < 0 || d > 5) continue;       // 타이머가 조금 늦어도 놓치지 않도록 5초 여유
@@ -11595,11 +12701,30 @@ private:
                 RunProg();
             }
         }
+        if (cfg_.dtUse && !cfg_.dtAlways) {     // 침입 탐지: 매일 개시 시각에 /detectOn, 종료 시각에 /detectOff
+            int d = now - (cfg_.dtSh * 3600 + cfg_.dtSm * 60 + cfg_.dtSs);
+            if (d >= 0 && d <= 5 && dtStartYmd_ != ymd) {
+                dtStartYmd_ = ymd;
+                PostDetect(true, "매일 개시 시각");
+            }
+            d = now - (cfg_.dtEh * 3600 + cfg_.dtEm * 60 + cfg_.dtEs);
+            if (d >= 0 && d <= 5 && dtEndYmd_ != ymd) {
+                dtEndYmd_ = ymd;
+                PostDetect(false, "매일 종료 시각");
+            }
+        }
+        if (cfg_.chOn && cfg_.chFile[0] && t.wMinute == cfg_.chMin && t.wSecond <= 5) {   // 시보: 매시 지정한 분 (타이머가 조금 늦어도 놓치지 않도록 5초 여유)
+            const int key = ymd * 100 + t.wHour;
+            if (chFiredKey_ != key) {
+                chFiredKey_ = key;
+                RunChime("매시", cfg_.chFile);
+            }
+        }
         if (cfg_.rbOn && rbFiredYmd_ != ymd) {  // 시스템 재시작 (재부팅 직후 재실행되어도 5초 여유가 지나 다시 실행되지 않음)
             int d = now - (cfg_.rbH * 3600 + cfg_.rbM * 60 + cfg_.rbS);
             if (d >= 0 && d <= 5) {
                 rbFiredYmd_ = ymd;
-                ConfirmReboot();
+                PostMessageW(hwnd_, WM_REBOOT_ASK, 0, 0);   // 타이머 처리 안에서 바로 모달 확인창을 띄우면 그동안 이 초의 시계를 못 그림 -> 메시지로 미룸
             }
         }
     }
@@ -11898,6 +13023,7 @@ private:
         case CMD_EXIT:      n = "앱 동작 설정 > 프로그램 종료"; break;
         case CMD_SHOWCLOCK: n = "시계 보이기/숨기기 토글"; break;
         case CMD_SCAN:      n = "WiFiScan 대화상자"; break;
+        case CMD_SCANSET:   n = "WiFiScan / HomeBack·NotHome 탐지 시간 및 프로그램 설정"; break;
         case CMD_MYPHONE:   n = "앱 동작 설정 > 내 폰 등록"; break;
         case CMD_IPREG:     n = "IP cam > IP cam 등록"; break;
         case CMD_IPVIEW:    n = "IP cam / 폰 연결 > 카메라 영상"; break;
@@ -11932,10 +13058,13 @@ private:
         else if (id >= CMD_CITY && id < CMD_CITY + CITY_COUNT) Log::Put("메뉴: Global 도시 선택 %s", CITIES[id - CMD_CITY].name);
         else if (id >= CMD_ATHEME && id < CMD_ATHEME + ATHEME_COUNT) Log::Put("메뉴: 아나로그 시계 디자인 > %s", ATHEMES[id - CMD_ATHEME].name);
         else if (id >= CMD_MOVE && id < CMD_MOVE + MOVE_COUNT) Log::Put("메뉴: 위치 이동 간격 %dms", MoveChoice(id - CMD_MOVE));
-        else if (id >= CMD_PROG && id <= CMD_PROG + 5) {
-            static const char* const A[] = {"사용 토글", "시각 설정", "파일 선택", "메모 설정", "알람 지우기", "알람 테스트"};
-            Log::Put("메뉴: 알람 / 다른 앱 호출 > %s", A[id - CMD_PROG]);
-        } else if (id == CMD_REBOOT)
+        else if (id == CMD_PROG)
+            Log::Put("메뉴: 알람 / 다른 앱 호출 (설정 대화상자)");
+        else if (id == CMD_DETECT)
+            Log::Put("메뉴: 작동시간 및 알람 설정 / 침입 탐지 시간");
+        else if (id == CMD_CHIME)
+            Log::Put("메뉴: 작동시간 및 알람 설정 / 시보 설정");
+        else if (id == CMD_REBOOT)
             Log::Put("메뉴: 시스템 재시작 시각 (시각 설정 + 사용)");
         else if (id >= CMD_HOMEPROG && id < CMD_HOMEPROG + 20) {
             static const char* const A[6] = {"사용 토글", "", "파일 선택", "메모 설정", "지우기", "테스트"};
@@ -11944,7 +13073,8 @@ private:
         else if (DecodeAlarm(id, ai, aact)) {
             static const char* const A[ALARM_ACTS] = {"사용 토글", "시각 설정", "파일 선택", "알람 지우기",
                 "자동 닫기 끔", "자동 닫기 재생이 끝나면", "자동 닫기 지정 시간 후", "닫기 시간 설정", "알람 테스트", "메모 설정"};
-            Log::Put("메뉴: %s > %s", AlarmName(ai), A[aact]);
+            if (ai < ALARM_COUNT) Log::Put("메뉴: %s (알람 설정 대화상자)", AlarmName(ai));
+            else Log::Put("메뉴: %s > %s", AlarmName(ai), A[aact]);
         }
     }
 
@@ -11954,6 +13084,7 @@ private:
         if (id == CMD_EXIT)            ConfirmExit();
         else if (id == CMD_SHOWCLOCK)  SetClockVisible(!cfg_.visible);
         else if (id == CMD_SCAN)       ScanCommand();
+        else if (id == CMD_SCANSET)    ScanSetCommand();
         else if (id == CMD_MYPHONE)    ScanCommand(true);
         else if (id == CMD_IPREG)      IpCamRegister();
         else if (id == CMD_IPVIEW)     IpCamView();
@@ -12042,10 +13173,14 @@ private:
             CheckFormats();
             cfg_.WriteInt("Option", "DateFormat", cfg_.dateFmt);
         }
-        else if (id >= CMD_PROG && id <= CMD_PROG + 5)
-            ProgCommand(id - CMD_PROG);
+        else if (id == CMD_PROG)
+            ProgCommand(0);
         else if (id == CMD_REBOOT)
             RebootCommand();
+        else if (id == CMD_DETECT)
+            DetectCommand();
+        else if (id == CMD_CHIME)
+            ChimeCommand();
         else if (DecodeAlarm(id, ai, aact))
             AlarmCommand(ai, aact);
         else if (id >= CMD_HOMEPROG && id < CMD_HOMEPROG + 20 && id % 10 != 1 && id % 10 < 6)
@@ -12724,7 +13859,7 @@ private:
         cfg_.ipPort = port;
         cfg_.SaveIpCam();
         Log::Put("IP cam 등록: %s:%d", cfg_.ipHost, cfg_.ipPort);
-        for (ipcam::Session* c : cams_) c->SetIp(cfg_.ipHost, std::to_string(cfg_.ipPort));      // 열려 있는 카메라 영상 창들에도 반영 (다음 [실행] 부터)
+        for (ipcam::SessionThread* c : cams_) c->SetIp(cfg_.ipHost, std::to_string(cfg_.ipPort));      // 열려 있는 카메라 영상 창들에도 반영 (다음 [실행] 부터)
         return true;
     }
 
@@ -12773,15 +13908,14 @@ private:
     void IpCamView() {                           // 누를 때마다 새 영상 창 (웹캠 / IP cam 을 각각 다른 창에서 동시에 실행 가능)
         if (owner_) return;
         Log::Put("카메라 영상 열기 (IP cam 등록값: %s:%d, 열린 창 %d개)", cfg_.ipHost, cfg_.ipPort, (int)cams_.size());      // IP cam 이 미등록이어도 창은 열림 (웹캠만 쓸 수 있음)
-        ipcam::Session* s = new ipcam::Session(hi_, hwnd_, cfg_.ipHost, std::to_string(cfg_.ipPort));
-        if (!s->Open()) { delete s; return; }
+        ipcam::SessionThread* s = ipcam::SessionThread::Start(hi_, hwnd_, cfg_.ipHost, std::to_string(cfg_.ipPort));   // 영상 창은 전용 스레드에서 열림 (시계와 분리)
+        if (!s) { Log::Put("카메라 영상 스레드 생성 실패 (오류 %d)", (int)GetLastError()); return; }
         cams_.push_back(s);
     }
 
     void IpCamClosed() {                         // 영상 창이 닫힘: 창이 없어진 세션의 수신 스레드 정지 + 정리 (마지막 창이 닫히면 ipcam.log 도 닫힘)
         for (size_t i = cams_.size(); i-- > 0; ) {
-            HWND w = cams_[i]->Hwnd();
-            if (w && IsWindow(w)) continue;
+            if (!cams_[i]->Done()) continue;                // 스레드가 끝난 것만 정리 (끝날 때 다시 이 메시지가 옴)
             Log::Put("카메라 영상 닫힘");
             delete cams_[i];
             cams_.erase(cams_.begin() + i);
@@ -13251,9 +14385,11 @@ private:
     HMENU        menuAlarm_    = NULL;
     HMENU        menuScan_     = NULL;
     HMENU        menuBack_     = NULL;
-    HMENU        menuProg_     = NULL;
+    int          dtStartYmd_   = 0;     // 침입 탐지 개시/종료를 마지막으로 한 날짜
+    int          dtEndYmd_     = 0;
     int          pgFiredYmd_   = 0;     // 프로그램 실행을 마지막으로 한 날짜
     int          rbFiredYmd_   = 0;     // 시스템 재시작을 마지막으로 실행한 날짜
+    int          chFiredKey_   = 0;     // 시보를 마지막으로 울린 시각 (YYYYMMDD*100 + 시)
     HMENU        menuAlarmSub_[ALARM_TOTAL] = {};
     HMENU        menuHomeProg_[2] = {};
     int          firedYmd_[ALARM_TOTAL]     = {};   // 알람이 마지막으로 울린 날짜 (YYYYMMDD)
@@ -13268,7 +14404,7 @@ private:
     POINT        preFull_      = {0, 0};  // 전체화면 켜기 직전의 창 위치
     bool         modal_        = false; // 메뉴/대화상자 사용 중 (자동 이동 일시 정지)
     ScanEngine*  scan_         = NULL;  // 본 창: scan 엔진 (WinMain 소유)
-    std::vector<ipcam::Session*> cams_;  // 본 창: 열려 있는 카메라 영상 세션들 (메뉴를 누를 때마다 새 창, 중복 실행 가능)
+    std::vector<ipcam::SessionThread*> cams_;  // 본 창: 열려 있는 카메라 영상 세션들 (메뉴를 누를 때마다 새 창, 중복 실행 가능)
     std::string  statusText_;           // 본 창: 맨 아래 상태줄 문구 (scan On/Off 등)
     HFONT        statusFont_   = NULL;
     ClockWindow* head_         = NULL;  // 본 창: 도시 창 목록
@@ -13359,8 +14495,85 @@ static void RunCompanionApp(const char* utf8Path, bool asInvoker) {
     Log::Put("동반 실행 앱 실행 %s (결과코드 %d, 권한 요청 무시 %s): %s", (INT_PTR)r > 32 ? "성공" : "실패", (int)(INT_PTR)r, asInvoker ? "ON" : "OFF", utf8Path);
 }
 
+// 시작할 때 .\WAV\WAVPlayer.exe (시보 재생 프로그램) 가 없으면 GitHub 에서 내려받는다.
+// 백그라운드 스레드에서 WinHTTP 로 받으므로 네트워크가 느리거나 없어도 시작이 지연되지 않는다. 임시 파일(.tmp)로 받아 검사한 뒤 제자리에 옮긴다.
+// 주소: https://github.com/GarpsuKim/gsTop/blob/main/gsHomeManager/WAV/WAVPlayer.exe 의 raw 파일 (blob 주소는 HTML 페이지라 raw 주소를 쓴다)
+static DWORD WINAPI WavPlayerDownloadThread(LPVOID) {
+    static const wchar_t* const HOST = L"github.com";
+    static const wchar_t* const PATH = L"/GarpsuKim/gsTop/raw/main/gsHomeManager/WAV/WAVPlayer.exe";
+    wchar_t dir[MAX_PATH], folder[MAX_PATH + 8], exe[MAX_PATH + 24], tmp[MAX_PATH + 32];
+    GetModuleFileNameW(NULL, dir, MAX_PATH);
+    wchar_t* sl = wcsrchr(dir, L'\\');
+    if (sl) *sl = 0;
+    wsprintfW(folder, L"%s\\WAV", dir);
+    wsprintfW(exe, L"%s\\WAVPlayer.exe", folder);
+    wsprintfW(tmp, L"%s.tmp", exe);
+    Log::Put("WAVPlayer.exe 내려받기 시작: https://github.com/GarpsuKim/gsTop/raw/main/gsHomeManager/WAV/WAVPlayer.exe");
+    CreateDirectoryW(folder, NULL);
+
+    bool ok = false;
+    HINTERNET ses = WinHttpOpen(L"gsHomeManager", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET con = ses ? WinHttpConnect(ses, HOST, INTERNET_DEFAULT_HTTPS_PORT, 0) : NULL;
+    HINTERNET req = con ? WinHttpOpenRequest(con, L"GET", PATH, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE) : NULL;
+    if (ses) WinHttpSetTimeouts(ses, 5000, 5000, 15000, 30000);
+    if (req && WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(req, NULL)) {
+        DWORD code = 0, sz = sizeof(code);
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &sz, WINHTTP_NO_HEADER_INDEX);
+        if (code != 200) {
+            Log::Put("WAVPlayer.exe 내려받기 실패: HTTP %d", (int)code);
+        } else {
+            HANDLE f = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (f == INVALID_HANDLE_VALUE) {
+                Log::Put("WAVPlayer.exe 내려받기 실패: 임시 파일을 만들 수 없음 (오류 %d)", (int)GetLastError());
+            } else {
+                char buf[16384];
+                DWORD n = 0;
+                unsigned long long total = 0;
+                bool mz = false, werr = false;
+                while (WinHttpReadData(req, buf, sizeof(buf), &n) && n > 0) {
+                    if (total == 0) mz = n >= 2 && buf[0] == 'M' && buf[1] == 'Z';     // 실행 파일(MZ) 인지 확인 (HTML 오류 페이지 방지)
+                    DWORD w = 0;
+                    if (!WriteFile(f, buf, n, &w, NULL) || w != n) { werr = true; break; }
+                    total += n;
+                }
+                CloseHandle(f);
+                if (!werr && mz && total > 1024 && MoveFileExW(tmp, exe, MOVEFILE_REPLACE_EXISTING)) {
+                    ok = true;
+                    Log::Put("WAVPlayer.exe 내려받기 완료 (%u 바이트)", (unsigned)total);
+                } else {
+                    Log::Put("WAVPlayer.exe 내려받기 실패: 받은 파일이 올바르지 않음 (%u 바이트, 실행 파일 %s, 쓰기 오류 %s)", (unsigned)total, mz ? "맞음" : "아님", werr ? "있음" : "없음");
+                }
+            }
+        }
+    } else {
+        Log::Put("WAVPlayer.exe 내려받기 실패: GitHub 에 연결할 수 없음 (WinHTTP 오류 %d)", (int)GetLastError());
+    }
+    if (req) WinHttpCloseHandle(req);
+    if (con) WinHttpCloseHandle(con);
+    if (ses) WinHttpCloseHandle(ses);
+    if (!ok) DeleteFileW(tmp);
+    return 0;
+}
+
+// .\WAV\WAVPlayer.exe 가 있는지 확인하고, 없으면 백그라운드에서 내려받는다
+static void EnsureWavPlayer() {
+    wchar_t path[MAX_PATH + 24];
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+    wchar_t* sl = wcsrchr(path, L'\\');
+    if (sl) *sl = 0;
+    lstrcatW(path, L"\\WAV\\WAVPlayer.exe");
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
+        Log::Put("WAVPlayer.exe 확인: 있음");
+        return;
+    }
+    Log::Put("WAVPlayer.exe 확인: 없음 -> GitHub 에서 내려받음");
+    HANDLE h = CreateThread(NULL, 0, WavPlayerDownloadThread, NULL, 0, NULL);
+    if (h) CloseHandle(h);
+}
+
 int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
     Log::Init();
+    EnsureWavPlayer();                          // .\WAV\WAVPlayer.exe (시보 재생) 가 없으면 GitHub 에서 내려받음 (백그라운드)
     tg::InstallCrashHandlers();                 // 처리되지 않은 예외는 원인을 log.txt 에 남기고 종료
     SingleInstance guard("gsHomeManager_SingleInstance");   // 중복 실행 방지
     if (!guard.IsFirst()) {                     // 이미 실행 중이면 기존 앱을 종료시키고 이 프로세스가 대신 실행
@@ -13390,10 +14603,18 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
         Log::Put("창 생성 실패 (오류 %d)", (int)GetLastError());
         return 1;
     }
-    scan.Start("프로그램 시작");                               // 시작할 때 자동으로 scan On
-    Log::Put("WiFiScan: 시작할 때 자동으로 scan On");
+    if (cfg.ScanWantedNow()) {                  // 탐지 사용 + [항상 또는 지금이 개시~종료 시각 안] 이면 시작할 때 자동으로 scan On
+        scan.Start("프로그램 시작");
+        Log::Put("WiFiScan: 시작할 때 자동으로 scan On");
+    } else {
+        Log::Put("WiFiScan: 탐지 사용 안 함 또는 지정 시간 밖이므로 시작할 때 scan Off");
+    }
     tg::Start();                                // Telegram 모듈 (전용 스레드). ini [Telegram] 에 토큰/chat id 가 없으면 스스로 사용 안 함
     Log::Put("Telegram 모듈 시작 (ini [Telegram], 로그 log.txt)");
+    if (cfg.DetectWantedNow()) {                // 침입 탐지 시간: 항상(프로그램 시작과 동시에), 또는 시작했을 때 이미 시간대 안이면 /detectOn
+        Log::Put("침입 탐지 시간: 프로그램 시작 -> /detectOn");
+        tg::PostTrigger("/detectOn");
+    }
     if (cfg.rsAuto) {                           // ini [RdpServer] autostart=1: 다른 PC(서버) 자동 시작
         std::string err;
         if (!rdp::Server::Get().Start(RdpServerCfg(cfg), err)) Log::Put("원격 서버 자동 시작 실패: %s", err.c_str());
