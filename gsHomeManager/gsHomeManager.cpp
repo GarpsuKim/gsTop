@@ -433,11 +433,17 @@ public:
     bool     companionInvoker = false;  // [Option] companion_run_as_invoker=TRUE: 동반 실행 앱의 관리자 권한 요청을 무시 (RunAsInvoker, 일반 권한으로 실행)
     bool     analogNoSec  = false;      // [Analog] HideSecond: 초침 생략
     int      analogSize   = 200;        // [Analog] Size: 아날로그 시계 한 변(px). 마우스 휠로 확대/축소하며 마지막 크기를 보관
-    bool     analogMatch  = false;      // [Analog] MatchBg: 시계 원 안쪽 바탕색을 모니터 바탕색(단색일 때)과 일치
+    int      analogBg     = 1;          // [Analog] BgMode: 시계 원 안쪽 바탕색. 0=모니터 배경 일치, 1=테마 적용, 2~12=흰색/회색/검정/빨강/주황/노랑/초록/파랑/남색/보라/핑크, 13=기타(BgColor)
+    COLORREF analogBgColor = RGB(255, 255, 255);   // [Analog] BgColor: 기타 색
+    bool     analogColOn[5] = {};       // [Analog] HourColor/MinColor/SecColor/TickColor/BorderColor: 시침/분침/초침/눈금/테두리 색을 직접 지정했는가 (false = 테마 적용)
+    COLORREF analogCol[5] = {};         // 직접 지정한 색
+    int      analogBgAlpha = 100;       // [Analog] BgAlpha: 시계 원 안쪽 바탕 불투명도 (10~100 %). 눈금/바늘/글자는 그대로
+    bool     analogMatch  = false;      // (analogBg == 0) 모니터 바탕색 일치. [Analog] MatchBg: 시계 원 안쪽 바탕색을 모니터 바탕색(단색일 때)과 일치
     bool     deskSolid    = false;      // (실행 중 값) 모니터 바탕이 단색인지
     COLORREF deskColor    = 0;          // (실행 중 값) 모니터 바탕 단색
     bool     analogFull   = false;      // [Analog] Full: 아날로그 전체화면 (모니터 중앙 고정 + 크기 = 모니터 높이)
     bool     analogNeon   = false;      // [Analog] Neon: 네온사인 효과 (어두운 문자판 + 빛나는 선)
+    int      analogAnim   = 0;          // [Analog] Animate: 애니메이션 종류 (0=끔, 1~9)
     int      analogTheme  = 1;          // [Analog] Theme: ATHEMES 인덱스 (0 블랙, 1 화이트 ...)
     int      clockMode    = 0;          // [Option] ClockMode: 0=[타이틀 & 디지털] 1=[디지털] 2=[아날로그] (마우스 클릭 때마다 순환, 시작할 때 이 모드로 시작)
     bool     bootingAlert = false;      // [Option] booting_alert=TRUE 이면 시작할 때 .\booting_alert\booting_Alert_RUN.BAT 실행
@@ -465,6 +471,7 @@ public:
     bool     chOn = false;              // 시보 사용
     char     chFile[784] = "";          // 재생할 wav 파일 경로 (UTF-8). ini 에 값이 없으면 C:\Windows\Media\ring10.wav
     int      chMin = 0;                 // 울릴 분 (0~59, 기본 0 = 정각)
+    int      chQs = 0, chQe = 0;        // 시보 제외 시간: 시작/끝 (하루 중 분 0~1439). 같으면 제외 없음, 시작 > 끝 이면 자정을 넘김. 시작 포함, 끝 미포함
     // HomeBack / NotHome 탐지 ([WiFiScan] ScanUse / ScanAlways + ScanOn*/ScanOff* 의 시각 = 개시/종료 시각)
     bool     scUse = true;              // 탐지(scan) 사용. 끄면 시작할 때 scan 을 켜지 않고 예약도 무시
     bool     scAlways = true;           // 항상: 시작할 때부터 계속 scan. 끄면 개시~종료 시각 동안에만 scan (ini 에 예약 시각이 있던 사용자는 기본 끔)
@@ -509,7 +516,7 @@ public:
         bgColor = d.bgColor;  backFollow = d.backFollow;  opacity = d.opacity;
         lstrcpyA(timeFont, d.timeFont);  timeSize = d.timeSize;  timeColor = d.timeColor;
         lstrcpyA(dateFont, d.dateFont);  dateSize = d.dateSize;  dateColor = d.dateColor;
-        analogTheme = d.analogTheme;  analogNeon = d.analogNeon;  analogMatch = d.analogMatch;  analogSize = d.analogSize;  analogNoSec = d.analogNoSec;
+        analogTheme = d.analogTheme;  analogNeon = d.analogNeon;  analogMatch = d.analogMatch;  analogBg = d.analogBg;  analogBgColor = d.analogBgColor;  analogBgAlpha = d.analogBgAlpha;  for (int i = 0; i < 5; i++) { analogColOn[i] = d.analogColOn[i]; analogCol[i] = d.analogCol[i]; }  analogSize = d.analogSize;  analogNoSec = d.analogNoSec;  analogAnim = d.analogAnim;
         topmost = d.topmost;  allMon = d.allMon;  allDesk = d.allDesk;  timeFmt = d.timeFmt;  dateFmt = d.dateFmt;
     }
 
@@ -623,8 +630,21 @@ public:
     void SaveClockMode() { WriteInt("Option", "ClockMode", clockMode); }
     void SaveAnalogTheme() { WriteInt("Analog", "Theme", analogTheme); }
     void SaveAnalogNeon() { WriteInt("Analog", "Neon", analogNeon); }
+    void SaveAnalogAnim() { WriteInt("Analog", "Animate", analogAnim); }
     void SaveAnalogFull() { WriteInt("Analog", "Full", analogFull); }
-    void SaveAnalogMatch() { WriteInt("Analog", "MatchBg", analogMatch); }
+    static const char* ColKey(int i) { static const char* const k[5] = {"HourColor", "MinColor", "SecColor", "TickColor", "BorderColor"}; return k[i]; }
+    void SaveAnalogCol() {
+        for (int i = 0; i < 5; i++) {
+            if (analogColOn[i]) WriteColor("Analog", ColKey(i), analogCol[i]);
+            else WritePrivateProfileStringA("Analog", ColKey(i), "Theme", ini_);
+        }
+    }
+    void SaveAnalogBgAlpha() { WriteInt("Analog", "BgAlpha", analogBgAlpha); }
+    void SaveAnalogBg() {
+        analogMatch = analogBg == 0;
+        WriteInt("Analog", "BgMode", analogBg);
+        WriteColor("Analog", "BgColor", analogBgColor);
+    }
     void SaveAnalogSize() { WriteInt("Analog", "Size", analogSize); }
     void SaveAnalogNoSec() { WriteInt("Analog", "HideSecond", analogNoSec); }
 
@@ -672,6 +692,7 @@ public:
     void SaveScanSet() {
         WriteInt("WiFiScan", "ScanUse", scUse);
         WriteInt("WiFiScan", "ScanAlways", scAlways);
+        WriteInt("WiFiScan", "NotHome", notHomeSec);
         SaveScanSched(ALARM_SCAN_ON);
         SaveScanSched(ALARM_SCAN_OFF);
         SaveHomeProg(0);
@@ -697,6 +718,13 @@ public:
         WriteInt("Alarm", "ChimeOn", chOn);
         WritePrivateProfileStringA("Alarm", "ChimeFile", chFile, ini_);
         WriteInt("Alarm", "ChimeMinute", chMin);
+        {
+            char q[16];
+            wsprintfA(q, "%02d:%02d", chQs / 60, chQs % 60);
+            WritePrivateProfileStringA("Alarm", "ChimeSkipStart", q, ini_);
+            wsprintfA(q, "%02d:%02d", chQe / 60, chQe % 60);
+            WritePrivateProfileStringA("Alarm", "ChimeSkipEnd", q, ini_);
+        }
     }
 
     // 지금(초 단위 시각)이 침입 탐지 시간대 안인지: 개시 <= 지금 < 종료 (종료가 개시보다 이르면 자정을 넘김)
@@ -862,18 +890,31 @@ private:
             "companion_run_as_invoker=FALSE\r\n"
             "\r\n"
             "[Analog]\r\n"
-            "; Theme: 아날로그 시계 테마. 0=블랙 1=화이트 2=푸른색 3=빨간색 4=무지개 5=초록색 6=금색 7=보라색 8=분홍색 9=청록색 10=세피아. 메뉴 F4) 아날로그 시계 디자인 에서 바꿀 수 있습니다.\r\n"
+            "; Theme: 아날로그 시계 테마. 0=블랙 1=화이트 2=푸른색 3=빨간색 4=무지개 5=초록색 6=금색 7=보라색 8=분홍색 9=청록색 10=세피아. 메뉴 F4) 아날로그 시계 에서 바꿀 수 있습니다.\r\n"
             "Theme=1\r\n"
-            "; Neon: 1=네온사인 효과 (어두운 바탕에 테마 색으로 빛나는 테두리/눈금/바늘), 0=끔. 메뉴 F4) 아나로그 시계 디자인 > 네온사인 on/off\r\n"
+            "; Neon: 1=네온사인 효과 (어두운 바탕에 테마 색으로 빛나는 테두리/눈금/바늘), 0=끔. 메뉴 F4) 아나로그 시계 > 네온사인 on/off\r\n"
             "Neon=0\r\n"
-            "; Full: 1=아날로그 모드에서 전체화면 (모니터 중앙에 고정, 크기를 모니터 수직 높이로 확대). 시계 모양이 아날로그일 때만 적용됩니다. 메뉴 F4) 아날로그 시계 디자인 > 전체화면 on/off\r\n"
+            "; Full: 1=아날로그 모드에서 전체화면 (모니터 중앙에 고정, 크기를 모니터 수직 높이로 확대). 시계 모양이 아날로그일 때만 적용됩니다. 메뉴 F4) 아날로그 시계 > 전체화면 on/off\r\n"
             "Full=0\r\n"
-            "; MatchBg: 1=시계 원 안쪽 바탕색을 모니터 바탕색과 일치시킴 (모니터 바탕이 단색일 때만. 그림이면 테마 색 사용). 메뉴 F4) 아날로그 시계 디자인 > 배경색 일치 on/off\r\n"
-            "MatchBg=0\r\n"
+            "; BgMode: 시계 원 안쪽 바탕색. 0=모니터 배경 일치 (모니터 바탕이 단색일 때만. 그림이면 테마 색 사용), 1=테마 적용, 2=흰색 3=회색 4=검정색 5=빨강 6=주황 7=노랑 8=초록 9=파랑 10=남색 11=보라 12=핑크, 13=기타 (BgColor). 메뉴 F4) 아날로그 시계 > 배경색 설정\r\n"
+            "BgMode=1\r\n"
+            "; BgColor: BgMode=13 (기타) 일 때 쓰는 색 (RRGGBB)\r\n"
+            "BgColor=FFFFFF\r\n"
+            "; BgAlpha: 시계 원 안쪽 바탕의 불투명도 (10 ~ 100 %, 100=불투명). 눈금/바늘/글자는 그대로 보입니다. 메뉴 F4) 아날로그 시계 > 배경 투명도\r\n"
+            "BgAlpha=100\r\n"
+            "; HourColor / MinColor / SecColor / TickColor: 시침 / 분침 / 초침 / 눈금 색. Theme=테마 색, RRGGBB=직접 지정. 메뉴 F4) 아날로그 시계 > 바늘 / 눈금 / 테두리 색깔\r\n"
+            "HourColor=Theme\r\n"
+            "MinColor=Theme\r\n"
+            "SecColor=Theme\r\n"
+            "TickColor=Theme\r\n"
+            "; BorderColor: 테두리 색 (Theme=테마 색, RRGGBB=직접 지정). 메뉴 F4) 아날로그 시계 > 바늘 / 눈금 / 테두리 색깔\r\n"
+            "BorderColor=Theme\r\n"
             "; Size: 아날로그 시계 한 변의 크기(픽셀). 아날로그 모드에서 마우스 휠을 굴리면 확대/축소되고, 마지막 크기가 여기에 저장됩니다. (60 ~ 모니터 높이)\r\n"
             "Size=200\r\n"
-            "; HideSecond: 1=초침을 그리지 않음, 0=초침 표시. 메뉴 F4) 아날로그 시계 디자인 > 초침 생략 on/off\r\n"
+            "; HideSecond: 1=초침을 그리지 않음, 0=초침 표시. 메뉴 F4) 아날로그 시계 > 초침 생략 on/off\r\n"
             "HideSecond=0\r\n"
+            "; Animate: 아날로그 애니메이션 종류. 0=끔 1~9=애니메이션1~9 (테두리/눈금/바늘이 함께 움직임). 메뉴 F4) 아날로그 시계 > 애니메이션 off, 애니메이션1 ~ 9\r\n"
+            "Animate=0\r\n"
             "\r\n"
             "[Lunar]\r\n"
             "; 음력 조회용 천문연구원 공공API. 주소와 인증키가 둘 다 있어야 메뉴 '음력 보이기' 를 쓸 수 있습니다 (없으면 메뉴 비활성).\r\n"
@@ -897,6 +938,7 @@ private:
             "; ProgOn=1 이면 매일 ProgTime(HH:MM:SS) 에 ProgFile(BAT/CMD/EXE) 을 실행하고, ProgMemo 가 있으면 모니터 중앙에 30초 표시합니다\r\n"
             "; RebootOn=1 이면 매일 RebootTime(HH:MM:SS) 에 재시작 확인창(300초)을 띄웁니다. Yes 또는 무응답이면 재시작 (shutdown /r /f /t 0, 앱 강제 종료), No 이면 재시작하지 않습니다\r\n"
             "; ChimeOn=1 이면 매시 ChimeMinute 분(0~59, 기본 0=정각)에 ChimeFile(wav) 을 .\\wav\\wavplayer.exe 로 재생합니다 (시보). ChimeFile 이 없으면 C:\\Windows\\Media\\ring10.wav\r\n"
+            "; ChimeSkipStart/ChimeSkipEnd=시보 제외 시간 (HH:MM). 이 시간대(시작 포함, 끝 미포함, 자정을 넘길 수 있음)에는 시보를 울리지 않습니다. 둘이 같으면(기본 00:00) 제외 없음\r\n"
             "\r\n"
             "[WiFiScan]\r\n"
             "; 집 안팎 감시 (블루투스 / Wi-Fi 스캔). 앱을 시작하면 자동으로 scan 을 시작합니다. 메뉴 'WiFiScan' 대화상자에서도 바꿀 수 있습니다.\r\n"
@@ -990,8 +1032,26 @@ private:
         clockMode = ReadInt("Option", "ClockMode", clockMode, 0, 2);
         analogTheme = ReadInt("Analog", "Theme", analogTheme, 0, ATHEME_COUNT - 1);
         analogNeon = ReadBool("Analog", "Neon", analogNeon);
+        analogAnim = ReadInt("Analog", "Animate", analogAnim, 0, 9);
         analogFull = ReadBool("Analog", "Full", analogFull);
-        analogMatch = ReadBool("Analog", "MatchBg", analogMatch);
+        {                                       // BgMode 가 없으면 예전 MatchBg(1=모니터 배경 일치) 에서 가져옴
+            analogBg = (int)GetPrivateProfileIntA("Analog", "BgMode", -1, ini_);          // 없으면(-1) 예전 키로 판단하고 ini 에는 쓰지 않음
+            if (analogBg < 0 || analogBg > 13) analogBg = ReadBool("Analog", "MatchBg", false) ? 0 : 1;
+            analogBgColor = ReadColor("Analog", "BgColor", analogBgColor);
+            analogMatch = analogBg == 0;
+            analogBgAlpha = ReadInt("Analog", "BgAlpha", analogBgAlpha, 10, 100);
+            for (int i = 0; i < 5; i++) {                       // "Theme"(또는 없음) = 테마 적용, RRGGBB = 직접 지정
+                char v[16];
+                GetPrivateProfileStringA("Analog", ColKey(i), "", v, sizeof(v), ini_);
+                analogColOn[i] = false;
+                if (!v[0]) WritePrivateProfileStringA("Analog", ColKey(i), "Theme", ini_);
+                else if (lstrcmpiA(v, "Theme") != 0) {
+                    const unsigned long x = strtoul(v[0] == '#' ? v + 1 : v, NULL, 16);
+                    analogCol[i] = RGB((x >> 16) & 255, (x >> 8) & 255, x & 255);
+                    analogColOn[i] = true;
+                }
+            }
+        }
         analogSize = ReadInt("Analog", "Size", analogSize, 60, 4000);
         analogNoSec = ReadBool("Analog", "HideSecond", analogNoSec);
         {                                       // booting_alert: TRUE / FALSE (없으면 FALSE 를 ini 에 써 넣음)
@@ -1108,6 +1168,13 @@ private:
             Utf8::Normalize(chFile, sizeof(chFile));
             chMin = (int)GetPrivateProfileIntA("Alarm", "ChimeMinute", 0, ini_);
             if (chMin < 0 || chMin > 59) chMin = 0;
+            for (int k = 0; k < 2; k++) {                       // 시보 제외 시간 "HH:MM" (없거나 잘못되면 00:00 = 제외 없음)
+                char q[32];
+                int h = 0, m = 0;
+                GetPrivateProfileStringA("Alarm", k ? "ChimeSkipEnd" : "ChimeSkipStart", "00:00", q, sizeof(q), ini_);
+                if (sscanf(q, "%d:%d", &h, &m) != 2 || h < 0 || h > 23 || m < 0 || m > 59) h = m = 0;
+                (k ? chQe : chQs) = h * 60 + m;
+            }
         }
 
         scUse = GetPrivateProfileIntA("WiFiScan", "ScanUse", 1, ini_) != 0;      // 없으면 사용 (예전처럼 시작할 때 scan On)
@@ -1135,6 +1202,21 @@ private:
         phPort = ReadSec("PhoneFtp", "Port", phPort, 1);
         if (phPort > 65535) phPort = 2121;
         ReadStr("PhoneFtp", "User", phUser, sizeof(phUser));
+        {   // 예전 screen_telegram.ini 에서 [Telegram] 에도 있던 집 감시 키는 [WiFiScan] 으로 통일: 값이 비어 있는 곳만 옮기고 [Telegram] 쪽 키는 삭제
+            static const char* const K[5] = {"HomeMac", "HomeIp", "HomeBluetooth", "WiFiScanWatchInterval", "NotHome"};
+            for (int i = 0; i < 5; i++) {
+                char t[64];
+                GetPrivateProfileStringA("Telegram", K[i], "\x01", t, sizeof(t), ini_);      // 키가 없으면 \x01
+                if (t[0] == '\x01' && !t[1]) continue;
+                if (i < 3 && t[0]) {
+                    char w[64];
+                    GetPrivateProfileStringA("WiFiScan", K[i], "", w, sizeof(w), ini_);
+                    if (!w[0]) WritePrivateProfileStringA("WiFiScan", K[i], t, ini_);
+                }
+                WritePrivateProfileStringA("Telegram", K[i], NULL, ini_);
+                Log::Put("ini: [Telegram] %s 삭제 ([WiFiScan] 으로 통일)", K[i]);
+            }
+        }
         scanBt   = ReadBool("WiFiScan", "ScanBluetooth", scanBt);        // 집 안팎 감시 (없는 키는 기본값을 ini 에 써 넣음)
         scanWifi = ReadBool("WiFiScan", "ScanWifi", scanWifi);
         ReadStr("WiFiScan", "HomeBluetooth", homeBt, sizeof(homeBt));
@@ -2175,10 +2257,87 @@ private:
 };
 
 // 시보 설정 대화상자: 사용 / wav 파일 선택 (기본 C:\Windows\Media) / 테스트 / 저장
+// ---------------------------------------------------------------- 아날로그 배경 투명도 대화상자 (좌우 슬라이더)
+class BgAlphaDialog {
+public:
+    typedef void (*PreviewFn)(void* ctx, int pct);                  // 슬라이더를 움직이는 동안 바로 미리보기
+    static bool Show(HINSTANCE hi, HWND owner, int& pct, PreviewFn fn, void* fctx) {
+        DlgBuilder b;
+        b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        b.D(0);
+        b.W(7); b.W(0); b.W(0); b.W(250); b.W(96);
+        b.W(0); b.W(0);
+        b.S("배경 투명도");
+        b.W(9); b.S("Segoe UI");
+        const DWORD ST = WS_CHILD | WS_VISIBLE;
+        const DWORD TS = ST | WS_TABSTOP;
+        b.Control(ST | SS_LEFT, 14, 10, 220, 10, IDC_VAL, "STATIC", "");
+        b.Control(TS | TBS_HORZ | TBS_AUTOTICKS, 10, 24, 230, 22, IDC_SLIDER, "msctls_trackbar32", "");
+        b.Control(ST | SS_LEFT, 14, 48, 40, 10, IDC_STATIC, "STATIC", "10%");
+        b.Control(ST | SS_RIGHT, 190, 48, 40, 10, IDC_STATIC, "STATIC", "100%");
+        b.Control(ST | SS_LEFT, 14, 60, 224, 10, IDC_STATIC, "STATIC", "(시계 원 안쪽 바탕의 불투명도. 100% = 불투명)");
+        b.Button(TS | BS_DEFPUSHBUTTON, 130, 76, 52, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 188, 76, 52, 14, IDCANCEL, "닫기");
+        Ctx c = {pct, pct, fn, fctx};
+        return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
+    }
+
+private:
+    enum { IDC_SLIDER = 101, IDC_VAL, IDC_STATIC = -1 };
+    struct Ctx { int& out; int orig; PreviewFn fn; void* fctx; };
+
+    static void ShowVal(HWND d, int v) {
+        wchar_t t[64];
+        wsprintfW(t, L"배경 투명도 : %d %%", v);
+        SetDlgItemTextW(d, IDC_VAL, t);
+    }
+
+    static INT_PTR CALLBACK Proc(HWND d, UINT msg, WPARAM w, LPARAM l) {
+        Ctx* c = (Ctx*)GetWindowLongPtrA(d, GWLP_USERDATA);
+        switch (msg) {
+        case WM_INITDIALOG: {
+            INITCOMMONCONTROLSEX ic = {sizeof(ic), ICC_BAR_CLASSES};
+            InitCommonControlsEx(&ic);
+            c = (Ctx*)l;
+            SetWindowLongPtrA(d, GWLP_USERDATA, l);
+            HWND tb = GetDlgItem(d, IDC_SLIDER);
+            SendMessageW(tb, TBM_SETRANGE, TRUE, MAKELONG(10, 100));
+            SendMessageW(tb, TBM_SETTICFREQ, 10, 0);
+            SendMessageW(tb, TBM_SETPAGESIZE, 0, 10);
+            SendMessageW(tb, TBM_SETPOS, TRUE, c->orig);
+            ShowVal(d, c->orig);
+            return TRUE;
+        }
+        case WM_HSCROLL:
+            if ((HWND)l == GetDlgItem(d, IDC_SLIDER)) {
+                const int v = (int)SendMessageW((HWND)l, TBM_GETPOS, 0, 0);
+                ShowVal(d, v);
+                if (c->fn) c->fn(c->fctx, v);
+                return TRUE;
+            }
+            break;
+        case WM_COMMAND:
+            switch (LOWORD(w)) {
+            case IDOK:
+                c->out = (int)SendDlgItemMessageW(d, IDC_SLIDER, TBM_GETPOS, 0, 0);
+                EndDialog(d, 1);
+                return TRUE;
+            case IDCANCEL:
+                if (c->fn) c->fn(c->fctx, c->orig);                 // 미리보기 되돌림
+                EndDialog(d, 0);
+                return TRUE;
+            }
+            break;
+        }
+        return FALSE;
+    }
+};
+
 struct ChimeData {
     bool on = false;
     char file[784] = "C:\\Windows\\Media\\ring10.wav";
     int  min = 0;                               // 울릴 분 (0~59)
+    int  qs = 0, qe = 0;                        // 시보 제외 시간 시작/끝 (하루 중 분). 같으면 제외 없음
 };
 
 class ChimeDialog {
@@ -2188,7 +2347,7 @@ public:
         DlgBuilder b;
         b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
         b.D(0);
-        b.W(10); b.W(0); b.W(0); b.W(270); b.W(106);
+        b.W(21); b.W(0); b.W(0); b.W(280); b.W(146);
         b.W(0); b.W(0);
         b.S("시보 설정");
         b.W(9); b.S("Segoe UI");
@@ -2202,14 +2361,25 @@ public:
         b.Control(ST | SS_LEFT, 14, 78, 24, 10, IDC_STATIC, "STATIC", "매시");
         b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 40, 75, 40, 100, IDC_MIN, "COMBOBOX", "");
         b.Control(ST | SS_LEFT, 86, 78, 100, 10, IDC_STATIC, "STATIC", "분에 울림");
-        b.Button(TS | BS_DEFPUSHBUTTON, 160, 88, 48, 14, IDOK, "저장");
-        b.Button(TS | BS_PUSHBUTTON, 214, 88, 50, 14, IDCANCEL, "닫기");
+        b.Control(ST | SS_LEFT, 14, 98, 58, 10, IDC_STATIC, "STATIC", "시보 제외 시간 :");
+        b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 72, 95, 28, 100, IDC_QSH, "COMBOBOX", "");
+        b.Control(ST | SS_LEFT, 102, 98, 9, 10, IDC_STATIC, "STATIC", "시");
+        b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 113, 95, 28, 100, IDC_QSM, "COMBOBOX", "");
+        b.Control(ST | SS_LEFT, 143, 98, 9, 10, IDC_STATIC, "STATIC", "분");
+        b.Control(ST | SS_LEFT, 157, 98, 8, 10, IDC_STATIC, "STATIC", "~");
+        b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 168, 95, 28, 100, IDC_QEH, "COMBOBOX", "");
+        b.Control(ST | SS_LEFT, 198, 98, 9, 10, IDC_STATIC, "STATIC", "시");
+        b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 209, 95, 28, 100, IDC_QEM, "COMBOBOX", "");
+        b.Control(ST | SS_LEFT, 239, 98, 9, 10, IDC_STATIC, "STATIC", "분");
+        b.Control(ST | SS_LEFT, 14, 112, 250, 10, IDC_STATIC, "STATIC", "(시보가 불필요한 시간을 지정하세요. 예 : 사용자 취침 시간)");
+        b.Button(TS | BS_DEFPUSHBUTTON, 170, 126, 48, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 224, 126, 50, 14, IDCANCEL, "닫기");
         Ctx c = {cd, cd, fn, fctx};
         return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
     }
 
 private:
-    enum { IDC_USE = 101, IDC_FILE, IDC_PICK, IDC_TEST, IDC_MIN, IDC_STATIC = -1 };
+    enum { IDC_USE = 101, IDC_FILE, IDC_PICK, IDC_TEST, IDC_MIN, IDC_QSH, IDC_QSM, IDC_QEH, IDC_QEM, IDC_STATIC = -1 };
     struct Ctx { ChimeData& out; ChimeData cur; TestFn fn; void* fctx; };      // cur = 대화상자에서 편집 중인 값 (저장해야 out 에 반영)
 
     static void ShowFile(HWND d, const ChimeData& p) {
@@ -2256,6 +2426,19 @@ private:
                 SendDlgItemMessageW(d, IDC_MIN, CB_ADDSTRING, 0, (LPARAM)t);
             }
             SendDlgItemMessageW(d, IDC_MIN, CB_SETCURSEL, c->cur.min, 0);
+            for (int k = 0; k < 4; k++) {                       // 제외 시간: 시 00 ~ 23, 분 00 ~ 59
+                const int id = IDC_QSH + k;
+                const int n = (k % 2 == 0) ? 24 : 60;
+                for (int i = 0; i < n; i++) {
+                    wchar_t t[8];
+                    wsprintfW(t, L"%02d", i);
+                    SendDlgItemMessageW(d, id, CB_ADDSTRING, 0, (LPARAM)t);
+                }
+            }
+            SendDlgItemMessageW(d, IDC_QSH, CB_SETCURSEL, c->cur.qs / 60, 0);
+            SendDlgItemMessageW(d, IDC_QSM, CB_SETCURSEL, c->cur.qs % 60, 0);
+            SendDlgItemMessageW(d, IDC_QEH, CB_SETCURSEL, c->cur.qe / 60, 0);
+            SendDlgItemMessageW(d, IDC_QEM, CB_SETCURSEL, c->cur.qe % 60, 0);
             return TRUE;
         case WM_COMMAND:
             switch (LOWORD(w)) {
@@ -2271,6 +2454,13 @@ private:
                 {
                     int m = (int)SendDlgItemMessageW(d, IDC_MIN, CB_GETCURSEL, 0, 0);
                     c->cur.min = m >= 0 && m <= 59 ? m : 0;
+                    int q[4];
+                    for (int k = 0; k < 4; k++) {
+                        q[k] = (int)SendDlgItemMessageW(d, IDC_QSH + k, CB_GETCURSEL, 0, 0);
+                        if (q[k] < 0) q[k] = 0;
+                    }
+                    c->cur.qs = q[0] * 60 + q[1];
+                    c->cur.qe = q[2] * 60 + q[3];
                 }
                 if (c->cur.on && !c->cur.file[0]) {
                     MessageBoxW(d, (LPCWSTR)u"'사용'을 켜려면 음악 파일을 선택하세요.", (LPCWSTR)u"시보 설정", MB_OK | MB_ICONINFORMATION);
@@ -2297,6 +2487,7 @@ struct ScanSetData {
     int  eh = 6,  em = 0, es = 0;               // 종료 시각 (scan Off)
     struct Prog { bool on = false; char file[784] = ""; char memo[320] = ""; };
     Prog prog[2];                               // [0] HomeBack, [1] NotHome (메모는 이 대화상자에서 바꾸지 않고 그대로 보존)
+    int  notHomeMin = 5;                        // NotHome 판정 기준 (분): 이 시간 동안 폰이 응답하지 않으면 NotHome
 };
 
 class ScanSetDialog {
@@ -2309,7 +2500,7 @@ public:
         DlgBuilder b;
         b.D(DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU);
         b.D(0);
-        b.W(23); b.W(0); b.W(0); b.W(300); b.W(200);
+        b.W(27); b.W(0); b.W(0); b.W(300); b.W(232);
         b.W(0); b.W(0);
         b.S("HomeBack / NotHome 탐지 시간 및 프로그램 설정");
         b.W(9); b.S("Segoe UI");
@@ -2335,15 +2526,21 @@ public:
             b.Button(TS | BS_PUSHBUTTON, 242, y, 28, 14, base + 3, "테스트");
             b.Button(TS | BS_PUSHBUTTON, 274, y, 20, 14, base + 4, "삭제");
         }
-        b.Button(TS | BS_DEFPUSHBUTTON, 170, 182, 58, 14, IDOK, "저장");
-        b.Button(TS | BS_PUSHBUTTON, 234, 182, 58, 14, IDCANCEL, "닫기");
+        b.Control(ST | SS_LEFT, 14, 184, 80, 10, IDC_STATIC, "STATIC", "NotHome 판정 기준 :");
+        b.Control(TS | WS_VSCROLL | CBS_DROPDOWNLIST, 96, 182, 40, 100, IDC_NHMIN, "COMBOBOX", "");
+        b.Control(ST | SS_LEFT, 140, 184, 14, 10, IDC_STATIC, "STATIC", "분");
+        b.Control(ST | SS_LEFT, 14, 199, 280, 10, IDC_STATIC, "STATIC", "(이 시간동안 사용자 폰이 응답하지 않으면 NotHome으로 판정합니다)");
+        b.Button(TS | BS_DEFPUSHBUTTON, 170, 214, 58, 14, IDOK, "저장");
+        b.Button(TS | BS_PUSHBUTTON, 234, 214, 58, 14, IDCANCEL, "닫기");
         Ctx c = {dd, dd, fn, fctx};
         return DialogBoxIndirectParamW(hi, (LPCDLGTEMPLATEW)b.Data(), owner, Proc, (LPARAM)&c) == 1;
     }
 
 private:
-    enum { IDC_USE = 101, IDC_ALWAYS, IDC_START, IDC_END, ROW0 = 110, IDC_STATIC = -1 };    // 프로그램 줄 i: ROW0 + i*10 + (0 사용, 1 파일, 2 찾기, 3 테스트, 4 삭제)
-    struct Ctx { ScanSetData& out; ScanSetData cur; TestFn fn; void* fctx; };           // cur = 편집 중인 값 (저장해야 out 에 반영)
+    enum { IDC_USE = 101, IDC_ALWAYS, IDC_START, IDC_END, IDC_NHMIN, ROW0 = 110, IDC_STATIC = -1 };
+    static int NhCount() { return 7; }
+    static int NhMin(int i) { static const int v[7] = {1, 2, 3, 5, 10, 15, 30}; return v[i]; }    // 프로그램 줄 i: ROW0 + i*10 + (0 사용, 1 파일, 2 찾기, 3 테스트, 4 삭제)
+    struct Ctx { ScanSetData& out; ScanSetData cur; TestFn fn; void* fctx; int nhIdx0 = 0; bool nhExact = true; };   // cur = 편집 중인 값 (저장해야 out 에 반영)
 
     static void SetT(HWND d, int id, int h, int m, int s) {
         SYSTEMTIME st = {};
@@ -2402,6 +2599,19 @@ private:
             SetT(d, IDC_START, c->cur.sh, c->cur.sm, c->cur.ss);
             SetT(d, IDC_END, c->cur.eh, c->cur.em, c->cur.es);
             for (int i = 0; i < 2; i++) ShowProg(d, i, c->cur.prog[i]);
+            {   // NotHome 판정 기준(분) 목록: 1, 2, 3, 5, 10, 15, 30. 목록에 없는 값이면 가장 가까운 칸을 보여 주되, 바꾸지 않으면 원래 값을 보존
+                int sel = 0, best = 1 << 30;
+                for (int i = 0; i < NhCount(); i++) {
+                    wchar_t t[8];
+                    wsprintfW(t, L"%d", NhMin(i));
+                    SendDlgItemMessageW(d, IDC_NHMIN, CB_ADDSTRING, 0, (LPARAM)t);
+                    const int df = abs(NhMin(i) - c->cur.notHomeMin);
+                    if (df < best) { best = df; sel = i; }
+                }
+                c->nhIdx0 = sel;
+                c->nhExact = (best == 0);
+                SendDlgItemMessageW(d, IDC_NHMIN, CB_SETCURSEL, sel, 0);
+            }
             Sync(d);
             return TRUE;
         case WM_COMMAND: {
@@ -2435,6 +2645,10 @@ private:
                 GetT(d, IDC_START, t.sh, t.sm, t.ss);
                 GetT(d, IDC_END, t.eh, t.em, t.es);
                 for (int i = 0; i < 2; i++) t.prog[i].on = IsDlgButtonChecked(d, ROW0 + i * 10) == BST_CHECKED;
+                {
+                    const int sel = (int)SendDlgItemMessageW(d, IDC_NHMIN, CB_GETCURSEL, 0, 0);
+                    if (sel >= 0 && sel < NhCount() && !(!c->nhExact && sel == c->nhIdx0)) t.notHomeMin = NhMin(sel);
+                }
                 if (t.use && !t.always && t.sh == t.eh && t.sm == t.em && t.ss == t.es) {
                     MessageBoxW(d, (LPCWSTR)u"개시 시각과 종료 시각이 같습니다. 서로 다르게 지정하세요.", (LPCWSTR)u"HomeBack / NotHome 탐지", MB_OK | MB_ICONINFORMATION);
                     return TRUE;
@@ -3652,7 +3866,8 @@ private:
         if (!StrUtil::parseIp(c.ip, ip)) ip = 0;                                       // 선택: 폰 고정 IP
         const int iv = c.interval > 0 ? std::max(5, c.interval) : 15;
         const int as = c.awaySec > 0 ? c.awaySec : 300;
-        const int fn = c.failN > 0 ? c.failN : 5;
+        int fn = c.failN > 0 ? c.failN : 5;
+        fn = std::min(fn, std::max(2, as / iv));                   // 판정 시간이 짧으면 그 안에 들어갈 주기 수까지만 (1분 기준인데 연속 횟수 때문에 몇 분씩 늦어지지 않게)
         const bool changed = bm != btMac_ || m != mac_ || ip != homeIp_ || c.bt != useBt_ || c.wifi != useWifi_ || iv != interval_ || as != awaySec_ || fn != failN_;
         if (!changed) return false;
         btMac_ = bm; mac_ = m; homeIp_ = ip; useBt_ = c.bt; useWifi_ = c.wifi; interval_ = iv; awaySec_ = as; failN_ = fn;
@@ -11802,6 +12017,7 @@ private:
         TID_SCROLL_DATE = 4,        // 년월일 스크롤
         TID_CLOSE       = 5,        // 알람 플레이어 자동 닫기 감시 (1초 간격, 필요할 때만)
         TID_CLICK       = 6,        // 한 번 클릭 확정 대기 (더블클릭이 아니면 시계 모드 변경)
+        TID_ANIM        = 7,        // 아날로그 애니메이션 프레임 (켰을 때만)
 
         CMD_BACKCOLOR   = 101,      // 메뉴 명령
         CMD_TIMEFONT    = 102,
@@ -11831,11 +12047,15 @@ private:
         WM_TRAY         = WM_APP + 1,   // 트레이 아이콘 콜백
         WM_REBOOT_ASK   = WM_APP + 20,  // 시스템 재시작 확인창 표시 (타이머 처리가 끝난 뒤 띄워서 시계가 멈추지 않게 함)
         CMD_OPACITY     = 200,      // 200 + (투명도/10) : 201~210
-        CMD_ASEC        = 853,      // F4) 아나로그 시계 디자인 > 초침 생략 on/off
-        CMD_AMATCH      = 852,      // F4) 아나로그 시계 디자인 > 배경색 일치 on/off
-        CMD_AFULL       = 851,      // F4) 아나로그 시계 디자인 > 전체화면 on/off
-        CMD_ANEON       = 850,      // F4) 아나로그 시계 디자인 > 네온사인 on/off
-        CMD_ATHEME      = 800,      // 800 + 테마 인덱스: F4) 아날로그 시계 디자인
+        CMD_AANIM       = 860,      // 860 + 종류(0=off, 1~9): F4) 아나로그 시계 > 애니메이션 off / 애니메이션1 ~ 9
+        CMD_ASEC        = 853,      // F4) 아나로그 시계 > 초침 생략 on/off
+        CMD_ACOL        = 900,      // 900 + 부위*2 + (0=테마 적용, 1=기타): 부위 0 시침, 1 분침, 2 초침, 3 눈금, 4 테두리 (메뉴 표시 순서는 시침/분침/초침/테두리/눈금)
+        CMD_ABGA        = 895,      // F4) 아나로그 시계 > 배경 투명도 (슬라이더 대화상자)
+        CMD_ABG         = 880,      // 880 + 종류(0~13): F4) 아나로그 시계 > 배경색 설정
+        CMD_AMATCH      = 852,      // F4) 아나로그 시계 > 배경색 일치 on/off
+        CMD_AFULL       = 851,      // F4) 아나로그 시계 > 전체화면 on/off
+        CMD_ANEON       = 850,      // F4) 아나로그 시계 > 네온사인 on/off
+        CMD_ATHEME      = 800,      // 800 + 테마 인덱스: F4) 아날로그 시계
         CMD_CITY        = 300,      // 300 + 도시 인덱스
         CMD_MOVE        = 400,      // 400 + 이동 간격 선택지 인덱스
         CMD_PROG        = 610,      // 610 사용, 611 시각, 612 파일, 613 메모, 614 지우기, 615 테스트
@@ -11850,9 +12070,9 @@ private:
     };
 
     // 위치 이동 간격 선택지 (ms). 0 = 이동하지 않고 고정
-    static const int MOVE_COUNT = 8;
+    static const int MOVE_COUNT = 13;
     static int MoveChoice(int i) {
-        static const int v[MOVE_COUNT] = {0, 5000, 10000, 30000, 60000, 300000, 600000, 1800000};
+        static const int v[MOVE_COUNT] = {0, 3000, 5000, 10000, 15000, 20000, 30000, 60000, 180000, 300000, 600000, 900000, 1800000};
         return v[i];
     }
 
@@ -12024,7 +12244,12 @@ private:
                 if (nt.wMinute == lastPaintMin_) return;
             }
             break;
+        case TID_ANIM:
+            if (cfg_.clockMode != 2 || !cfg_.analogAnim) { KillTimer(hwnd_, TID_ANIM); return; }
+            if (modal_ || IsIconic(hwnd_) || !IsWindowVisible(hwnd_)) return;      // 대화상자 중 / 최소화 / 트레이 숨김: 그리지 않음
+            break;
         case TID_MOVE:
+            if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) return;       // 마우스로 끄는 중에는 이동하지 않음 (끌던 창이 튀지 않게)
             if (!modal_ && !cfg_.analogFull) MoveGroup();       // 전체화면: 모니터 중앙에 고정
             return;
         case TID_CLOSE:
@@ -12078,6 +12303,35 @@ private:
         SelectObject(dc, old);
     }
 
+    // 그린 DIB 를 픽셀별 알파로 창에 올림: 원 바깥(ANALOG_KEY) = 완전 투명, 원 안쪽 바탕 = BgAlpha, 그 외(눈금/바늘/글자/테두리) = 불투명
+    bool PushAlpha(HDC dc, DWORD* px, int w, int h) {
+        GdiFlush();
+        const DWORD key = ((DWORD)GetRValue(ANALOG_KEY) << 16) | ((DWORD)GetGValue(ANALOG_KEY) << 8) | GetBValue(ANALOG_KEY);
+        const int fr = GetRValue(faceKey_), fg = GetGValue(faceKey_), fb = GetBValue(faceKey_);
+        const DWORD face = ((DWORD)fr << 16) | ((DWORD)fg << 8) | (DWORD)fb;
+        const int ba = cfg_.analogBgAlpha * 255 / 100;
+        for (int i = 0, n = w * h; i < n; i++) {
+            const DWORD v = px[i] & 0xFFFFFF;
+            int a = 255;
+            if (v == key) { px[i] = 0; continue; }
+            if (v == face) a = ba;
+            else if (faceSoft_) {                                                  // 네온 번짐: 바탕과 가까울수록 바탕 불투명도에 가깝게
+                int d = abs((int)((v >> 16) & 255) - fr), e = abs((int)((v >> 8) & 255) - fg), f = abs((int)(v & 255) - fb);
+                if (e > d) d = e;
+                if (f > d) d = f;
+                if (d > 160) d = 160;
+                a = ba + (255 - ba) * d / 160;
+            }
+            if (a >= 255) { px[i] = 0xFF000000u | v; continue; }
+            const DWORD r = ((v >> 16) & 255) * a / 255, g = ((v >> 8) & 255) * a / 255, bl = (v & 255) * a / 255;   // 미리 곱한 알파
+            px[i] = ((DWORD)a << 24) | (r << 16) | (g << 8) | bl;
+        }
+        POINT src = {0, 0};
+        SIZE sz = {w, h};
+        BLENDFUNCTION bf = {AC_SRC_OVER, 0, (BYTE)(cfg_.opacity * 255 / 100), AC_SRC_ALPHA};   // 창 전체 투명도(opacity)도 함께 적용
+        return UpdateLayeredWindow(hwnd_, NULL, NULL, &sz, dc, &src, 0, &bf, ULW_ALPHA) != FALSE;
+    }
+
     void OnPaint() {
         PAINTSTRUCT ps;
         HDC sdc = BeginPaint(hwnd_, &ps);
@@ -12085,7 +12339,20 @@ private:
         GetClientRect(hwnd_, &rc);
 
         HDC dc = CreateCompatibleDC(sdc);       // 더블버퍼링 (깜박임 방지)
-        HBITMAP bm = CreateCompatibleBitmap(sdc, rc.right, rc.bottom);
+        const bool am = cfg_.clockMode == 2 && cfg_.analogBgAlpha < 100 && ulw_;   // 아날로그 바탕 반투명: 32비트 DIB 로 그린 뒤 픽셀별 알파로 올림
+        void* dib = NULL;
+        HBITMAP bm = NULL;
+        if (am) {
+            BITMAPINFO bi = {};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = rc.right;
+            bi.bmiHeader.biHeight = -rc.bottom;
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+            bm = CreateDIBSection(sdc, &bi, DIB_RGB_COLORS, &dib, NULL, 0);
+        }
+        if (!bm) bm = CreateCompatibleBitmap(sdc, rc.right, rc.bottom);
         HGDIOBJ obm = SelectObject(dc, bm);
         FillRect(dc, &rc, bgBrush_);
         SetBkMode(dc, TRANSPARENT);
@@ -12136,7 +12403,8 @@ private:
 
             if (!owner_) DrawStatus(dc, rc);
         }
-        BitBlt(sdc, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
+        if (!(am && dib && PushAlpha(dc, (DWORD*)dib, rc.right, rc.bottom)))
+            BitBlt(sdc, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
         SelectObject(dc, obm);
         DeleteObject(bm);                       // 그리자마자 해제 -> 상주 메모리 증가 없음
         DeleteDC(dc);
@@ -12182,12 +12450,24 @@ private:
     void ApplyOpacity() {
         LONG_PTR ex = GetWindowLongPtrA(hwnd_, GWL_EXSTYLE);
         const bool analog = (cfg_.clockMode == 2);          // 아날로그: 원 바깥(ANALOG_KEY 색)을 완전 투명하게
-        if (analog || cfg_.opacity < 100) {
+        if (analog && cfg_.analogBgAlpha < 100) {           // 바탕 반투명: 픽셀별 알파 (UpdateLayeredWindow, OnPaint 에서 그림)
+            if (!ulw_) {
+                SetWindowLongPtrA(hwnd_, GWL_EXSTYLE, ex & ~(LONG_PTR)WS_EX_LAYERED);     // 레이어 속성을 한 번 껐다 켜야 방식을 바꿀 수 있음
+                SetWindowLongPtrA(hwnd_, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+                ulw_ = true;
+            }
+        } else if (analog || cfg_.opacity < 100) {
+            if (ulw_) {
+                SetWindowLongPtrA(hwnd_, GWL_EXSTYLE, ex & ~(LONG_PTR)WS_EX_LAYERED);
+                ex = GetWindowLongPtrA(hwnd_, GWL_EXSTYLE);
+                ulw_ = false;
+            }
             SetWindowLongPtrA(hwnd_, GWL_EXSTYLE, ex | WS_EX_LAYERED);
             SetLayeredWindowAttributes(hwnd_, ANALOG_KEY, (BYTE)(cfg_.opacity * 255 / 100),
                                        (analog ? LWA_COLORKEY : 0) | (cfg_.opacity < 100 ? LWA_ALPHA : 0));
         } else {
             SetWindowLongPtrA(hwnd_, GWL_EXSTYLE, ex & ~(LONG_PTR)WS_EX_LAYERED);
+            ulw_ = false;
         }
         RedrawWindow(hwnd_, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     }
@@ -12223,7 +12503,7 @@ private:
     HMENU BuildMenu() {
         HMENU bar = CreatePopupMenu();          // 최상위 항목들을 담는 팝업 메뉴 (창에 붙이지 않음)
         HMENU set = menuSet_ = CreatePopupMenu();       // 앱 동작 설정
-        HMENU dsn = menuDsn_ = CreatePopupMenu();       // 디지탈 시계 디자인: 바탕색 / 투명도 / 년월일·음력 보이기 / 표시 형식 / 글꼴
+        HMENU dsn = menuDsn_ = CreatePopupMenu();       // 디지탈 시계: 바탕색 / 투명도 / 년월일·음력 보이기 / 표시 형식 / 글꼴
         menuOpacity_ = CreatePopupMenu();
         for (int p = 100; p >= 10; p -= 10) {
             char b[8];
@@ -12243,7 +12523,7 @@ private:
 
         menuMove_ = CreatePopupMenu();          // 위치 이동 간격 (0 = 이동 안 함)
         static const char* const moveName[MOVE_COUNT] = {
-            "0 (이동 안 함, 위치 고정)", "5초", "10초", "30초", "1분", "5분", "10분", "30분"};
+            "0 (이동 안 함, 위치 고정)", "3초", "5초", "10초", "15초", "20초", "30초", "1분", "3분", "5분", "10분", "15분", "30분"};
         for (int i = 0; i < MOVE_COUNT; i++) AddMenu(menuMove_, 0, CMD_MOVE + i, moveName[i]);
         AddMenu(set, MF_POPUP, (UINT_PTR)menuMove_, "위치 이동 간격 변경(&I)");   // 디지탈/아날로그 모두 적용되므로 앱 동작 설정(F1)에 둠
 
@@ -12280,16 +12560,42 @@ private:
         AppendMenuA(set, MF_SEPARATOR, 0, NULL);
         AddMenu(set, 0,        CMD_EXIT,      "프로그램 종료 (&Exit)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)set, "F2) 앱 동작 설정(&S)");
-        AddMenu(bar, MF_POPUP, (UINT_PTR)dsn, "F3) 디지탈 시계 디자인(&D)");
+        AddMenu(bar, MF_POPUP, (UINT_PTR)dsn, "F3) 디지탈 시계(&D)");
 
-        menuATheme_ = CreatePopupMenu();        // 아날로그 시계 디자인: 테마
+        menuATheme_ = CreatePopupMenu();        // 아날로그 시계: 테마
         AddMenu(menuATheme_, 0, CMD_AFULL, "전체화면 on/off(&F)");
         AddMenu(menuATheme_, 0, CMD_ANEON, "네온사인 on/off(&O)");
         AddMenu(menuATheme_, 0, CMD_ASEC, "초침 생략 on/off(&S)");
-        AddMenu(menuATheme_, 0, CMD_AMATCH, "배경색 일치 on/off(&B)  (모니터 바탕색 = 시계 원 안쪽)");
+        menuABg_ = CreatePopupMenu();           // 배경색 설정: 시계 원 안쪽 바탕색
+        {
+            static const char* const bgName[14] = {"모니터 배경 일치", "테마 적용", "흰색", "회색", "검정색", "빨강", "주황", "노랑",
+                                                   "초록", "파랑", "남색", "보라", "핑크", "기타 (색 선택)..."};
+            for (int i = 0; i < 14; i++) AddMenu(menuABg_, 0, CMD_ABG + i, bgName[i]);
+        }
+        AddMenu(menuATheme_, MF_POPUP, (UINT_PTR)menuABg_, "배경색 설정(&B)");
+        AddMenu(menuATheme_, 0, CMD_ABGA, "배경 투명도(&T)...");
+        {                                       // 바늘 및 눈금 색깔: 시침 / 분침 / 초침 / 눈금 각각 테마 적용 or 기타(색 선택)
+            HMENU top = CreatePopupMenu();
+            static const char* const partName[5] = {"시침(&H)", "분침(&M)", "초침(&S)", "눈금(&T)", "테두리(&B)"};
+            static const int order[5] = {0, 1, 2, 4, 3};                    // 표시 순서: 시침, 분침, 초침, 테두리, 눈금
+            for (int k = 0; k < 5; k++) {
+                const int i = order[k];
+                menuACol_[i] = CreatePopupMenu();
+                AddMenu(menuACol_[i], 0, CMD_ACOL + i * 2, "테마 적용");
+                AddMenu(menuACol_[i], 0, CMD_ACOL + i * 2 + 1, "기타 (색 선택)...");
+                AddMenu(top, MF_POPUP, (UINT_PTR)menuACol_[i], partName[i]);
+            }
+            AddMenu(menuATheme_, MF_POPUP, (UINT_PTR)top, "바늘 / 눈금 / 테두리 색깔(&H)");
+        }
+        AddMenu(menuATheme_, 0, CMD_AANIM, "애니메이션 off(&A)");
+        for (int i = 1; i <= 9; i++) {
+            char s[32];
+            wsprintfA(s, "애니메이션&%d", i);
+            AddMenu(menuATheme_, 0, CMD_AANIM + i, s);
+        }
         AppendMenuA(menuATheme_, MF_SEPARATOR, 0, NULL);
         for (int i = 0; i < ATHEME_COUNT; i++) AddMenu(menuATheme_, 0, CMD_ATHEME + i, ATHEMES[i].name);
-        AddMenu(bar, MF_POPUP, (UINT_PTR)menuATheme_, "F4) 아나로그 시계 디자인(&N)");
+        AddMenu(bar, MF_POPUP, (UINT_PTR)menuATheme_, "F4) 아나로그 시계(&N)");
 
         HMENU glob = menuGlobal_ = CreatePopupMenu();   // Global: 도시를 고르면 그 도시 시계 창이 하나 더 추가됨
         for (int i = 0; i < CITY_COUNT; i++) AddMenu(glob, 0, CMD_CITY + i, CITIES[i].name);
@@ -12395,6 +12701,8 @@ private:
         ScanSetData d;
         d.use = cfg_.scUse;
         d.always = cfg_.scAlways;
+        d.notHomeMin = std::max(1, (cfg_.notHomeSec + 30) / 60);
+        const int oldNhMin = d.notHomeMin;
         const Alarm& a = cfg_.alarms[ALARM_SCAN_ON];
         const Alarm& b = cfg_.alarms[ALARM_SCAN_OFF];
         d.sh = a.h; d.sm = a.m; d.ss = a.s;
@@ -12414,6 +12722,7 @@ private:
         if (!ok) return;
         cfg_.scUse = d.use;
         cfg_.scAlways = d.always;
+        if (d.notHomeMin != oldNhMin) cfg_.notHomeSec = d.notHomeMin * 60;      // 바꾸지 않았으면 ini 의 초 값을 그대로 둠
         Alarm& na = cfg_.alarms[ALARM_SCAN_ON];
         Alarm& nb = cfg_.alarms[ALARM_SCAN_OFF];
         na.h = d.sh; na.m = d.sm; na.s = d.ss; na.on = true;       // 개시/종료 시각은 항상 저장 (쓰는지는 '항상' 이 결정)
@@ -12425,9 +12734,10 @@ private:
             lstrcpynA(cfg_.homeProg[i].memo, d.prog[i].memo, sizeof(cfg_.homeProg[i].memo));
         }
         cfg_.SaveScanSet();
+        if (scan_) scan_->SetConfig(ScanEngine::FromSettings(cfg_));            // 실행 중인 감시에도 바로 반영
         UpdateScanSetMenu();
-        Log::Put("HomeBack/NotHome 탐지 저장: 사용 %d, 항상 %d, 개시 %02d:%02d:%02d, 종료 %02d:%02d:%02d, HomeBack %d(%s), NotHome %d(%s)",
-                 (int)d.use, (int)d.always, d.sh, d.sm, d.ss, d.eh, d.em, d.es,
+        Log::Put("HomeBack/NotHome 탐지 저장: 사용 %d, 항상 %d, 개시 %02d:%02d:%02d, 종료 %02d:%02d:%02d, NotHome 판정 기준 %d초, HomeBack %d(%s), NotHome %d(%s)",
+                 (int)d.use, (int)d.always, d.sh, d.sm, d.ss, d.eh, d.em, d.es, cfg_.notHomeSec,
                  (int)d.prog[0].on, d.prog[0].file[0] ? d.prog[0].file : "-", (int)d.prog[1].on, d.prog[1].file[0] ? d.prog[1].file : "-");
         ApplyScanState("설정 저장");
     }
@@ -12598,6 +12908,12 @@ private:
                     CMD_CHIME, (LPCWSTR)u);                      // '사용' 이면 메뉴 이름 앞에 체크 표시
     }
 
+    // 시보 제외 시간 안인가? [시작, 끝) 하루 중 분 단위, 시작 > 끝 이면 자정을 넘김, 같으면 제외 없음
+    static bool InChimeSkip(int qs, int qe, int minuteOfDay) {
+        if (qs == qe) return false;
+        return qs < qe ? (minuteOfDay >= qs && minuteOfDay < qe) : (minuteOfDay >= qs || minuteOfDay < qe);
+    }
+
     // CMD 모드에서 start "" .\wav\wavplayer.exe "<wav 파일>" 실행 (작업 폴더는 exe 폴더, cmd 창은 숨김). 실행을 시도했으면 true
     bool RunChime(const char* why, const char* file) {
         if (!file[0]) { Log::Put("시보(%s): 파일이 없어 실행하지 않음", why); return false; }
@@ -12632,6 +12948,8 @@ private:
         ChimeData d;
         d.on = cfg_.chOn;
         d.min = cfg_.chMin;
+        d.qs = cfg_.chQs;
+        d.qe = cfg_.chQe;
         lstrcpynA(d.file, cfg_.chFile, sizeof(d.file));
         modal_ = true;
         bool ok = ChimeDialog::Show(hi_, hwnd_, d, ChimeTestCb, this);
@@ -12639,11 +12957,15 @@ private:
         if (!ok) return;
         cfg_.chOn = d.on;
         cfg_.chMin = d.min;
+        cfg_.chQs = d.qs;
+        cfg_.chQe = d.qe;
         lstrcpynA(cfg_.chFile, d.file, sizeof(cfg_.chFile));
         chFiredKey_ = 0;
         cfg_.SaveChime();
         UpdateChimeMenu();
-        Log::Put("시보 설정 저장: 사용 %d, 매시 %02d분, 파일=%s", (int)d.on, d.min, d.file[0] ? d.file : "(없음)");
+        if (d.qs == d.qe) Log::Put("시보 설정 저장: 사용 %d, 매시 %02d분, 제외 시간 없음, 파일=%s", (int)d.on, d.min, d.file[0] ? d.file : "(없음)");
+        else Log::Put("시보 설정 저장: 사용 %d, 매시 %02d분, 제외 시간 %02d:%02d ~ %02d:%02d, 파일=%s", (int)d.on, d.min,
+                      d.qs / 60, d.qs % 60, d.qe / 60, d.qe % 60, d.file[0] ? d.file : "(없음)");
     }
 
     void UpdateRebootMenu() {
@@ -12908,7 +13230,10 @@ private:
             const int key = ymd * 100 + t.wHour;
             if (chFiredKey_ != key) {
                 chFiredKey_ = key;
-                RunChime("매시", cfg_.chFile);
+                if (InChimeSkip(cfg_.chQs, cfg_.chQe, t.wHour * 60 + t.wMinute))
+                    Log::Put("시보(매시): 제외 시간 %02d:%02d ~ %02d:%02d 안이라 울리지 않음", cfg_.chQs / 60, cfg_.chQs % 60, cfg_.chQe / 60, cfg_.chQe % 60);
+                else
+                    RunChime("매시", cfg_.chFile);
             }
         }
         if (cfg_.rbOn && rbFiredYmd_ != ymd) {  // 시스템 재시작 (재부팅 직후 재실행되어도 5초 여유가 지나 다시 실행되지 않음)
@@ -13206,15 +13531,18 @@ private:
     void UpdateOptionChecks() {
         if (!menuSet_) return;
         if (menuATheme_) CheckMenuItem(menuATheme_, CMD_ASEC, MF_BYCOMMAND | (cfg_.analogNoSec ? MF_CHECKED : MF_UNCHECKED));
-        if (menuATheme_) {
-            EnableMenuItem(menuATheme_, CMD_AMATCH, MF_BYCOMMAND | (cfg_.deskSolid || cfg_.analogMatch ? MF_ENABLED : MF_GRAYED));   // 단색이 아니면 켤 수 없음
-            CheckMenuItem(menuATheme_, CMD_AMATCH, MF_BYCOMMAND | (cfg_.analogMatch ? MF_CHECKED : MF_UNCHECKED));
+        for (int i = 0; i < 5; i++)
+            if (menuACol_[i]) CheckMenuRadioItem(menuACol_[i], CMD_ACOL + i * 2, CMD_ACOL + i * 2 + 1, CMD_ACOL + i * 2 + (cfg_.analogColOn[i] ? 1 : 0), MF_BYCOMMAND);
+        if (menuABg_) {
+            EnableMenuItem(menuABg_, CMD_ABG, MF_BYCOMMAND | (cfg_.deskSolid || cfg_.analogBg == 0 ? MF_ENABLED : MF_GRAYED));   // 모니터 바탕이 단색이 아니면 고를 수 없음
+            CheckMenuRadioItem(menuABg_, CMD_ABG, CMD_ABG + 13, CMD_ABG + cfg_.analogBg, MF_BYCOMMAND);
         }
         if (menuATheme_) CheckMenuItem(menuATheme_, CMD_AFULL, MF_BYCOMMAND | (cfg_.analogFull ? MF_CHECKED : MF_UNCHECKED));
+        if (menuATheme_) CheckMenuRadioItem(menuATheme_, CMD_AANIM, CMD_AANIM + 9, CMD_AANIM + cfg_.analogAnim, MF_BYCOMMAND);
         if (menuATheme_) CheckMenuItem(menuATheme_, CMD_ANEON, MF_BYCOMMAND | (cfg_.analogNeon ? MF_CHECKED : MF_UNCHECKED));
         if (menuATheme_) CheckMenuRadioItem(menuATheme_, CMD_ATHEME, CMD_ATHEME + ATHEME_COUNT - 1,
                                             CMD_ATHEME + cfg_.analogTheme, MF_BYCOMMAND);
-        if (menu_) {                            // 아날로그 모드: 디지탈 시계 디자인 비활성 / 디지탈 모드: 아나로그 시계 디자인 비활성
+        if (menu_) {                            // 아날로그 모드: 디지탈 시계 비활성 / 디지탈 모드: 아나로그 시계 비활성
             EnableMenuItem(menu_, TOP_DIGITAL, MF_BYPOSITION | (cfg_.clockMode == 2 ? MF_GRAYED : MF_ENABLED));
             EnableMenuItem(menu_, TOP_ANALOG,  MF_BYPOSITION | (cfg_.clockMode == 2 ? MF_ENABLED : MF_GRAYED));
         }
@@ -13247,10 +13575,9 @@ private:
         case CMD_SHOWDATE:  n = "년월일 보이기/숨기기 토글"; break;
         case CMD_SHOWLUNAR: n = "음력 보이기/숨기기 토글"; break;
         case CMD_RESET:     n = "설정 초기화"; break;
-        case CMD_ASEC:      n = "F4) 아나로그 시계 디자인 > 초침 생략 on/off"; break;
-        case CMD_AMATCH:    n = "F4) 아나로그 시계 디자인 > 배경색 일치 on/off"; break;
-        case CMD_AFULL:     n = "F4) 아나로그 시계 디자인 > 전체화면 on/off"; break;
-        case CMD_ANEON:     n = "F4) 아나로그 시계 디자인 > 네온사인 on/off"; break;
+        case CMD_ASEC:      n = "F4) 아나로그 시계 > 초침 생략 on/off"; break;
+        case CMD_AFULL:     n = "F4) 아나로그 시계 > 전체화면 on/off"; break;
+        case CMD_ANEON:     n = "F4) 아나로그 시계 > 네온사인 on/off"; break;
         case CMD_BACKCOLOR: n = "바탕색 선택"; break;
         case CMD_BACKDESK:  n = "시계 바탕색과 모니터 바탕색을 동일하게 토글"; break;
         case CMD_TIMEFONT:  n = "시분초 글꼴 변경"; break;
@@ -13270,7 +13597,14 @@ private:
         else if (id >= CMD_TFMT && id < CMD_TFMT + FMT_COUNT) Log::Put("메뉴: 시분초 표시 형식 %d", id - CMD_TFMT);
         else if (id >= CMD_DFMT && id < CMD_DFMT + FMT_COUNT) Log::Put("메뉴: 년월일 표시 형식 %d", id - CMD_DFMT);
         else if (id >= CMD_CITY && id < CMD_CITY + CITY_COUNT) Log::Put("메뉴: Global 도시 선택 %s", CITIES[id - CMD_CITY].name);
-        else if (id >= CMD_ATHEME && id < CMD_ATHEME + ATHEME_COUNT) Log::Put("메뉴: 아나로그 시계 디자인 > %s", ATHEMES[id - CMD_ATHEME].name);
+        else if (id >= CMD_ATHEME && id < CMD_ATHEME + ATHEME_COUNT) Log::Put("메뉴: 아나로그 시계 > %s", ATHEMES[id - CMD_ATHEME].name);
+        else if (id >= CMD_ABG && id <= CMD_ABG + 13) Log::Put("메뉴: 아나로그 시계 > 배경색 설정 %d", id - CMD_ABG);
+        else if (id == CMD_ABGA) Log::Put("메뉴: 아나로그 시계 > 배경 투명도 (대화상자)");
+        else if (id >= CMD_ACOL && id <= CMD_ACOL + 9) {
+            static const char* const pn[5] = {"시침", "분침", "초침", "눈금", "테두리"};
+            Log::Put("메뉴: 아나로그 시계 > 바늘 / 눈금 / 테두리 색깔 > %s > %s", pn[(id - CMD_ACOL) / 2], (id - CMD_ACOL) % 2 ? "기타" : "테마 적용");
+        }
+        else if (id >= CMD_AANIM && id <= CMD_AANIM + 9) { if (id == CMD_AANIM) Log::Put("메뉴: 아나로그 시계 > 애니메이션 off"); else Log::Put("메뉴: 아나로그 시계 > 애니메이션%d", id - CMD_AANIM); }
         else if (id >= CMD_MOVE && id < CMD_MOVE + MOVE_COUNT) Log::Put("메뉴: 위치 이동 간격 %dms", MoveChoice(id - CMD_MOVE));
         else if (id == CMD_PROG)
             Log::Put("메뉴: 알람 / 다른 앱 호출 (설정 대화상자)");
@@ -13349,11 +13683,67 @@ private:
             ForAll(&ClockWindow::ScheduleSecondTick);   // 분 단위 <-> 초 단위 갱신 간격 즉시 반영
             ForAll(&ClockWindow::ApplyFormat);
         }
-        else if (id == CMD_AMATCH) {
-            RefreshDeskColor(false);
-            if (!cfg_.analogMatch && !cfg_.deskSolid) { UpdateOptionChecks(); return; }      // 모니터 바탕이 그림이면 켜지 않음
-            cfg_.analogMatch = !cfg_.analogMatch;
-            cfg_.SaveAnalogMatch();
+        else if (id >= CMD_ACOL && id <= CMD_ACOL + 9) {
+            const int part = (id - CMD_ACOL) / 2;
+            if ((id - CMD_ACOL) % 2) {                                      // 기타: 시스템 색 선택 대화상자
+                static COLORREF custom[16];
+                const AnalogTheme& th = ATHEMES[cfg_.analogTheme];
+                CHOOSECOLORW cc = {};
+                cc.lStructSize  = sizeof(cc);
+                cc.hwndOwner    = hwnd_;
+                cc.rgbResult    = cfg_.analogColOn[part] ? cfg_.analogCol[part] : (part == 2 ? th.sec : part == 3 ? th.tickHour : part == 4 ? th.bezel : th.hand);
+                cc.lpCustColors = custom;
+                cc.Flags        = CC_RGBINIT | CC_FULLOPEN;
+                modal_ = true;
+                const BOOL ok = ChooseColorW(&cc);
+                modal_ = false;
+                if (!ok) { UpdateOptionChecks(); return; }
+                cfg_.analogCol[part] = cc.rgbResult;
+                cfg_.analogColOn[part] = true;
+                Log::Put("아나로그 색 직접 선택 (부위 %d): %02X%02X%02X", part, GetRValue(cc.rgbResult), GetGValue(cc.rgbResult), GetBValue(cc.rgbResult));
+            } else {
+                cfg_.analogColOn[part] = false;
+            }
+            cfg_.SaveAnalogCol();
+            UpdateOptionChecks();
+            ForAll(&ClockWindow::ApplyFormat);
+        }
+        else if (id == CMD_ABGA) {
+            const int orig = cfg_.analogBgAlpha;
+            int v = orig;
+            modal_ = true;
+            const bool ok = BgAlphaDialog::Show(hi_, hwnd_, v, BgAlphaPreview, this);
+            modal_ = false;
+            cfg_.analogBgAlpha = ok ? v : orig;
+            ForAll(&ClockWindow::ApplyOpacity);
+            if (ok && v != orig) {
+                cfg_.SaveAnalogBgAlpha();
+                Log::Put("아나로그 배경 투명도 %d%% -> %d%%", orig, v);
+            }
+        }
+        else if (id >= CMD_ABG && id <= CMD_ABG + 13) {
+            const int m = id - CMD_ABG;
+            if (m == 0) {
+                RefreshDeskColor(false);
+                if (!cfg_.deskSolid) { UpdateOptionChecks(); return; }      // 모니터 바탕이 그림이면 고르지 않음
+            }
+            if (m == 13) {                                                  // 기타: 시스템 색 선택 대화상자
+                static COLORREF custom[16];
+                CHOOSECOLORW cc = {};
+                cc.lStructSize  = sizeof(cc);
+                cc.hwndOwner    = hwnd_;
+                cc.rgbResult    = cfg_.analogBgColor;
+                cc.lpCustColors = custom;
+                cc.Flags        = CC_RGBINIT | CC_FULLOPEN;
+                modal_ = true;
+                const BOOL ok = ChooseColorW(&cc);
+                modal_ = false;
+                if (!ok) { UpdateOptionChecks(); return; }
+                cfg_.analogBgColor = cc.rgbResult;
+                Log::Put("아나로그 배경색 직접 선택: %02X%02X%02X", GetRValue(cc.rgbResult), GetGValue(cc.rgbResult), GetBValue(cc.rgbResult));
+            }
+            cfg_.analogBg = m;
+            cfg_.SaveAnalogBg();
             UpdateOptionChecks();
             ForAll(&ClockWindow::ApplyFormat);
         }
@@ -13362,6 +13752,13 @@ private:
             cfg_.SaveAnalogFull();
             ApplyAnalogFull();
             UpdateOptionChecks();
+        }
+        else if (id >= CMD_AANIM && id <= CMD_AANIM + 9) {
+            cfg_.analogAnim = id - CMD_AANIM;
+            cfg_.SaveAnalogAnim();
+            UpdateOptionChecks();
+            ForAll(&ClockWindow::ScheduleSecondTick);   // 프레임 타이머 시작/중지 + 갱신 간격
+            ForAll(&ClockWindow::ApplyFormat);
         }
         else if (id == CMD_ANEON) {
             cfg_.analogNeon = !cfg_.analogNeon;
@@ -13769,21 +14166,129 @@ private:
         return RGB(Rnd(r * 255), Rnd(g * 255), Rnd(b * 255));
     }
 
+    // ---- 애니메이션 (cfg_.analogAnim: 0=끔, 1~9). 테두리 / 눈금 / 바늘이 같은 종류로 함께 움직임
+    //   1 빛 꼬리가 돌고 눈금을 따라 돎, 시/분침 숨쉬기, 초침 부드럽게
+    //   2 반대편 두 개의 빛, 초침이 똑딱(튕김)
+    //   3 테두리/눈금/바늘이 함께 숨쉬듯 밝아졌다 어두워짐
+    //   4 무지개 색이 돌며 변함
+    //   5 점선 테두리가 돌고 눈금이 반짝이며 초침에 잔상
+    //   6 레이더: 초침 뒤로 꼬리가 끌리며 지나간 테두리/눈금이 빛남
+    //   7 초 진행: 테두리/눈금이 지난 초까지 채워짐, 초침 똑딱
+    //   8 빠른 회전: 빛 3개가 빠르게 돎, 바늘 빠르게 깜박임
+    //   9 박동: 매초 시작에 전체가 번쩍였다 사라짐, 초침 튕김
+    bool         ulw_ = false;      // 픽셀별 알파(UpdateLayeredWindow) 방식 사용 중 (바탕 반투명)
+    COLORREF     faceKey_ = 0;      // 마지막으로 그린 원 안쪽 바탕색 (반투명 처리 대상)
+    bool         faceSoft_ = false; // 네온: 바탕과 비슷한 번짐 픽셀도 반투명 처리
+    bool         apx_ = false;      // 바탕 반투명 중: 글자 가장자리가 불투명하게 남지 않도록 안티앨리어싱 끔
+    int    aon_ = 0;
+    double aph_ = 0, ams_ = 0;                  // aph_: 4초에 한 바퀴(0~1), ams_: 현재 초 안의 경과(0~1)
+    int    asec_ = 0;
+    static COLORREF Lift(COLORREF c, double k) {                               // c 를 흰색 쪽으로 k(0~1) 만큼 밝게
+        if (k < 0) k = 0;
+        if (k > 1) k = 1;
+        return RGB(Rnd(GetRValue(c) + (255 - GetRValue(c)) * k), Rnd(GetGValue(c) + (255 - GetGValue(c)) * k), Rnd(GetBValue(c) + (255 - GetBValue(c)) * k));
+    }
+    static double Wrap(double d, double m) { return d - m * floor(d / m); }     // 0 <= 결과 < m
+    static double Trail(double d, double span) { return d < span ? (1 - d / span) * (1 - d / span) : 0; }   // 빛이 지나간 뒤 거리 d -> 꼬리 밝기
+    double Breath() const { return 0.5 + 0.5 * sin(aph_ * 4 * 3.14159265358979); }    // 2초 주기 숨쉬기 (0~1)
+    double Beat() const { return exp(-ams_ * 5); }                              // 초가 시작될 때 1 -> 빠르게 0
+    double SecAngle() const {                                                  // 초침 각도 (도)
+        const double base = asec_ * 6;
+        if (aon_ == 2 || aon_ == 9) return base - 6 * exp(-ams_ * 10) * cos(ams_ * 30);   // 똑딱: 지나쳤다가 돌아오는 튕김
+        if (aon_ == 7) return base - 6 * exp(-ams_ * 15);                       // 똑딱: 빠르게 한 칸
+        return base + ams_ * 6;                                                // 부드럽게 흐름
+    }
+    // 테두리 한 조각(각도 a: 12시 = 0, 시계 방향)의 덧칠 색. on=false 면 덧칠하지 않음
+    COLORREF AnimBorder(double a, COLORREF base, bool& on) {
+        on = true;
+        const double sa = SecAngle();
+        double k = 0;
+        switch (aon_) {
+        case 1: k = Trail(Wrap(aph_ * 360 - a, 360), 90); on = k > 0.02; return Lift(base, 0.8 * k);
+        case 2: k = std::max(Trail(Wrap(aph_ * 360 - a, 360), 90), Trail(Wrap(aph_ * 360 + 180 - a, 360), 90)); on = k > 0.02; return Lift(base, 0.8 * k);
+        case 3: return Lift(base, 0.15 + 0.6 * Breath());
+        case 4: return Hsv(a + aph_ * 360, 0.9, 1.0);
+        case 5: on = ((int)Wrap(a + aph_ * 360, 360) / 20) % 2 == 0; return Lift(base, 0.7);
+        case 6: k = Trail(Wrap(sa - a, 360), 120); on = k > 0.02; return Lift(base, 0.85 * k);
+        case 7: { const double e = asec_ * 6 + ams_ * 6; on = a <= e; return Lift(base, 0.3 + 0.55 * (e > 0 ? a / e : 0)); }
+        case 8:
+            for (int c = 0; c < 3; c++) k = std::max(k, Trail(Wrap(aph_ * 1080 + c * 120 - a, 360), 60));
+            on = k > 0.02;
+            return Lift(base, 0.85 * k);
+        case 9: return Lift(base, 0.15 + 0.75 * Beat());
+        }
+        on = false;
+        return base;
+    }
+    COLORREF AnimTick(int i, COLORREF base) {                                  // 눈금 i(0~59) 의 색
+        const double sa = SecAngle();
+        switch (aon_) {
+        case 1: return Lift(base, 0.8 * Trail(Wrap(aph_ * 60 - i, 60), 14));
+        case 2: return Lift(base, 0.8 * std::max(Trail(Wrap(aph_ * 60 - i, 60), 14), Trail(Wrap(aph_ * 60 + 30 - i, 60), 14)));
+        case 3: return Lift(base, 0.7 * Breath());
+        case 4: return Hsv(i * 6 + aph_ * 360, 0.9, 1.0);
+        case 5: {                                                              // 반짝임: 눈금마다 무작위로 잠깐 밝아짐
+            unsigned h = (GetTickCount() / 160) * 2654435761u ^ ((unsigned)i * 40503u * 2246822519u);
+            h ^= h >> 13;
+            h *= 3266489917u;
+            h ^= h >> 16;
+            return h % 5 == 0 ? Lift(base, 0.9) : base;
+        }
+        case 6: return Lift(base, 0.85 * Trail(Wrap(sa - i * 6, 360), 120));
+        case 7: return i == asec_ ? Lift(base, 0.95) : (i < asec_ ? Lift(base, 0.45) : base);
+        case 8: {
+            double k = 0;
+            for (int c = 0; c < 3; c++) k = std::max(k, Trail(Wrap(aph_ * 180 + c * 20 - i, 60), 8));
+            return Lift(base, 0.85 * k);
+        }
+        case 9: return Lift(base, 0.8 * Beat());
+        }
+        return base;
+    }
+    COLORREF AnimHand(COLORREF base, int w) {                                  // 바늘 색 (w: 0 시/분침, 1 초침)
+        switch (aon_) {
+        case 1: return Lift(base, 0.25 + 0.25 * sin(aph_ * 4 * 3.14159265358979));
+        case 2: return Lift(base, 0.15);
+        case 3: return Lift(base, 0.7 * Breath());
+        case 4: return Hsv(aph_ * 360 + w * 120, 0.75, 1.0);
+        case 5: case 6: return Lift(base, 0.3);
+        case 8: return Lift(base, 0.25 + 0.25 * sin(aph_ * 12 * 3.14159265358979));
+        case 9: return Lift(base, 0.7 * Beat());
+        }
+        return base;
+    }
+
     void PaintAnalog(HDC dc, const RECT& rc, const SYSTEMTIME& t) {
         const double PI = 3.14159265358979323846;
+        apx_ = cfg_.analogBgAlpha < 100;
+        faceSoft_ = false;
+        aon_ = cfg_.analogAnim;
+        aph_ = aon_ ? (GetTickCount() % 4000) / 4000.0 : 0;
+        ams_ = t.wMilliseconds / 1000.0;
+        asec_ = t.wSecond;
         AnalogTheme th = ATHEMES[cfg_.analogTheme];
-        if (MatchDesk()) {                                                        // 원 안쪽 = 모니터 바탕색. 어두우면 눈금/글자/바늘을 밝게
-            th.face = cfg_.deskColor;
-            if (Lum(th.face) < 128) {
+        COLORREF fc;
+        if (AnalogFace(fc)) {                                                     // 원 안쪽을 지정한 색으로. 어두우면 눈금/글자/바늘을 밝게, 밝으면 어둡게
+            th.face = fc;
+            if (Lum(fc) < 128) {
                 th.tickMin = RGB(150, 150, 150);  th.tickHour = RGB(225, 225, 225);
                 th.text = RGB(210, 210, 210);     th.hand = RGB(235, 235, 235);
+            } else {
+                th.tickMin = RGB(90, 90, 90);     th.tickHour = RGB(20, 20, 20);
+                th.text = RGB(30, 30, 30);        th.hand = RGB(25, 25, 25);
             }
+            const int dr = abs(GetRValue(th.sec) - GetRValue(fc)) + abs(GetGValue(th.sec) - GetGValue(fc)) + abs(GetBValue(th.sec) - GetBValue(fc));
+            if (dr < 150) th.sec = Lum(fc) < 128 ? RGB(255, 255, 255) : RGB(0, 0, 0);   // 초침이 배경과 비슷한 색이면 눈에 띄는 색으로
         }
+        faceKey_ = th.face;
         const bool full = !owner_ && cfg_.analogFull;                             // 전체화면: 원 테두리 생략, 눈금은 굵고 선명하게
         if (full) {
             if (Lum(th.face) < 128) { th.tickMin = RGB(235, 235, 235);  th.tickHour = RGB(255, 255, 255); }
             else                    { th.tickMin = RGB(60, 60, 60);     th.tickHour = RGB(0, 0, 0); }
         }
+        if (cfg_.analogColOn[3]) th.tickMin = th.tickHour = cfg_.analogCol[3];   // 눈금 색 직접 지정
+        if (cfg_.analogColOn[4]) th.bezel = cfg_.analogCol[4];                   // 테두리 색 직접 지정 (무지개 테두리도 단색으로)
+        const bool rbB = th.rainbow && !cfg_.analogColOn[4];                     // 무지개 테두리를 쓰는가
         HBRUSH kb = CreateSolidBrush(ANALOG_KEY);
         FillRect(dc, &rc, kb);                                                    // 원 바깥: 투명 처리용 색
         DeleteObject(kb);
@@ -13796,7 +14301,7 @@ private:
         HGDIOBJ np = GetStockObject(NULL_PEN);
         HGDIOBJ op = SelectObject(dc, np);
         if (full) {
-        } else if (th.rainbow) {                                                  // 무지개 테두리: 3도씩 색을 바꾼 부채꼴 120개
+        } else if (rbB) {                                                         // 무지개 테두리: 3도씩 색을 바꾼 부채꼴 120개
             for (int d = 0; d < 360; d += 3) {
                 const double a0 = d * PI / 180, a1 = (d + 4) * PI / 180, rr = R + 1;
                 POINT pt[3] = {{cx, cy}, {cx + Rnd(rr * sin(a0)), cy - Rnd(rr * cos(a0))},
@@ -13814,6 +14319,22 @@ private:
             SelectObject(dc, ob);
             DeleteObject(bezel);
         }
+        if (aon_ && !full) {                                                      // 테두리 애니메이션: 6도 조각마다 색을 덧그림
+            const double rm = R - bz / 2.0;
+            for (int d = 0; d < 360; d += 6) {
+                bool on;
+                const COLORREF c = AnimBorder(d + 3, rbB ? Hsv(d, 0.85, 0.95) : th.bezel, on);
+                if (!on) continue;
+                const double a0 = d * PI / 180, a1 = (d + 7) * PI / 180;
+                LOGBRUSH lb = {BS_SOLID, c, 0};
+                HPEN pn = ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_FLAT, bz > 3 ? bz - 2 : bz, &lb, 0, NULL);
+                HGDIOBJ o = SelectObject(dc, pn);
+                MoveToEx(dc, cx + Rnd(rm * sin(a0)), cy - Rnd(rm * cos(a0)), NULL);
+                LineTo(dc, cx + Rnd(rm * sin(a1)), cy - Rnd(rm * cos(a1)));
+                SelectObject(dc, o);
+                DeleteObject(pn);
+            }
+        }
         HBRUSH face = CreateSolidBrush(th.face);
         HGDIOBJ ob = SelectObject(dc, face);
         if (full) Ellipse(dc, cx - R, cy - R, cx + R + 1, cy + R + 1);
@@ -13826,7 +14347,8 @@ private:
         for (int i = 0; i < 60; i++) {
             const bool hr = (i % 5 == 0);
             COLORREF col = hr ? th.tickHour : th.tickMin;
-            if (th.rainbow) col = Hsv(i * 6, full ? 0.9 : 0.85, full ? 1.0 : (hr ? 0.75 : 0.95));
+            if (th.rainbow && !cfg_.analogColOn[3]) col = Hsv(i * 6, full ? 0.9 : 0.85, full ? 1.0 : (hr ? 0.75 : 0.95));
+            if (aon_) col = AnimTick(i, col);                                     // 애니메이션 종류별 눈금 색
             HPEN pn = CreatePen(PS_SOLID, hr ? (full ? (R / 40 < 7 ? 7 : R / 40) : (R / 50 < 2 ? 2 : R / 50)) : (full ? (R / 130 < 2 ? 2 : R / 130) : (R / 100 < 1 ? 1 : R / 100)), col);
             op = SelectObject(dc, pn);
             const double a = i * 6 * PI / 180, rIn = rOut - (hr ? R * (full ? 0.16 : 0.10) : R * (full ? 0.055 : 0.045));
@@ -13841,7 +14363,7 @@ private:
         FormatDate(t, 1, ds);                                                     // yyyy-MM-dd
         char top[96];                                                             // 도시 창은 요일 대신 도시 이름 + (AM)/(PM)
         wsprintfA(top, "%s (%s)", owner_ ? city_ : WD[t.wDayOfWeek % 7], t.wHour < 12 ? "AM" : "PM");
-        HFONT f = MakeFont(cfg_.dateFont, R * 14 / 100 < 10 ? 10 : R * 14 / 100);
+        HFONT f = MakeFont(cfg_.dateFont, R * 14 / 100 < 10 ? 10 : R * 14 / 100, apx_ ? NONANTIALIASED_QUALITY : CLEARTYPE_QUALITY);
         HGDIOBJ of = SelectObject(dc, f);
         SetTextColor(dc, th.text);
         const char* txt[2] = {top, ds};
@@ -13876,12 +14398,26 @@ private:
         };
         const double hh = ((t.wHour % 12) + t.wMinute / 60.0 + t.wSecond / 3600.0) * 30;
         const double mm = (t.wMinute + t.wSecond / 60.0) * 6;
-        const double ss = t.wSecond * 6;
-        hand(hh, R * 0.52, R * 0.050 < 2 ? 2 : R * 0.050, R * 0.10, th.hand);
-        hand(mm, R * 0.80, R * 0.036 < 1.5 ? 1.5 : R * 0.036, R * 0.10, th.hand);
+        const double ss = aon_ ? SecAngle() : t.wSecond * 6;                      // 애니메이션: 종류별 초침 움직임
+        const COLORREF hcH0 = cfg_.analogColOn[0] ? cfg_.analogCol[0] : th.hand, hcM0 = cfg_.analogColOn[1] ? cfg_.analogCol[1] : th.hand;   // 시침/분침 색 (직접 지정 or 테마)
+        const COLORREF hcH = aon_ ? AnimHand(hcH0, 0) : hcH0, hcM = aon_ ? AnimHand(hcM0, 0) : hcM0;
+        hand(hh, R * 0.52, R * 0.050 < 2 ? 2 : R * 0.050, R * 0.10, hcH);
+        hand(mm, R * 0.80, R * 0.036 < 1.5 ? 1.5 : R * 0.036, R * 0.10, hcM);
 
         const double sa = ss * PI / 180;                                          // 초침 (뒤쪽 꼬리 포함) + 가운데 점
-        const COLORREF capC = cfg_.analogNoSec ? th.hand : th.sec;                // 초침 생략: 가운데 점만 바늘 색으로
+        const COLORREF capC0 = cfg_.analogNoSec ? th.hand : (cfg_.analogColOn[2] ? cfg_.analogCol[2] : th.sec);               // 초침 생략: 가운데 점만 바늘 색으로
+        const COLORREF capC = aon_ ? AnimHand(capC0, 1) : capC0;
+        if ((aon_ == 5 || aon_ == 6) && !cfg_.analogNoSec) {                      // 초침 잔상 (뒤로 갈수록 흐리게)
+            for (int j = 4; j >= 1; j--) {
+                const double ga = (ss - j * 5) * PI / 180;
+                HPEN gp = CreatePen(PS_SOLID, R / 48 < 1 ? 1 : R / 48, Mix(th.face, capC, 0.5 * (1 - j / 5.0)));
+                HGDIOBJ go = SelectObject(dc, gp);
+                MoveToEx(dc, cx, cy, NULL);
+                LineTo(dc, cx + Rnd(R * 0.86 * sin(ga)), cy - Rnd(R * 0.86 * cos(ga)));
+                SelectObject(dc, go);
+                DeleteObject(gp);
+            }
+        }
         HPEN ps = CreatePen(PS_SOLID, R / 48 < 1 ? 1 : R / 48, capC);
         HBRUSH rb = CreateSolidBrush(capC);
         op = SelectObject(dc, ps);
@@ -13915,8 +14451,11 @@ private:
         const double PI = 3.14159265358979323846;
         const AnalogTheme& th = ATHEMES[cfg_.analogTheme];
         const int u = (!owner_ && cfg_.analogFull) ? 1 : (R / 96 < 1 ? 1 : R / 96);   // 글로우/선 굵기 배율 (크기에 비례)
-        const COLORREF bg = (MatchDesk() && Lum(cfg_.deskColor) < 110) ? cfg_.deskColor : RGB(8, 8, 14), mainC = th.rainbow ? RGB(235, 235, 255) : NeonOf(th.bezel), secC = NeonOf(th.sec);
+        COLORREF fcol;
+        const COLORREF bg = (AnalogFace(fcol) && Lum(fcol) < 110) ? fcol : RGB(8, 8, 14), mainC = th.rainbow ? RGB(235, 235, 255) : NeonOf(th.bezel), secC = NeonOf(th.sec);
 
+        faceKey_ = bg;
+        faceSoft_ = true;
         HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
         HBRUSH face = CreateSolidBrush(bg);
         HGDIOBJ ob = SelectObject(dc, face);
@@ -13929,8 +14468,9 @@ private:
             LOGBRUSH lb = {BS_SOLID, c, 0};
             return ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND, w, &lb, 0, NULL);
         };
+        const double pulse = aon_ == 9 ? Beat() : (aon_ == 1 || aon_ == 3 || aon_ == 8) ? Breath() : 0;   // 애니메이션: 번짐 밝기가 숨 쉬듯/박동처럼 변함 (0~1)
         auto passCol = [&](int pass, COLORREF c) {                              // 0,1: 어두운 번짐 / 2: 밝은 심
-            return pass == 0 ? Mix(bg, c, 0.15) : pass == 1 ? Mix(bg, c, 0.40) : Mix(c, RGB(255, 255, 255), 0.45);
+            return pass == 0 ? Mix(bg, c, 0.15 + 0.15 * pulse) : pass == 1 ? Mix(bg, c, 0.40 + 0.2 * pulse) : Mix(c, RGB(255, 255, 255), 0.45 + 0.2 * pulse);
         };
         auto line = [&](double x1, double y1, double x2, double y2, int w, COLORREF c) {
             for (int pass = 0; pass < 3; pass++) {
@@ -13943,10 +14483,12 @@ private:
             }
         };
 
+        const COLORREF ringC = cfg_.analogColOn[4] ? cfg_.analogCol[4] : mainC;      // 테두리 색 (직접 지정 or 테마)
+        const bool rbR = th.rainbow && !cfg_.analogColOn[4];
         const int rr = R - 7 * u;                                                  // 테두리 링 (번짐이 원 밖으로 나가지 않게 안쪽에)
         const bool noRing = !owner_ && cfg_.analogFull;                        // 전체화면: 링 생략, 눈금은 굵고 선명하게
         if (noRing) {
-        } else if (th.rainbow) {
+        } else if (rbR) {
             for (int d = 0; d < 360; d += 3) {
                 const double a0 = d * PI / 180, a1 = (d + 3.5) * PI / 180;
                 line(cx + rr * sin(a0), cy - rr * cos(a0), cx + rr * sin(a1), cy - rr * cos(a1), 3 * u, Hsv(d, 0.9, 1.0));
@@ -13954,7 +14496,7 @@ private:
         } else {
             HGDIOBJ nb = SelectObject(dc, GetStockObject(NULL_BRUSH));
             for (int pass = 0; pass < 3; pass++) {
-                HPEN pn = mkpen(pass == 0 ? 9 * u : pass == 1 ? 6 * u : 3 * u, passCol(pass, mainC));
+                HPEN pn = mkpen(pass == 0 ? 9 * u : pass == 1 ? 6 * u : 3 * u, passCol(pass, ringC));
                 HGDIOBJ o = SelectObject(dc, pn);
                 Ellipse(dc, cx - rr, cy - rr, cx + rr + 1, cy + rr + 1);
                 SelectObject(dc, o);
@@ -13962,13 +14504,23 @@ private:
             }
             SelectObject(dc, nb);
         }
+        if (aon_ && !noRing) {                                                 // 테두리 애니메이션: 6도 조각마다 덧그림
+            for (int d = 0; d < 360; d += 6) {
+                bool on;
+                const COLORREF c = AnimBorder(d + 3, ringC, on);
+                if (!on) continue;
+                const double a0 = d * PI / 180, a1 = (d + 7) * PI / 180;
+                line(cx + rr * sin(a0), cy - rr * cos(a0), cx + rr * sin(a1), cy - rr * cos(a1), 3 * u, c);
+            }
+        }
 
         const double rOut = noRing ? R - 9 : R - 18 * u;                           // 눈금: 시 눈금 12개는 네온, 분 눈금은 은은하게
         for (int i = 0; i < 60; i++) {
             const bool hr = (i % 5 == 0);
             const double a = i * 6 * PI / 180, rIn = rOut - (hr ? R * 0.10 : R * 0.04);
             const double x1 = cx + rOut * sin(a), y1 = cy - rOut * cos(a), x2 = cx + rIn * sin(a), y2 = cy - rIn * cos(a);
-            const COLORREF c = th.rainbow ? Hsv(i * 6, 0.9, 1.0) : mainC;
+            COLORREF c = cfg_.analogColOn[3] ? cfg_.analogCol[3] : (th.rainbow ? Hsv(i * 6, 0.9, 1.0) : mainC);
+            if (aon_) c = AnimTick(i, c);                                         // 애니메이션 종류별 눈금 색
             if (hr) line(x1, y1, x2, y2, noRing ? (R / 35 < 8 ? 8 : R / 35) : 3 * u, c);
             else {
                 HPEN pn = mkpen(noRing ? (R / 130 < 2 ? 2 : R / 130) : u, Mix(bg, c, noRing ? 1.0 : 0.6));
@@ -13986,7 +14538,7 @@ private:
         char top[96];                                                          // 요일(도시 이름) + (AM)/(PM)
         wsprintfA(top, "%s (%s)", owner_ ? city_ : WD[t.wDayOfWeek % 7], t.wHour < 12 ? "AM" : "PM");
         const char* txt[2] = {top, ds};
-        HFONT f = MakeFont(cfg_.dateFont, R * 14 / 100 < 10 ? 10 : R * 14 / 100);
+        HFONT f = MakeFont(cfg_.dateFont, R * 14 / 100 < 10 ? 10 : R * 14 / 100, apx_ ? NONANTIALIASED_QUALITY : CLEARTYPE_QUALITY);
         HGDIOBJ of = SelectObject(dc, f);
         SetTextColor(dc, Mix(mainC, RGB(255, 255, 255), 0.4));
         const int ty[2] = {cy - R * 34 / 100, cy + R * 34 / 100};
@@ -14004,10 +14556,16 @@ private:
             const double a = deg * PI / 180, dx = sin(a), dy = -cos(a);
             line(cx - dx * tail, cy - dy * tail, cx + dx * len, cy + dy * len, w, c);
         };
-        hand(((t.wHour % 12) + t.wMinute / 60.0 + t.wSecond / 3600.0) * 30, R * 0.50, 0, 5 * u, mainC);
-        hand((t.wMinute + t.wSecond / 60.0) * 6, R * 0.75, 0, 4 * u, mainC);
-        if (!cfg_.analogNoSec) hand(t.wSecond * 6, R * 0.80, R * 0.18, 2 * u, secC);
-        HBRUSH cb = CreateSolidBrush(passCol(2, cfg_.analogNoSec ? mainC : secC));
+        const COLORREF hourC = cfg_.analogColOn[0] ? cfg_.analogCol[0] : mainC, minC = cfg_.analogColOn[1] ? cfg_.analogCol[1] : mainC;   // 직접 지정한 색은 그대로
+        const COLORREF secBase = cfg_.analogColOn[2] ? cfg_.analogCol[2] : secC;
+        const COLORREF hourH = aon_ ? AnimHand(hourC, 0) : hourC, minH = aon_ ? AnimHand(minC, 0) : minC, secH = aon_ ? AnimHand(secBase, 1) : secBase;
+        const double ssn = aon_ ? SecAngle() : t.wSecond * 6;                  // 애니메이션: 종류별 초침 움직임
+        hand(((t.wHour % 12) + t.wMinute / 60.0 + t.wSecond / 3600.0) * 30, R * 0.50, 0, 5 * u, hourH);
+        hand((t.wMinute + t.wSecond / 60.0) * 6, R * 0.75, 0, 4 * u, minH);
+        if ((aon_ == 5 || aon_ == 6) && !cfg_.analogNoSec)                     // 초침 잔상
+            for (int j = 4; j >= 1; j--) hand(ssn - j * 5, R * 0.80, R * 0.18, 2 * u, Mix(bg, secH, 0.5 * (1 - j / 5.0)));
+        if (!cfg_.analogNoSec) hand(ssn, R * 0.80, R * 0.18, 2 * u, secH);
+        HBRUSH cb = CreateSolidBrush(passCol(2, cfg_.analogNoSec ? hourC : secBase));
         op = SelectObject(dc, GetStockObject(NULL_PEN));
         ob = SelectObject(dc, cb);
         const int cap = R * 5 / 100 < 3 ? 3 : R * 5 / 100;
@@ -14369,6 +14927,21 @@ private:
     }
 
     bool MatchDesk() const { return cfg_.analogMatch && cfg_.deskSolid; }
+    static void BgAlphaPreview(void* self, int pct) {                         // 슬라이더를 움직이는 동안 바로 반영
+        ClockWindow* w = (ClockWindow*)self;
+        w->cfg_.analogBgAlpha = pct;
+        w->ForAll(&ClockWindow::ApplyOpacity);
+    }
+    // 원 안쪽 바탕색 지정이 있으면 true 와 색 (테마 적용이면 false)
+    bool AnalogFace(COLORREF& c) const {
+        static const COLORREF P[11] = {RGB(255, 255, 255), RGB(128, 128, 128), RGB(0, 0, 0), RGB(200, 30, 30), RGB(240, 130, 20), RGB(240, 210, 40),
+                                       RGB(30, 150, 60), RGB(30, 80, 200), RGB(20, 30, 110), RGB(120, 40, 160), RGB(240, 130, 180)};
+        const int m = cfg_.analogBg;
+        if (m == 0) { c = cfg_.deskColor; return cfg_.deskSolid; }
+        if (m >= 2 && m <= 12) { c = P[m - 2]; return true; }
+        if (m == 13) { c = cfg_.analogBgColor; return true; }
+        return false;
+    }
     static int Lum(COLORREF c) { return (GetRValue(c) * 299 + GetGValue(c) * 587 + GetBValue(c) * 114) / 1000; }
 
     void ToggleBackFollow() {
@@ -14451,9 +15024,11 @@ private:
         UINT ms = 1000 - t.wMilliseconds;
         if (owner_ && MinuteOnly()) ms += (59 - t.wSecond) * 1000;      // 도시 창: 알람과 무관하므로 다음 분 경계에만 깨움
         SetTimer(hwnd_, TID_SECOND, ms, NULL);
+        if (cfg_.clockMode == 2 && cfg_.analogAnim) SetTimer(hwnd_, TID_ANIM, 50, NULL);    // 애니메이션: 초당 약 20 프레임
+        else KillTimer(hwnd_, TID_ANIM);
     }
 
-    bool MinuteOnly() const { return cfg_.clockMode == 2 && cfg_.analogNoSec; }   // 아날로그 + 초침 생략: 분 단위 갱신
+    bool MinuteOnly() const { return cfg_.clockMode == 2 && cfg_.analogNoSec && !cfg_.analogAnim; }   // 아날로그 + 초침 생략: 분 단위 갱신
 
     // 스크롤 범위 계산용 텍스트 폭 측정
     void MeasureText() {
@@ -14502,14 +15077,9 @@ private:
         return TRUE;
     }
 
-    // 본 창 + 도시 창 전체를 한 덩어리로 작업영역 내 랜덤 위치로 이동 (상대 위치 유지)
+    // 본 창 + 도시 창 전체를 한 덩어리로 "현재 있는 모니터"의 작업영역 안 랜덤 위치로 이동 (상대 위치 유지).
+    // 모니터를 바꾸지 않으므로 사용자가 끌어다 놓은 모니터에 그대로 머물고, 모니터 경계를 넘지 않음
     void MoveGroup() {
-        RECT wa;
-        MonList L = {};
-        if (cfg_.allMon) EnumDisplayMonitors(NULL, NULL, MonProc, (LPARAM)&L);
-        if (L.n > 0) wa = L.r[rand() % L.n];    // 모든 모니터 On: 임의의 모니터 선택
-        else         SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0);   // Off: 기본 모니터
-
         RECT g;
         GetWindowRect(hwnd_, &g);
         for (ClockWindow* p = head_; p; p = p->next_) {
@@ -14517,6 +15087,10 @@ private:
             GetWindowRect(p->hwnd_, &r);
             UnionRect(&g, &g, &r);
         }
+        RECT wa;
+        MONITORINFO mi = {sizeof(mi)};
+        if (GetMonitorInfoW(MonitorFromRect(&g, MONITOR_DEFAULTTONEAREST), &mi)) wa = mi.rcWork;   // 창이 가장 많이 걸친 모니터
+        else SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0);
         int mx = wa.right - wa.left - (g.right - g.left);
         int my = wa.bottom - wa.top - (g.bottom - g.top);
         int dx = wa.left + (mx > 0 ? rand() % (mx + 1) : 0) - g.left;
@@ -14555,11 +15129,11 @@ private:
     }
 
     // 폰트 이름은 UTF-8(또는 ANSI) 문자열 -> UTF-16 변환 후 생성. 크기는 픽셀 높이
-    static HFONT MakeFont(const char* name, int px) {
+    static HFONT MakeFont(const char* name, int px, BYTE quality = CLEARTYPE_QUALITY) {
         char16_t face[LF_FACESIZE] = {};
         FaceToWide(name, (LPWSTR)face);
         return CreateFontW(-px, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
-                           0, 0, CLEARTYPE_QUALITY, 0, (LPCWSTR)face);
+                           0, 0, quality, 0, (LPCWSTR)face);
     }
 
     // UTF-8 한 줄을 오프셋만큼 옮겨서 그림
@@ -14585,12 +15159,14 @@ private:
     HFONT        dateFont_     = NULL;
     HBRUSH       bgBrush_      = NULL;
     HMENU        menu_         = NULL;  // 본 창만 (더블클릭 팝업 메뉴)
-    enum { TOP_DIGITAL = 1, TOP_ANALOG = 2 };           // 최상위 메뉴 위치: F3 디지탈 시계 디자인 / F4 아나로그 시계 디자인
+    enum { TOP_DIGITAL = 1, TOP_ANALOG = 2 };           // 최상위 메뉴 위치: F3 디지탈 시계 / F4 아나로그 시계
     static constexpr int TOP_MENU_COUNT = 8;            // 최상위 메뉴 개수 (F2 ~ F9. F1 은 전체 메뉴)
     HMENU        menuTop_[TOP_MENU_COUNT] = {};         // 최상위 메뉴의 하위 팝업 (순서대로 F2 ~ F9)
     HMENU        menuSet_      = NULL;
-    HMENU        menuDsn_      = NULL;  // F3) 디지탈 시계 디자인
-    HMENU        menuATheme_   = NULL;  // F4) 아날로그 시계 디자인 (테마 목록)
+    HMENU        menuDsn_      = NULL;  // F3) 디지탈 시계
+    HMENU        menuATheme_   = NULL;  // F4) 아날로그 시계 (테마 목록)
+    HMENU        menuABg_      = NULL;  // F4) 아날로그 시계 > 배경색 설정
+    HMENU        menuACol_[5]  = {};    // F4) 아날로그 시계 > 바늘 / 눈금 / 테두리 색깔 > 시침/분침/초침/눈금/테두리
     HMENU        menuOpacity_  = NULL;
     HMENU        menuMove_     = NULL;
     HMENU        menuGlobal_   = NULL;
