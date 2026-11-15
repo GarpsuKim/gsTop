@@ -6,7 +6,7 @@ Windows 10/11 에서 동작하는
 - 텔레그램 원격 제어(화면/웹캠 캡처, 침입 탐지) 
 - 사용자의 귀가 외출 상태 자동 감지
 
-C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)이며, 버전 정보(exe 속성)는 `version.h` + `gsHomeManager.rc` 로 넣습니다. 아이콘은 `gsHomeManager.ico` 를 같은 rc 로 exe 에 넣습니다 (빌드할 때 `gsHomeManager.ico` 가 같은 폴더에 있어야 함).
+C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)
 
 ## 특징
 
