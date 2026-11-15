@@ -1,12 +1,6 @@
 # gsHomeManager
 
-Windows 10/11 에서 동작하는
-- 텍스트/아날로그 시계 
-- 카메라 침입 탐지 
-- 텔레그램 원격 제어(화면/웹캠 캡처, 침입 탐지) 
-- 사용자의 귀가 외출 상태 자동 감지
-
-C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)
+Windows 11용 텍스트/아날로그 시계 + 집 감시(WiFiScan) + 텔레그램 원격 제어(화면/웹캠 캡처, 침입 탐지) 앱입니다. 기존 gsClock, WiFiScan, screen_telegram 을 하나로 합쳤습니다. C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)이며, 버전 정보(exe 속성)는 `version.h` + `gsHomeManager.rc` 로 넣습니다. 아이콘은 `gsHomeManager.ico` 를 같은 rc 로 exe 에 넣습니다 (빌드할 때 `gsHomeManager.ico` 가 같은 폴더에 있어야 함).
 
 ## 특징
 
@@ -15,6 +9,7 @@ C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)
 - 아나로그: 원형 시계 (분 눈금 60개 + 시 눈금 12개, 시침/분침/초침, 요일(AM/PM)과 날짜 표시). 원 바깥은 완전 투명. 테마 11종, 네온사인 효과, 초침 생략, 전체화면, 모니터 바탕색 일치, 마우스 휠 확대/축소 (아래 아나로그 시계 참고)
 - 일정 간격으로 창 위치를 랜덤 이동 (메뉴에서 간격 선택, 0 = 고정. 디지탈/아나로그 모두 적용)
 - 세계 도시 시계 (Global): 도시를 선택할 때마다 시계 창이 추가되며, 목록은 종료 시 저장되어 재시작 시 복원 (시계 모양은 본 창과 같이 바뀜)
+- 시보: 매시 지정한 분(기본 정각)에 wav 파일 재생 (메뉴 F6 > 시보 설정)
 - 알람 10개 + 시스템 재시작 + 다른 앱 호출: 시각 지정, 동영상/음악 파일을 시스템 기본 플레이어로 실행, 플레이어 자동 닫기, 메모 표시, 알람 테스트
 - 바탕색, 투명도, 시분초/년월일 폰트(이름, 크기, 색) 변경
 - 항상 위, 모든 모니터, 모든 가상 데스크탑 적용(On/Off)
@@ -26,7 +21,7 @@ C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)
 - 마지막 창 위치 저장
 - WiFiScan: 앱 시작 시 자동으로 scan On. Bluetooth / Wi-Fi(LAN) scan 으로 집에 있는지 감시하고 `/HomeBack`, `/NotHome` 을 같은 프로세스의 Telegram 모듈에 직접 전달 (아래 WiFiScan 참고)
 - `/HomeBack`, `/NotHome` 판정이 날 때마다 모니터 중앙에 5초 동안 팝업 메시지를 표시
-- WiFiScan 메뉴의 Wifi공유기 자동감시 On / Off: 정해 둔 시각에 scan 을 자동으로 켜고 끄며, 음악/동영상 재생·메모 표시도 가능 (설정하지 않으면 scan 에 영향 없음)
+- WiFiScan 메뉴의 HomeBack / NotHome 탐지 시간 및 프로그램 설정: 하나의 대화상자에서 탐지 사용, 항상 / 지정한 시간 동안에만 scan, `/HomeBack` · `/NotHome` 판정 때 실행할 프로그램을 설정
 - 메인 윈도우 맨 아래 상태줄에 scan On / Off 가 될 때마다 시각과 사유를 표시 (아나로그 모드에서는 상태줄 없음)
 - 카메라 영상: 한 창에서 WebCam1 / WebCam2(PC 웹캠) / IP Cam(안드로이드 폰 카메라 앱 DroidCam, IP Webcam 등의 MJPEG 영상)을 골라 실시간 표시, 사진 저장/동영상 촬영, 폰 탐색기(FTP)로 폰 파일 열기
 - **다른 PC 원격 제어**: 같은 내부망의 다른 PC 화면을 보면서 마우스로 조작(클라이언트), 또는 이 PC 를 다른 PC 가 조작하게 허용(서버). 연결 요청이 오면 Yes/No 확인창을 띄움 (아래 다른 PC 원격 제어 참고)
@@ -39,6 +34,7 @@ C++(g++/MinGW) 단일 소스 파일(`gsHomeManager.cpp`)
 gsHomeManager.cpp ............ 소스 (시계 + WiFiScan + IP cam + Telegram 모듈)
 gsHomeManager.rc ............. exe 속성(자세히 탭) 버전 리소스 (UTF-8)
 gsHomeManager.ico ............ 아이콘
+wav\WAVPlayer.exe ............ 시보 재생 프로그램 (시작할 때 없으면 GitHub 에서 자동으로 내려받음)
 version.h .................... 버전/저작권 정보 (버전을 올릴 때 이 파일만 수정)
 version.txt .................. _build.bat 이 version.h 에서 자동 생성 (exe 와 함께 GitHub 에 올림)
 _build.bat ................... 컴파일 & 링크
@@ -92,8 +88,8 @@ g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManage
 | F3 | 디지탈 시계 디자인 | 바탕색 변경(시계 바탕색과 모니터 바탕색을 동일하게 / 바탕색 선택), 투명도 변경, 시분초 표시 형식, 년월일 표시 형식, 시분초 글꼴, 년월일 글꼴, 년월일 보이기, 음력 보이기 |
 | F4 | 아나로그 시계 디자인 | 전체화면 on/off, 네온사인 on/off, 초침 생략 on/off, 배경색 일치 on/off, 테마 11종 |
 | F5 | Global | 도시 선택(중복 선택 불가). 도시 창을 닫으면 그 도시 시계만 종료 |
-| F6 | 작동시간 및 알람 설정 | 알람1 ~ 알람10, 시스템 재시작, 다른 앱 호출, 침입 탐지 시간 (아래 참고) |
-| F7 | WiFiScan | WifiScan모니터링(설정/진행 상황 대화상자), Wifi공유기 자동감시 On / Off, HomeBack 프로그램, NotHome 프로그램 (아래 참고) |
+| F6 | 작동시간 및 알람 설정 | 알람1 ~ 알람10, 시스템 재시작, 다른 앱 호출, 침입 탐지 시간, 시보 설정 (아래 참고) |
+| F7 | WiFiScan | WifiScan모니터링(설정/진행 상황 대화상자), HomeBack / NotHome 탐지 시간 및 프로그램 설정 (아래 참고) |
 | F8 | IP cam / 폰 연결 | IP cam 등록(IP address / port 를 ini 에 저장), 카메라 영상(영상 창 열기 → WebCam1 / WebCam2 / IP Cam 선택 후 [실행]), 폰 탐색기, 다른 PC(서버), 다른 PC(클라이언트) |
 | F9 | Help | About(프로그램 이름/버전/개발자), ReadMe.MD(기본 브라우저로 열기), 홈페이지(주소 표시), 최신 버전 다운로드(GitHub zip 다운로드 링크 열기), 음력 API 키값 등록 |
 
@@ -148,23 +144,24 @@ F4) 아나로그 시계 디자인 메뉴 (모두 ini `[Analog]` 에 저장):
 - **다른 앱 호출**: 서브메뉴 없이 누르면 하나의 대화상자가 열립니다(사용 / 시각 / BAT·CMD·EXE 파일 / 메모 / 알람 지우기 / 알람 테스트, `저장` 으로 반영). 시각이 되면 선택한 파일을 실행하고, 메모가 있으면 모니터 중앙에 30초 표시합니다.
 - **침입 탐지 시간**: 하나의 대화상자에서 `침입 탐지 사용`, `항상`, `매일 개시 시각`, `매일 종료 시각` 을 설정합니다(사용 중이면 메뉴 앞에 체크). `항상` 이 켜져 있으면 프로그램을 시작할 때(그리고 저장할 때) 텔레그램 `/detectOn` 을 실행하고, 꺼져 있으면 매일 개시 시각에 `/detectOn`, 종료 시각에 `/detectOff` 를 실행합니다(종료가 개시보다 이르면 자정을 넘김). 시간대 안에서 프로그램을 시작하거나 설정을 저장해도 바로 `/detectOn` 을 실행합니다. 명령은 같은 프로세스의 텔레그램 모듈에 직접 전달되므로 `[Telegram]` 의 토큰/chat id 와 카메라(CAMERA=TRUE)가 필요합니다. ini 키는 `[Alarm]` 의 `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (기본: 사용 안 함, 항상, 22:00:00, 06:00:00) 입니다.
 
+- **시보 설정**: 하나의 대화상자에서 `사용`(체크), `음악파일 선택...`, `매시 NN분` (목록 00 ~ 59, 기본 00), `테스트`, `저장` 을 설정합니다(사용 중이면 메뉴 앞에 체크, 메뉴 이름 뒤에 선택한 파일명 표시). 음악 파일 선택은 `C:\Windows\Media` 를 기본 폴더로 하는 `*.wav` 탐색입니다. 이미 고른 파일이 있으면 그 폴더에서 시작합니다. `테스트` 는 저장하지 않은 현재 입력값으로 바로 재생하고, `저장` 은 ini 에 기록합니다(`사용` 을 켜려면 파일이 필요). 시계 모양(디지탈/아나로그)이나 트레이 상태와 관계없이 매시 지정한 분(0~5초)에 한 번, exe 폴더 기준 `start "" .\wav\wavplayer.exe "선택한_파일"` 를 cmd 창 없이 실행합니다. `wav\wavplayer.exe` 가 없으면 실행하지 않고 `gsHomeManager.log` 에 기록합니다 (테스트 때는 안내창). ini 키는 `[Alarm]` 의 `ChimeOn` / `ChimeFile` / `ChimeMinute` 이며, `ChimeFile` 키가 없으면 `C:\Windows\Media\ring10.wav` 를 기본값으로 씁니다.
+
 자동 닫기는 파일 재생 길이(+3초)를 셸 속성으로 읽어 계산하며, 읽지 못하면 지정 시간을 사용합니다. 실행 후 8초 안에 새로 생긴 플레이어 창을 찾아 `WM_CLOSE` 를 보내는 방식이므로 다음 제약이 있습니다.
 
 - 이미 열려 있던 플레이어 창을 재사용하거나 UWP 앱이 창을 다르게 만들면 닫히지 않을 수 있습니다.
 - 재생 중 일시정지/이동하면 길이 기준 시점이 어긋납니다.
 
-### Wifi공유기 자동감시 On / Off
+### HomeBack / NotHome 탐지 시간 및 프로그램 설정
 
-WiFiScan 메뉴의 두 항목으로, 알람과 같은 방식(사용 / 시각 설정 / 동영상·음악 파일 / 메모 / 플레이어 자동 닫기 / 지우기 / 테스트)으로 설정합니다. 시각을 정하면 바로 사용 상태가 되며 매일 반복됩니다.
+WiFiScan 메뉴의 한 항목으로 열리는 하나의 대화상자입니다 (예전의 'Wifi공유기 자동감시 On / Off', 'HomeBack 프로그램', 'NotHome 프로그램' 메뉴를 합친 것).
 
-- On 시각이 되면 scan 을 시작하고, Off 시각이 되면 scan 을 정지합니다. 이미 그 상태이면 그대로 두고 상태줄에만 표시합니다.
-- 같은 시각에 지정한 음악/동영상을 시스템 기본 플레이어로 재생하고, 메모가 있으면 모니터 중앙에 30초 표시합니다. 파일/메모는 없어도 됩니다.
-- ini 의 `[WiFiScan]` 에 `ScanOnTime` / `ScanOffTime` 이 없으면 아무 영향이 없습니다.
-- '파일/메모 테스트' 는 파일과 메모만 실행하고 scan 상태는 바꾸지 않습니다.
+- **HomeBack / NotHome 탐지 사용**: 끄면 시작할 때 scan 을 켜지 않고 개시/종료 시각도 무시합니다 (`ScanUse`, 기본 사용). 저장하면 바로 현재 상태에 맞게 scan 을 켜거나 끕니다.
+- **항상**: 켜면 프로그램을 시작할 때부터 계속 scan 합니다 (`ScanAlways`). 끄면 **개시 시각** 에 scan 을 켜고 **종료 시각** 에 끄며, 시작했을 때 이미 그 시간대 안이면 바로 켭니다. 종료가 개시보다 이르면 자정을 넘깁니다. 시각은 `[WiFiScan]` 의 `ScanOnTime` / `ScanOffTime` 에 저장되며 매일 반복됩니다.
+- **실행될 프로그램 지정**: HomeBack / NotHome 줄마다 `사용`(체크), 파일(`...` 로 BAT / CMD / EXE 선택), `테스트`(현재 입력값으로 1회 실행, 저장하지 않음), `삭제`(사용·파일·메모를 비움) 가 있고, `저장` 을 눌러야 반영됩니다. `/HomeBack` 또는 `/NotHome` 판정이 날 때마다 해당 프로그램을 실행하며, 앱이 시작될 때 현재 상태를 한 번 전달하므로 그때도 실행됩니다. 메모(`...ProgMemo`)가 ini 에 있으면 모니터 중앙에 30초 표시합니다 (이 대화상자에서는 바꾸지 않고 그대로 보존).
+- 예전에 ini 의 `ScanOn*` / `ScanOff*` 에 설정해 둔 음악/동영상·메모·플레이어 자동 닫기 값은 지우지 않으며, 개시/종료 시각이 되면 예전처럼 실행됩니다 (이 대화상자에서는 바꿀 수 없고 ini 를 직접 고칩니다).
+- ini 에 `ScanOnTime` 이 이미 있던 사용자는 `ScanAlways` 가 꺼진 상태(예전 예약 유지)로, 없던 사용자는 켜진 상태(예전처럼 시작할 때 항상 scan)로 시작합니다.
+- ini 키: `[WiFiScan]` 의 `ScanUse`, `ScanAlways`, `ScanOnTime`, `ScanOffTime`, `HomeBackProgOn/File/Memo`, `NotHomeProgOn/File/Memo`.
 
-### HomeBack 프로그램 / NotHome 프로그램
-
-WiFiScan 메뉴의 두 항목으로, '다른 앱 호출'과 같은 방식(사용 / BAT·CMD·EXE 파일 선택 / 메모 / 지우기 / 테스트)이며 시각 설정만 없습니다. `/HomeBack` 또는 `/NotHome` 판정이 날 때마다 해당 프로그램을 실행하고, 메모가 있으면 모니터 중앙에 30초 표시합니다. 앱이 시작될 때 현재 상태를 한 번 전달하므로 그때도 실행됩니다. ini 키는 `[WiFiScan]` 의 `HomeBackProgOn/File/Memo`, `NotHomeProgOn/File/Memo` 입니다.
 
 ### 상태줄과 명령 전달 팝업
 
@@ -417,8 +414,8 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 | `[Analog]` | `Theme`(0~10), `Neon`, `Full`, `MatchBg`, `Size`(60 ~ 모니터 높이, 기본 200), `HideSecond` |
 | `[Lunar]` | `ApiUrl`, `ApiKey` (음력 조회용 공공API 주소/인증키. 둘 다 있어야 '음력 보이기' 사용 가능) |
 | `[Global]` | `BaseCity`, `Cities` |
-| `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작), `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (침입 탐지 시간) |
-| `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
+| `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작), `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (침입 탐지 시간), `ChimeOn`/`ChimeFile`/`ChimeMinute` (시보) |
+| `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `ScanUse`(기본 1), `ScanAlways`(기본 1, 단 `ScanOnTime` 이 이미 있으면 0), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
 | `[IPCam]` | `Host` (IP address), `Port` (기본 4747). 카메라 영상 창의 IP Cam 용 (WebCam1/2 는 설정 없음) |
 | `[PhoneFtp]` | `Host`, `Port`, `User` (폰 탐색기. 비밀번호는 저장하지 않음) |
 | `[RdpServer]` | `port`(7071), `password`(평문), `allowed_ip`(`any`), `accept`(`once` / `auto` / `always`), `autostart`(0/1), `osk`(0/1) (다른 PC(서버)) |
