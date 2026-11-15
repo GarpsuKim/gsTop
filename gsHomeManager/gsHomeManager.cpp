@@ -228,13 +228,15 @@ public:
     void SetTextWidth(int w) { tw_ = w; }
     int  Offset() const      { return off_; }
 
-    // 한 칸 이동, 창 끝에 닿으면 방향 전환
-    void Advance(int clientWidth) {
+    // 한 칸 이동, 창 끝에 닿으면 방향 전환. 위치가 바뀌었으면 true (글자가 창에 다 들어가 움직일 폭이 없으면 false -> 다시 그릴 필요 없음)
+    bool Advance(int clientWidth) {
+        const int before = off_;
         int range = (clientWidth - tw_) / 2;
         if (range < 0) range = 0;
         off_ += dir_ * step_;
         if (off_ >=  range) { off_ =  range; dir_ = -1; }
         if (off_ <= -range) { off_ = -range; dir_ =  1; }
+        return off_ != before;
     }
 
 private:
@@ -491,8 +493,8 @@ public:
     char     homeMac[32]  = "";         // HomeMac: 폰 Wi-Fi(LAN 카드) MAC
     char     homeIp[24]   = "";         // HomeIp: 폰 고정 IP (선택)
     int      scanSec      = 15;         // WiFiScanWatchInterval: scan(감시) 주기 (초, 최소 5)
-    int      notHomeSec   = 60;         // NotHome: 외출 판정 (초)
-    int      notHomeFails = 3;          // NotHomeFails: 외출 판정에 필요한 연속 미확인 횟수 (0 이면 3)
+    int      notHomeSec   = 300;        // NotHome: 외출 판정 (초)
+    int      notHomeFails = 5;          // NotHomeFails: 외출 판정에 필요한 연속 미확인 횟수 (0 이면 5)
 
     void Init() {
         InitPath();
@@ -909,10 +911,10 @@ private:
             "HomeIp=\r\n"
             "; scan(감시) 주기 (초, 최소 5, 0 이면 15)\r\n"
             "WiFiScanWatchInterval=15\r\n"
-            "; 외출 판정 시간 (초): 블루투스, Wi-Fi 둘 다 이 시간 동안 연속으로 확인되지 않으면 /NotHome (0 이면 60)\r\n"
-            "NotHome=60\r\n"
-            "; 외출 판정에 필요한 연속 미확인 횟수: 감시 주기마다 블루투스, Wi-Fi 둘 다 확인되지 않은 횟수가 이 값 이상이고 위 외출 판정 시간도 지나야 /NotHome (0 이면 3)\r\n"
-            "NotHomeFails=3\r\n"
+            "; 외출 판정 시간 (초): 블루투스, Wi-Fi 둘 다 이 시간 동안 연속으로 확인되지 않으면 /NotHome (0 이면 300)\r\n"
+            "NotHome=300\r\n"
+            "; 외출 판정에 필요한 연속 미확인 횟수: 감시 주기마다 블루투스, Wi-Fi 둘 다 확인되지 않은 횟수가 이 값 이상이고 위 외출 판정 시간도 지나야 /NotHome (0 이면 5)\r\n"
+            "NotHomeFails=5\r\n"
             "; --- scan 예약 (메뉴 WiFiScan > Wifi공유기 자동감시 On / Off). 아래 키가 없으면 scan 에 아무 영향이 없습니다. 매일 반복됩니다.\r\n"
             "; ScanOnUse / ScanOffUse = 1(사용), 0(해제).  ScanOnTime / ScanOffTime = HH:MM:SS (24시간제, 이 PC 시각)\r\n"
             "; ScanOnFile / ScanOffFile = 그 시각에 시스템 기본 플레이어로 재생할 동영상/음악 파일 경로,  ScanOnMemo / ScanOffMemo = 모니터 중앙에 30초 표시할 메모\r\n"
@@ -1141,6 +1143,11 @@ private:
         scanSec    = ReadSec("WiFiScan", "WiFiScanWatchInterval", scanSec, 5);
         notHomeSec = ReadSec("WiFiScan", "NotHome", notHomeSec, 1);
         notHomeFails = ReadSec("WiFiScan", "NotHomeFails", notHomeFails, 1);
+        if (!HasKey("WiFiScan", "NotHomeRule")) {                        // 판정 기준을 느슨하게 바꾼 버전: 예전 기본값 그대로이면 새 기본값으로 (한 번만)
+            if (notHomeSec == 60)   { notHomeSec = 300;  WriteInt("WiFiScan", "NotHome", notHomeSec); }
+            if (notHomeFails == 3)  { notHomeFails = 5;  WriteInt("WiFiScan", "NotHomeFails", notHomeFails); }
+            WriteInt("WiFiScan", "NotHomeRule", 2);
+        }
         LoadRdp();
     }
 
@@ -3071,6 +3078,22 @@ public:
         if (SendARP(htonl(ip), 0, m, &len) != NO_ERROR || len != 6) return "";
         return StrUtil::macStr((unsigned char*)m);
     }
+    // 이 PC 의 이웃(ARP) 캐시에서 mac 을 가진 IP 후보 (네트워크 호출 없이 즉시). 캐시는 오래된 정보일 수 있으니 힌트로만 쓰고 macOf 로 다시 확인할 것.
+    static std::vector<uint32_t> cached(const std::string& mac) {
+        std::vector<uint32_t> v;
+        ULONG sz = 0;
+        GetIpNetTable(nullptr, &sz, FALSE);
+        if (!sz) return v;
+        std::vector<char> buf(sz);
+        auto* t = (MIB_IPNETTABLE*)buf.data();
+        if (GetIpNetTable(t, &sz, FALSE) != NO_ERROR) return v;
+        for (DWORD i = 0; i < t->dwNumEntries; i++) {
+            const MIB_IPNETROW& r = t->table[i];
+            if (r.dwPhysAddrLen != 6 || r.dwType == MIB_IPNET_TYPE_INVALID) continue;
+            if (StrUtil::macStr((const unsigned char*)r.bPhysAddr) == mac) v.push_back(ntohl(r.dwAddr));
+        }
+        return v;
+    }
     // 서브넷 전체에서 mac 을 가진 IP 를 찾는다 (없으면 0). 동시 ARP 가 너무 많으면 느린 기기의 응답을 놓치므로 16 스레드.
     static uint32_t find(const Subnet& sn, const std::string& mac, const Cancel& cancel) {
         std::atomic<uint32_t> next(sn.net + 1), hit(0);
@@ -3416,11 +3439,17 @@ public:
                 if (ip >= bc || cancel()) break;
                 bool on = false, arp = false;
                 ULONG m[2] = {0};
+                // ARP 먼저 (같은 서브넷이면 ARP 응답이 곧 존재 증거. 예전에는 ping 과 ARP 를 둘 다 기다려 없는 IP 마다 대기 시간이 두 배였음).
+                // 이전에 보였던 장치만 재시도 때 ping 으로 한 번 더 깨워 본다 (절전 중인 폰 등)
                 for (int t = known.count(ip) ? 3 : 1; t > 0 && !on && !arp && !cancel(); t--) {
-                    on = IcmpSendEcho(ic, htonl(ip), data, 4, 0, reply, sizeof reply, 1000) > 0 &&
-                         ((ICMP_ECHO_REPLY*)reply)->Status == IP_SUCCESS;
                     ULONG len = 6;
                     arp = SendARP(htonl(ip), 0, m, &len) == NO_ERROR && len == 6;
+                    on = arp;
+                    if (!arp && t > 1) {
+                        on = IcmpSendEcho(ic, htonl(ip), data, 4, 0, reply, sizeof reply, 1000) > 0 &&
+                             ((ICMP_ECHO_REPLY*)reply)->Status == IP_SUCCESS;
+                        if (on) { len = 6; arp = SendARP(htonl(ip), 0, m, &len) == NO_ERROR && len == 6; }
+                    }
                 }
                 if (!on && !arp) { view_.done++; continue; }
                 Host h; h.ip = ip; h.on = true;
@@ -3547,8 +3576,8 @@ public:
 struct ScanCfg {
     bool bt = true, wifi = true;                              // scan 대상 (체크박스)
     std::string btMac, mac, ip;                               // 폰 블루투스 주소 / 폰 Wi-Fi(LAN 카드) MAC / 폰 고정 IP (선택)
-    int interval = 15, awaySec = 60;                          // 감시 주기(초), 외출 판정(초)
-    int failN = 3;                                            // 외출 판정에 필요한 연속 미확인 횟수 (NotHomeFails)
+    int interval = 15, awaySec = 300;                         // 감시 주기(초), 외출 판정(초)
+    int failN = 5;                                            // 외출 판정에 필요한 연속 미확인 횟수 (NotHomeFails)
 };
 
 class ScanCfgBox {
@@ -3594,6 +3623,7 @@ public:
             std::string via;
             bt_ = Chk{false, false, "확인 안 함"};
             wf_ = Chk{false, false, "블루투스 응답으로 확인 생략"};
+            netDown_ = false;
             const bool present = checkBluetooth(via) || checkWifi(via);   // 1) 블루투스 우선  2) 확인되지 않으면 Wi-Fi
             if (cancel_()) return;
             update(present, via);
@@ -3621,13 +3651,13 @@ private:
         uint32_t ip = 0;
         if (!StrUtil::parseIp(c.ip, ip)) ip = 0;                                       // 선택: 폰 고정 IP
         const int iv = c.interval > 0 ? std::max(5, c.interval) : 15;
-        const int as = c.awaySec > 0 ? c.awaySec : 60;
-        const int fn = c.failN > 0 ? c.failN : 3;
+        const int as = c.awaySec > 0 ? c.awaySec : 300;
+        const int fn = c.failN > 0 ? c.failN : 5;
         const bool changed = bm != btMac_ || m != mac_ || ip != homeIp_ || c.bt != useBt_ || c.wifi != useWifi_ || iv != interval_ || as != awaySec_ || fn != failN_;
         if (!changed) return false;
         btMac_ = bm; mac_ = m; homeIp_ = ip; useBt_ = c.bt; useWifi_ = c.wifi; interval_ = iv; awaySec_ = as; failN_ = fn;
         btAddr_ = btMac_.empty() ? 0 : Bluetooth::addrOf(btMac_);
-        ip_ = 0; lastBtInfo_.clear(); lastWifiInfo_.clear();
+        ip_ = 0; lastFull_ = 0; lastBtInfo_.clear(); lastWifiInfo_.clear();
         return true;
     }
     bool haveBt() const { return useBt_ && btAddr_ != 0; }
@@ -3655,6 +3685,7 @@ private:
             Logger::log("네트워크 어댑터 감지: Wi-Fi 확인 시작 (" + sn_.range() + ")");
         if (!sn_.valid()) {
             wf_ = Chk{true, false, "PC 의 네트워크 어댑터/IP 범위를 찾지 못함 (PC 의 LAN/Wi-Fi 연결 끊김?)"};
+            netDown_ = true;
             return false;
         }
         bool ok = false;
@@ -3667,9 +3698,23 @@ private:
             ok = Arp::check(ip_, mac_);
             if (!ok) tried += "이전 IP " + StrUtil::ipStr(ip_) + " 무응답, ";
         }
+        if (!ok) {                                 // 이 PC 의 이웃 캐시에 있는 IP 를 한 번씩 확인 (전체 검색보다 훨씬 빠름)
+            for (uint32_t cip : Arp::cached(mac_)) {
+                if (cip == homeIp_ || cip == ip_ || cip <= sn_.net || cip >= sn_.bc) continue;
+                if (Arp::macOf(cip) == mac_) { ip_ = cip; ok = true; break; }
+                tried += "이웃 캐시 IP " + StrUtil::ipStr(cip) + " 무응답, ";
+            }
+        }
         if (!ok) {
-            ip_ = Arp::find(sn_, mac_, cancel_); ok = (ip_ != 0);
-            if (!ok) tried += "범위 " + sn_.range() + " 전체 ARP 검색에서 해당 MAC 없음";
+            const time_t now = time(0);
+            if (!lastFull_ || now - lastFull_ >= kFullFindSec) {     // 254개 IP 전체 ARP 검색은 오래 걸리고 네트워크를 쓰므로 일정 간격으로만
+                lastFull_ = now;
+                ip_ = Arp::find(sn_, mac_, cancel_); ok = (ip_ != 0);
+                if (!ok) tried += "범위 " + sn_.range() + " 전체 ARP 검색에서 해당 MAC 없음";
+            } else {
+                ip_ = 0;
+                tried += "전체 ARP 검색은 " + std::to_string((long long)(now - lastFull_)) + "초 전에 해서 생략";
+            }
         }
         if (ok) via = "Wi-Fi " + StrUtil::ipStr(ip_);
         const std::string wi = ok ? "확인됨 (" + StrUtil::ipStr(ip_) + ")"
@@ -3739,8 +3784,19 @@ private:
     //   (한 번도 확인 못 했으면 감시 시작 시각부터 센다. 그 전에 확인되면 /HomeBack)
     void update(bool present, const std::string& via) {
         const time_t now = time(0);
+        if (lastCycle_ && now - lastCycle_ > std::max(180, interval_ * 6)) {     // PC 절전/멈춤 등으로 감시가 오래 끊겼다가 돌아옴: 그 동안은 외출 증거가 아님
+            Logger::log("감시 공백 " + dur((long long)(now - lastCycle_)) + " (PC 절전/지연 추정): 미확인 시간과 횟수를 다시 셉니다");
+            resumeAt_ = now; fails_ = 0;
+        }
+        lastCycle_ = now;
+        if (!present && netDown_) {                                              // PC 자신의 네트워크가 없으면 폰이 없다고 말할 수 없다
+            if (!netDownLogged_) { Logger::log("PC 의 네트워크 어댑터가 없어 판정을 보류합니다 (미확인 횟수에 넣지 않음)"); netDownLogged_ = true; }
+            view_.setPhase("감시 보류 - PC 의 네트워크 어댑터 없음");
+            return;
+        }
+        netDownLogged_ = false;
         if (present) { lastSeen_ = now; lastVia_ = via; fails_ = 0; } else fails_++;
-        const time_t ref = lastSeen_ ? lastSeen_ : startTime_;
+        const time_t ref = std::max(lastSeen_ ? lastSeen_ : startTime_, resumeAt_);
         const long long miss = (long long)(now - ref);
         const bool awayDue = !present && fails_ >= failN_ && miss >= awaySec_;
         const std::string cond = "연속 " + std::to_string(fails_) + "회 / " + dur(miss) + " 미확인 (외출 판정: 연속 " + std::to_string(failN_) + "회, " + std::to_string(awaySec_) + "초)";
@@ -3778,7 +3834,11 @@ private:
     Chk bt_{false, false, ""}, wf_{false, false, ""};
     std::string lastVia_;
     time_t awaySince_ = 0, startTime_ = 0;
-    int failN_ = 3, fails_ = 0;                               // 외출 판정에 필요한 연속 미확인 횟수 / 현재 연속 미확인 횟수
+    int failN_ = 5, fails_ = 0;                               // 외출 판정에 필요한 연속 미확인 횟수 / 현재 연속 미확인 횟수
+    bool netDown_ = false, netDownLogged_ = false;            // 이번 주기에 PC 자신의 네트워크가 없었는가 (이때는 외출 증거가 아님)
+    time_t lastFull_ = 0;                                     // 마지막 전체 ARP 검색 시각
+    static constexpr int kFullFindSec = 60;                   // 전체 ARP 검색 최소 간격 (초)
+    time_t lastCycle_ = 0, resumeAt_ = 0;                     // 직전 판정 시각 / 감시 공백(PC 절전 등) 뒤 다시 세기 시작한 시각
     std::string mac_, btMac_, lastBtInfo_, lastWifiInfo_;
     ULONGLONG btAddr_ = 0;
     uint32_t homeIp_ = 0, ip_ = 0;
@@ -3877,17 +3937,25 @@ private:
         PrevResult prev = PrevResult::load(out.path());       // 새 파일을 만들기 전에 이전 결과를 읽어 둔다
         view.initFrom(prev, c.bt, c.wifi);
 
-        // 1) 블루투스 스캔
+        // 1) 블루투스 스캔 (아래 Wi-Fi 스캔과 동시에 진행: 블루투스 주변 탐색 약 5초 + 페어링 장치 호출 동안 Wi-Fi 스캔이 기다리지 않게)
         std::vector<BtDev> bt;
+        std::thread btTh;
+        struct Joiner { std::thread& t; ~Joiner() { if (t.joinable()) t.join(); } } btJoin{btTh};   // 어느 경로로 나가든 스레드를 먼저 끝낸다
         if (c.bt) {
             Logger::log("블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)");
             view.setPhase("블루투스 스캔 중 (주변 탐색 약 5초 + 페어링 장치 확인)");
-            bt = Bluetooth::scan(prev, cancel, view);
-            if (cancel()) return;
-            int on = 0;
-            for (auto& d : bt) on += d.on;
-            Logger::log("블루투스 스캔 완료: " + std::to_string(bt.size()) + "개 장치 (ON " + std::to_string(on) + " / OFF " +
-                        std::to_string(bt.size() - on) + ")" + (bt.empty() ? " - 어댑터 없음/꺼짐?" : "") + " -> " + out.path());
+            btTh = std::thread([&]() {
+                try {
+                    bt = Bluetooth::scan(prev, cancel, view);
+                    if (cancel()) return;
+                    int on = 0;
+                    for (auto& d : bt) on += d.on;
+                    Logger::log("블루투스 스캔 완료: " + std::to_string(bt.size()) + "개 장치 (ON " + std::to_string(on) + " / OFF " +
+                                std::to_string(bt.size() - on) + ")" + (bt.empty() ? " - 어댑터 없음/꺼짐?" : "") + " -> " + out.path());
+                } catch (const std::exception& e) {
+                    Logger::log(std::string("블루투스 스캔 오류: ") + e.what());
+                }
+            });
         } else {
             bt = Bluetooth::offline(prev, view);
             Logger::log("블루투스 스캔 안 함 (스캔 대상 아님): 이전 결과만 OFF 로 남김");
@@ -3907,6 +3975,7 @@ private:
         }
 
         // 결과 파일: 두 구역을 한꺼번에 쓴다 (취소되면 쓰지 않고 기존 파일을 그대로 둠)
+        if (btTh.joinable()) btTh.join();                      // 블루투스 스캔이 아직 끝나지 않았으면 기다린다
         if (cancel()) return;
         out.write(bt, wifi);
 
@@ -11967,13 +12036,15 @@ private:
             return;
         case TID_SCROLL_TIME:
             if (cfg_.clockMode == 2) return;    // 아날로그: 글자 스크롤 없음 -> 다시 그리지 않음
-            timeScroll_.Advance(ClientWidth());
+            if (!timeScroll_.Advance(ClientWidth())) return;     // 글자가 창에 다 들어가 위치가 안 바뀌면 다시 그리지 않음
             break;
-        case TID_SCROLL_DATE:
+        case TID_SCROLL_DATE: {
             if (cfg_.clockMode == 2) return;
-            dateScroll_.Advance(ClientWidth());
-            lunarScroll_.Advance(ClientWidth());
+            const int cw = ClientWidth();
+            const bool d = dateScroll_.Advance(cw), l = lunarScroll_.Advance(cw);   // 둘 다 항상 진행
+            if (!d && !l) return;
             break;
+        }
         }
         InvalidateRect(hwnd_, NULL, FALSE);
     }

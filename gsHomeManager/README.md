@@ -187,10 +187,17 @@ WiFiScan 메뉴의 한 항목으로 열리는 하나의 대화상자입니다 (�
 ### 판정 조건 (집 안팎)
 
 - **확인 방법**: 감시 주기(`WiFiScanWatchInterval`)마다 블루투스를 먼저 확인하고, 확인되지 않으면 LAN 카드(Wi-Fi) 를 확인합니다. 둘 중 하나라도 확인되면 집에 있는 것으로 봅니다.
-- **`/NotHome`**: 둘 다 확인되지 않은 횟수가 연속 `NotHomeFails` 회 이상이고(기본 3), 미확인 시간도 `NotHome` 초 이상(기본 60)일 때만 판정합니다. 두 조건을 모두 채워야 하므로 일시적인 무응답(폰 절전 등)으로는 판정되지 않습니다. 한 번이라도 확인되면 횟수는 0 으로 돌아갑니다.
+- **`/NotHome`**: 둘 다 확인되지 않은 횟수가 연속 `NotHomeFails` 회 이상이고(기본 5), 미확인 시간도 `NotHome` 초 이상(기본 300 = 5분)일 때만 판정합니다. 두 조건을 모두 채워야 하므로 일시적인 무응답(폰 절전 등)으로는 판정되지 않습니다. 한 번이라도 확인되면 횟수는 0 으로 돌아갑니다.
 - **시작 직후에도 같은 유예**: 앱/scan 을 (재)시작한 뒤 첫 확인이 실패해도 바로 `/NotHome` 으로 보지 않습니다. 같은 조건(연속 횟수 + 시간, 한 번도 확인 못 했으면 감시 시작 시각부터 계산)을 채울 때까지 `초기 상태 판정 보류` 로 기록하고, 그 전에 확인되면 `/HomeBack` 입니다.
 - **재시작해도 같은 상태는 다시 알리지 않음**: 마지막 판정 상태를 exe 폴더의 `home.state`(`HOME` / `AWAY`) 에 저장합니다. 시작 직후의 첫 판정이 저장된 상태와 같으면 로그에만 남기고 텔레그램 명령과 HomeBack / NotHome 프로그램은 실행하지 않습니다. 상태가 바뀐 판정, 또는 `home.state` 가 없을 때(처음 실행)는 전달합니다. 상태를 강제로 다시 알리고 싶으면 `home.state` 를 지우고 다시 시작하세요.
-- `NotHomeFails` 는 `[WiFiScan]` 에 있고 ini 를 직접 고칩니다 (0 이면 3, 이 값이 클수록 외출 판정이 늦고 오탐이 줄어듭니다). 실행 중에는 scan 재시작 때 반영됩니다.
+- `NotHomeFails` 는 `[WiFiScan]` 에 있고 ini 를 직접 고칩니다 (0 이면 5, 이 값이 클수록 외출 판정이 늦고 오탐이 줄어듭니다). 실행 중에는 scan 재시작 때 반영됩니다. 예전 기본값(`NotHome=60`, `NotHomeFails=3`)을 그대로 쓰던 ini 는 새 기본값(300 / 5)으로 **한 번만** 올리고 `NotHomeRule=2` 를 기록합니다 (그 뒤에 직접 고친 값은 그대로 유지).
+- **PC 자신의 네트워크가 없을 때**(LAN/Wi-Fi 끊김)는 폰이 없다는 증거가 아니므로 미확인 횟수에 넣지 않고 판정을 보류합니다 (`PC 의 네트워크 어댑터가 없어 판정을 보류합니다`).
+- **감시 공백**: PC 절전/멈춤 등으로 감시 주기가 `max(180초, 감시 주기×6)` 보다 오래 끊겼다가 돌아오면 그 동안은 외출 증거로 보지 않고 미확인 시간과 횟수를 다시 셉니다 (`감시 공백 …`).
+
+### scan 속도
+
+- **감시 확인**: 블루투스 우선, 그다음 LAN 카드. LAN 카드는 고정 IP → 이전 IP → 이 PC 의 이웃(ARP) 캐시에 있는 IP 순으로 한 번씩 확인하고, 그래도 없을 때만 254개 IP 전체 ARP 검색을 합니다. 전체 검색은 60초에 한 번만 하므로 폰이 없는 동안(집을 비운 동안) 매 주기마다 네트워크를 훑지 않습니다.
+- **시작할 때 전체 scan**: 같은 서브넷에서는 ARP 응답이 곧 존재 증거이므로 ARP 를 먼저 보내고 응답이 없으면 그 IP 는 바로 건너뜁니다 (예전에는 ping 과 ARP 를 모두 기다려 없는 IP 마다 대기가 두 배였음). 이전에 보였던 장치만 ping 으로 한 번 더 깨워 봅니다. 블루투스 scan 은 Wi-Fi scan 과 동시에 진행합니다.
 
 ### 판정 사유 기록 (`WiFiScan_watch.log`)
 
@@ -439,7 +446,7 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 | `[Lunar]` | `ApiUrl`, `ApiKey` (음력 조회용 공공API 주소/인증키. 둘 다 있어야 '음력 보이기' 사용 가능) |
 | `[Global]` | `BaseCity`, `Cities` |
 | `[Alarm]` | `AlarmNOn`, `AlarmNTime`, `AlarmNFile`, `AlarmNMemo`, `AlarmNClose` (0/1/2), `AlarmNCloseSec`, `ProgOn`/`ProgTime`/`ProgFile`/`ProgMemo` (다른 앱 호출), `RebootOn`/`RebootTime` (시스템 재시작), `DetectUse`/`DetectAlways`/`DetectStart`/`DetectEnd` (침입 탐지 시간), `ChimeOn`/`ChimeFile`/`ChimeMinute` (시보) |
-| `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=60초), `NotHomeFails`(0=3회), `ScanUse`(기본 1), `ScanAlways`(기본 1, 단 `ScanOnTime` 이 이미 있으면 0), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
+| `[WiFiScan]` | `ScanBluetooth`, `ScanWifi`, `HomeBluetooth`, `HomeMac`, `HomeIp`, `WiFiScanWatchInterval`(0=15초, 최소 5), `NotHome`(0=300초), `NotHomeFails`(0=5회), `NotHomeRule`(내부 표식), `ScanUse`(기본 1), `ScanAlways`(기본 1, 단 `ScanOnTime` 이 이미 있으면 0), `ScanOnUse`/`ScanOnTime`/`ScanOnFile`/`ScanOnMemo`/`ScanOnClose`/`ScanOnCloseSec` 와 `ScanOff...` 같은 키 (scan 예약), `HomeBackProgOn`/`HomeBackProgFile`/`HomeBackProgMemo`, `NotHomeProgOn`/`NotHomeProgFile`/`NotHomeProgMemo` |
 | `[IPCam]` | `Host` (IP address), `Port` (기본 4747). 카메라 영상 창의 IP Cam 용 (WebCam1/2 는 설정 없음) |
 | `[PhoneFtp]` | `Host`, `Port`, `User` (폰 탐색기. 비밀번호는 저장하지 않음) |
 | `[RdpServer]` | `port`(7071), `password`(평문), `allowed_ip`(`any`), `accept`(`once` / `auto` / `always`), `autostart`(0/1), `osk`(0/1) (다른 PC(서버)) |
