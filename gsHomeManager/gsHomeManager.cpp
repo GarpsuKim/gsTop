@@ -12659,7 +12659,20 @@ private:
     void RebootCommand() {
         modal_ = true;
         bool use = cfg_.rbOn;
+        const int oh = cfg_.rbH, om = cfg_.rbM, os = cfg_.rbS;       // '확인' 뒤 Yes/No 에서 No 이면 되돌리기 위한 이전 값
         bool ok = TimeDialog::Show(hi_, hwnd_, "시스템 재시작 시각 (시:분:초)", cfg_.rbH, cfg_.rbM, cfg_.rbS, &use);
+        if (ok) {                                                    // 한 번 더 확인
+            char ms[128];
+            wsprintfA(ms, "시스템 재시작 시각을 %02d시 %02d분 %02d초로 등록하겠습니까?(Yes/No)", cfg_.rbH, cfg_.rbM, cfg_.rbS);
+            char16_t mu[128], cu[32];
+            Utf8::ToUtf16(ms, -1, mu, 128);
+            Utf8::ToUtf16("시스템 재시작 시각", -1, cu, 32);
+            if (MessageBoxW(hwnd_, (LPCWSTR)mu, (LPCWSTR)cu, MB_YESNO | MB_ICONQUESTION) != IDYES) {
+                cfg_.rbH = oh; cfg_.rbM = om; cfg_.rbS = os;
+                Log::Put("시스템 재시작 시각 등록 취소 (No)");
+                ok = false;
+            }
+        }
         modal_ = false;
         if (!ok) return;
         cfg_.rbOn = use;
@@ -12929,10 +12942,33 @@ private:
         int r = ConfirmDialog::Show(hi_, 300, "시스템 재시작", "시스템을 재시작 하겠습니까? (Yes/No)", "무응답 시 재시작", true);
         modal_ = false;
         Log::Put("시스템 재시작 확인 결과: %s", r == IDNO ? "No -> 재시작 안 함" : "Yes 또는 시간 초과 -> 재시작 실행");
-        if (r != IDNO) {
+        if (r != IDNO && !RebootWindows()) {                  // API 요청이 실패하면 예전 방식(shutdown.exe)으로 다시 시도
             HINSTANCE x = ShellExecuteW(NULL, (LPCWSTR)u"open", (LPCWSTR)u"shutdown.exe", (LPCWSTR)u"/r /f /t 0", NULL, SW_HIDE);
-            Log::Put("shutdown /r /f /t 0 실행 (결과코드 %d)", (int)(INT_PTR)x);
+            Log::Put("shutdown /r /f /t 0 실행 (결과코드 %d, 32 이하는 실행 실패)", (int)(INT_PTR)x);
         }
+    }
+
+    // Windows 재시작 요청: 종료 권한(SeShutdownPrivilege)을 켜고 ExitWindowsEx(재시작 + 강제) 로 직접 요청하고 결과를 로그에 남긴다.
+    // (예전의 숨김 창 shutdown.exe 는 실패해도 이유를 알 수 없었음)
+    bool RebootWindows() {
+        HANDLE tok = NULL;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &tok)) {
+            TOKEN_PRIVILEGES tp = {};
+            if (LookupPrivilegeValueW(NULL, L"SeShutdownPrivilege", &tp.Privileges[0].Luid)) {
+                tp.PrivilegeCount = 1;
+                tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+                SetLastError(0);
+                AdjustTokenPrivileges(tok, FALSE, &tp, 0, NULL, NULL);
+                Log::Put("종료 권한(SeShutdownPrivilege) 켜기: 오류코드 %lu (0=성공, 1300=이 계정에 권한 없음)", (unsigned long)GetLastError());
+            }
+            CloseHandle(tok);
+        } else {
+            Log::Put("프로세스 토큰 열기 실패: 오류코드 %lu", (unsigned long)GetLastError());
+        }
+        SetLastError(0);
+        const BOOL ok = ExitWindowsEx(EWX_REBOOT | EWX_FORCE, 0x80040001u);     // 사유: 계획됨 + 응용 프로그램 + 유지 관리
+        Log::Put("ExitWindowsEx(재시작, 강제): %s (오류코드 %lu)", ok ? "요청 성공 (Windows 가 곧 재시작)" : "실패", (unsigned long)GetLastError());
+        return ok != FALSE;
     }
 
     // ---- 알람 실행 + 플레이어 자동 닫기
