@@ -12024,9 +12024,19 @@ class LogWin {
 public:
     static void Install() { Log::SetSink(&Sink); }
 
-    // 창을 만들거나 이미 있으면 앞으로 가져옴 (호출한 스레드가 메시지 루프를 돌아야 함: 대화상자/메인 스레드)
+    // 창을 만들거나 이미 있으면 앞으로 가져옴. 창은 자기 전용 스레드(메시지 루프)에서 돌므로 어느 스레드에서든 호출할 수 있다
+    // (서버 [시작] 버튼, 클라이언트 연결이 수락된 순간 - 프로그램 시작 때 자동 시작한 서버 포함)
     static void Open() {
-        if (hw_ && IsWindow(hw_)) { ShowWindow(hw_, SW_SHOWNORMAL); SetForegroundWindow(hw_); return; }
+        {
+            std::lock_guard<std::mutex> g(mu_);
+            if (starting_) return;
+            if (hw_) { PostMessageW(hw_, WM_LOGSHOW, 0, 0); return; }
+            starting_ = true;
+        }
+        std::thread([] { Run(); }).detach();
+    }
+
+    static void Run() {
         HINSTANCE hi = GetModuleHandleW(NULL);
         WNDCLASSW wc = {};
         wc.lpfnWndProc = Proc;
@@ -12036,11 +12046,23 @@ public:
         wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
         wc.lpszClassName = L"gsHomeManagerRdpLog";
         RegisterClassW(&wc);
-        hw_ = CreateWindowW(L"gsHomeManagerRdpLog", L"원격 서버 연결 로그", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
-                            780, 380, NULL, NULL, hi, NULL);
-        if (!hw_) return;
-        ShowWindow(hw_, SW_SHOWNORMAL);
-        UpdateWindow(hw_);
+        HWND h = CreateWindowW(L"gsHomeManagerRdpLog", L"원격 서버 연결 로그", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
+                               780, 380, NULL, NULL, hi, NULL);
+        if (!h) { std::lock_guard<std::mutex> g(mu_); starting_ = false; return; }
+        ShowWindow(h, SW_SHOWNORMAL);
+        UpdateWindow(h);
+        Raise(h);
+        MSG msg;
+        while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    static void Raise(HWND h) {                 // 포커스를 뺏지 않고 맨 앞으로
+        if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
+        SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
     static void Sink(const char* line) {
@@ -12053,6 +12075,8 @@ public:
 
 private:
     static constexpr UINT WM_LOGADD = WM_APP + 30;
+    static constexpr UINT WM_LOGSHOW = WM_APP + 31;
+    static inline bool starting_ = false;
     static inline HWND hw_ = NULL, ed_ = NULL;
     static inline HFONT font_ = NULL;
     static inline std::mutex mu_;
@@ -12084,12 +12108,17 @@ private:
             SendMessageW(ed_, EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
             std::string all;
             {
-                std::lock_guard<std::mutex> g(mu_);
+                std::lock_guard<std::mutex> g(mu_);         // 기록 복사와 hw_ 지정을 한꺼번에 (그 사이에 들어온 줄을 놓치지 않게)
                 for (auto& l : hist_) all += l;
                 pend_.clear();
+                hw_ = w;
+                starting_ = false;
             }
             Append(all);
             return 0; }
+        case WM_LOGSHOW:
+            Raise(w);
+            return 0;
         case WM_SIZE:
             if (ed_) MoveWindow(ed_, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
             return 0;
@@ -12108,6 +12137,7 @@ private:
             hw_ = NULL;
             ed_ = NULL;
             if (font_) { DeleteObject(font_); font_ = NULL; }
+            PostQuitMessage(0);                     // 이 창의 스레드를 끝냄 (다시 열면 새 스레드)
             return 0; }
         }
         return DefWindowProcW(w, m, wp, lp);
@@ -12458,6 +12488,7 @@ private:
         SetState(ST_CONN, ips);
         frames_ = 0;
         Log::Put("원격 서버: 클라이언트 연결 수락: %s", ips.c_str());
+        LogWin::Open();                         // 연결 성공: 로그 창을 보여 줌 (자동 시작한 서버도 포함)
         if (cfg.osk) RunOsk();
 
         std::vector<RECT> gMons;                // 모니터 (왼쪽 -> 오른쪽)
