@@ -98,12 +98,23 @@ public:
 };
 
 // ---------------------------------------------------------------- Log
-// 동작 로그: 실행 파일과 같은 폴더의 gsHomeManager.log (UTF-8, 한 줄에 한 동작, 시각 포함).
+// 동작 로그: 실행 파일 폴더의 log 폴더(.\log)에 gsHomeManager.log (UTF-8, 한 줄에 한 동작, 시각 포함).
 // 기록할 때만 파일을 열고 바로 닫음(상주 메모리/핸들 없음). 1MB 를 넘으면 gsHomeManager.log.old 로 넘기고 새로 시작.
 class Log {
 public:
     static void Init() {
         GetModuleFileNameA(NULL, path_, MAX_PATH);
+        {   // exe 폴더\log\exe이름 으로 바꾸고 log 폴더를 만든다
+            char name[MAX_PATH];
+            int s = lstrlenA(path_);
+            while (s > 0 && path_[s - 1] != '\\') s--;
+            lstrcpyA(name, path_ + s);
+            path_[s] = 0;
+            lstrcatA(path_, "log");
+            CreateDirectoryA(path_, NULL);
+            lstrcatA(path_, "\\");
+            lstrcatA(path_, name);
+        }
         int n = lstrlenA(path_);
         while (n > 0 && path_[n - 1] != '.' && path_[n - 1] != '\\') n--;
         if (n > 0 && path_[n - 1] == '.') lstrcpyA(path_ + n, "log");
@@ -138,6 +149,8 @@ public:
         WriteFile(h, line, (DWORD)n, &w, NULL);
         CloseHandle(h);
     }
+
+    static const char* Path() { return path_; }       // 로그 파일 전체 경로 (Help > 로그 보기용)
 
 private:
     static HANDLE Open() {
@@ -2675,7 +2688,7 @@ private:
 // 알람 메모 표시 창: 모니터 중앙, 항상 위, 지정한 초 후 자동으로 닫힘 (클릭하면 즉시 닫힘). 창마다 독립적으로 동작
 class MemoWindow {
 public:
-    static void Show(HINSTANCE hi, const char* utf8, int sec) {
+    static void Show(HINSTANCE hi, const char* utf8, int sec, int fontPx = 34) {
         static bool reg = false;
         if (!reg) {
             WNDCLASSW wc = {};
@@ -2693,7 +2706,9 @@ public:
         Utf8::ToUtf16(utf8, -1, d->text, 320);
         d->start = GetTickCount();
         d->sec = sec;
-        const int W = 640, H = 220, off = live_ * 30;       // 동시에 여러 개면 조금씩 어긋나게
+        d->px = fontPx;
+        const bool big = fontPx > 34;                       // 큰 글자 팝업(업로드/전송 안내)은 창도 크게: 가로 화면의 80%(최대 1400), 세로 400
+        const int W = big ? std::min(1400, GetSystemMetrics(SM_CXSCREEN) * 8 / 10) : 640, H = big ? 400 : 220, off = live_ * 30;   // 동시에 여러 개면 조금씩 어긋나게
         int x = (GetSystemMetrics(SM_CXSCREEN) - W) / 2 + off;
         int y = (GetSystemMetrics(SM_CYSCREEN) - H) / 2 + off;
         HWND h = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, (LPCWSTR)u"gsHomeManagerMemo", (LPCWSTR)u"",
@@ -2705,7 +2720,7 @@ public:
     }
 
 private:
-    struct Data { char16_t text[320]; DWORD start; int sec; };
+    struct Data { char16_t text[320]; DWORD start; int sec; int px; };
     static inline int live_ = 0;
 
     static void Paint(HWND h, HDC dc) {
@@ -2717,7 +2732,7 @@ private:
         DeleteObject(br);
         SetBkMode(dc, TRANSPARENT);
 
-        HFONT big = CreateFontW(-34, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        HFONT big = CreateFontW(-d->px, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
         HGDIOBJ old = SelectObject(dc, big);
         SetTextColor(dc, RGB(255, 255, 255));
         RECT t = {20, 16, rc.right - 20, rc.bottom - 44};
@@ -3061,7 +3076,11 @@ public:
         }();
         return d;
     }
-    static std::string logFile()    { return dir() + "WiFiScan_watch.log"; }
+    static const std::string& logDir() {                     // exe 폴더\log\ (없으면 만듦. 모든 로그 파일은 여기에 생김)
+        static const std::string d = [] { std::string s = dir() + "log\\"; CreateDirectoryA(s.c_str(), nullptr); return s; }();
+        return d;
+    }
+    static std::string logFile()    { return logDir() + "WiFiScan_watch.log"; }
     static std::string resultFile() { return dir() + "WiFiScan_result.txt"; }
     static std::string ouiFile()    { return dir() + "oui.txt"; }
     static std::string homeStateFile() { return dir() + "home.state"; }      // 마지막 집 안팎 상태 (HOME / AWAY)
@@ -3730,7 +3749,7 @@ private:
 class ScanEvents {
 public:
     enum { MSG = WM_APP + 4 };
-    struct Item { int kind; std::string text; };      // kind: 0=상태줄, 1=팝업(5초), 2=HomeBack 프로그램 실행, 3=NotHome 프로그램 실행, 4=앱 종료
+    struct Item { int kind; std::string text; };      // kind: 0=상태줄, 1=팝업(5초), 5=업로드 안내(큰 글자 1초), 2=HomeBack 프로그램 실행, 3=NotHome 프로그램 실행, 4=앱 종료
     static void SetWindow(HWND h) {
         bool any;
         { std::lock_guard<std::mutex> g(mu_); wnd_ = h; any = !q_.empty(); }
@@ -3744,6 +3763,7 @@ public:
         push(Item{0, std::string(b) + what});
     }
     static void Popup(const std::string& text) { push(Item{1, text}); }
+    static void Uploading(const std::string& text) { push(Item{5, text}); }       // 텔레그램 파일 수신 안내: 모니터 중앙에 큰 글자로 1초
     static void Program(int home) { push(Item{home ? 3 : 2, std::string()}); }   // home: 0=HomeBack, 1=NotHome
     static void Quit() { push(Item{4, std::string()}); }                         // 텔레그램 /stop, /restart: 본 창이 앱을 종료함 (확인창 없이)
     static std::vector<Item> Take() {
@@ -3768,7 +3788,7 @@ private:
     static inline HWND wnd_ = NULL;
 };
 
-namespace tg { void PostTrigger(const std::string& cmd); }      // Telegram 모듈 (아래쪽 namespace tg)
+namespace tg { void PostTrigger(const std::string& cmd); bool BrowseUploads(std::string& msg); }      // Telegram 모듈 (아래쪽 namespace tg)
 
 class TriggerFile {
 public:
@@ -5808,12 +5828,14 @@ private:
             std::lock_guard<std::mutex> g(Mu());
             if (refs++ > 0) { IPLOG("---- another camera window opened (%d)", refs); return; }
             char exe[MAX_PATH] = "";
-            std::string path = "ipcam.log";
+            std::string path = "log\\ipcam.log";
             if (GetModuleFileNameA(nullptr, exe, MAX_PATH)) {
                 path = exe;
                 size_t sl = path.find_last_of("\\/");
-                path = (sl == std::string::npos ? std::string() : path.substr(0, sl + 1)) + "ipcam.log";
-            }
+                path = (sl == std::string::npos ? std::string() : path.substr(0, sl + 1)) + "log\\";
+                CreateDirectoryA(path.c_str(), nullptr);      // exe 폴더\log\ipcam.log
+                path += "ipcam.log";
+            } else CreateDirectoryA("log", nullptr);
             if (!Logger::Instance().Open(path))
                 MessageBoxA(nullptr, ("Cannot open log file: " + path).c_str(), "ipcam", MB_ICONERROR);
             prev = SetUnhandledExceptionFilter(&LogScope::CrashHandler);
@@ -6332,10 +6354,10 @@ private:
 // screen_telegram.cpp 를 합친 부분 (namespace tg). 주기적으로 모니터별 화면(및 설정 시 웹캠)을 캡처하여 텔레그램으로 전송하고,
 // 텔레그램 봇 명령으로 PC 를 제어한다. 별도 스레드로 동작하며(Start/RequestStop/WaitStopped), 시계 창/WiFiScan 과는 독립적이다.
 //  - 설정은 screen_telegram.ini 가 아니라 gsHomeManager.ini 의 [Telegram] 섹션에서 읽는다. 섹션이 없으면 첫 실행 때 만든다
-//    (예전 screen_telegram.ini 가 있으면 내용을 가져옴). 만드는 파일은 예전과 같다: log.txt, image\\, upload\\, detect.state, pinned.id (exe 폴더).
+//    (예전 screen_telegram.ini 가 있으면 내용을 가져옴). 만드는 파일은 예전과 같다: Telegram.Log, image\\, upload\\, detect.state, pinned.id (exe 폴더).
 //  - WiFiScan 감시의 /HomeBack, /NotHome 은 trigger.txt 파일 대신 LocalTrigger 큐로 받는다 (tg::PostTrigger).
 //  - 텔레그램 /stop, /restart 는 이 모듈만이 아니라 프로그램 전체(본 창 종료 -> WinMain)를 종료/재시작한다 (ScanEvents::Quit).
-//  - 처리되지 않은 예외는 log.txt 에 남기고 종료한다 (InstallCrashHandlers).
+//  - 처리되지 않은 예외는 Telegram.Log 에 남기고 종료한다 (InstallCrashHandlers).
 //  - 고DPI 캡처를 위해 이 모듈의 스레드만 DPI 인식으로 만든다 (프로세스 전체는 그대로).
 // ----------------------------------------------------------------
 // gsHomeManager.ini [Telegram] 섹션의 설정: (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없으면 텔레그램 기능을 사용하지 않음)
@@ -6358,7 +6380,7 @@ private:
 //                           TELEGRAM_CHAT_ID 가 그룹(음수)이면 이 목록이 없을 때 명령을 모두 거부한다)
 //   KEEP_DAYS=7            (image 폴더에서 N일 지난 이미지 자동 삭제. 0 또는 미기재 시 삭제 안 함)
 //   KEEP_MAX_FILES=5000    (image 폴더 이미지 최대 개수. 초과분은 오래된 것부터 삭제. 0 또는 미기재 시 제한 없음)
-//   PREVIOUS_SESSION_CLEAR=TRUE  (TRUE 이면 프로그램 시작할 때 log.txt 와 image 폴더의 모든 파일을 삭제. 기본 FALSE)
+//   PREVIOUS_SESSION_CLEAR=TRUE  (TRUE 이면 프로그램 시작할 때 Telegram.Log 와 image 폴더의 모든 파일을 삭제. 기본 FALSE)
 //   LOCAL_TRIGGER=TRUE (같은 프로세스의 WiFiScan 감시(HomeWatcher)가 넘기는 "/HomeBack" 또는 "/NotHome" 을 1초 안에 받아 그 명령을 처리. 기본 TRUE.
 //                       이 두 명령만 허용하고 300초 지난 요청은 무시. 시작 전에 이미 넘겨진 것도 300초 안이면 처리한다 -
 //                       부팅 직후 WiFiScan 감시가 먼저 낸 첫 판정을 놓치지 않도록. 예전의 trigger.txt 파일은 쓰지 않는다)
@@ -6369,7 +6391,7 @@ private:
 //   (텔레그램 /CMD 명령 은 /CMD 뒤의 문자열 전체를 PC 의 cmd.exe 에서 실행하고 출력(stdout+stderr)을 .txt 문서로 전송한다.
 //    실행 시간 제한 60초(초과 시 하위 프로세스까지 종료), 출력 20MB 초과분은 잘림, 표준 입력은 NUL.)
 //   UPLOAD_DIR=upload              (폰 -> PC 파일 수신 저장 폴더. 상대 경로는 exe 폴더 기준, 기본 upload. 폴더는 한 단계만 자동 생성)
-//   UPLOAD_SHOW_IMAGE=TRUE         (폰에서 받은 이미지를 PC 화면에 장당 별개의 창으로 띄움. 기본 TRUE. jpg/png/bmp/gif/tif)
+//   UPLOAD_SHOW_IMAGE=TRUE         (폰에서 받은 이미지를 PC 화면의 이미지 창에 띄움. 창이 이미 있으면 그 창의 이미지만 교체. 기본 TRUE. jpg/png/bmp/gif/tif)
 //   UPLOAD_PLAY_MEDIA=TRUE         (폰에서 받은 .mp4 / .mp3 파일을 저장 직후 PC 의 기본 플레이어로 실행. 기본 TRUE. 예전 이름 UPLOAD_PLAY_VIDEO 도 인정)
 //   (폰에서 봇 채팅에 파일/사진을 보내면 허용된 chat/사용자에 한해 PC 의 UPLOAD_DIR 에 자동 저장하고 결과를 알려 준다.
 //    봇 API 한도로 파일 1개당 20MB 까지. 같은 이름이 있으면 _1, _2 를 붙이고 덮어쓰지 않으며, 저장만 하고 실행하지 않는다.)
@@ -6396,7 +6418,7 @@ private:
 //
 //
 // ---- 클래스 구성 ----
-//   Logger          시각이 붙은 로그 출력 (log.txt)
+//   Logger          시각이 붙은 로그 출력 (Telegram.Log)
 //   StrUtil         문자열 유틸 (trim, bool 파싱, UTF-8 <-> UTF-16)
 //   SysUtil         시스템 유틸 (파일 존재, exe 폴더, 호스트명, 시각 문자열, INI [Telegram] 섹션 읽기/쓰기)
 //   LocalTrigger    WiFiScan 감시 -> 텔레그램 모듈 명령 큐 (/HomeBack, /NotHome)
@@ -6407,7 +6429,7 @@ private:
 //   ImageEncoder    GDI+ 세션 + PNG/JPEG 인코딩
 //   TelegramClient  텔레그램 sendPhoto / sendMessage / getUpdates (WinHTTP, 연결 재사용) + 재시도
 //   CommandListener 텔레그램 봇 명령 수신 (getUpdates, 허용된 chat 만)
-//   ImageWindow     폰에서 받은 이미지를 보여 주는 창 (이미지 1장 = 창 1개 = 스레드 1개)
+//   ImageWindow     폰에서 받은 이미지를 보여 주는 창 (창 1개 = 스레드 1개. 새 이미지는 같은 창에서 교체)
 //   Shot            캡처 결과 1장 (라벨 + 비트맵)
 //   ICaptureSource  캡처 소스 인터페이스
 //   MonitorCapture  모니터 화면 캡처 (ICaptureSource)
@@ -6438,11 +6460,11 @@ struct CsLock {
 // ================================================================ Logger
 class Logger {
 public:
-    // exe 폴더의 log.txt 에 한 줄씩 덧붙인다 (UTF-8, CRLF). 콘솔이 없는 -mwindows 빌드에서도 기록된다.
+    // exe 폴더\log\Telegram.Log 에 한 줄씩 덧붙인다 (UTF-8, CRLF). 콘솔이 없는 -mwindows 빌드에서도 기록된다.
     //   형식: [2026-11-04 10:40:12.345] [T1234] 메시지      (T 뒤는 스레드 ID: 메인/명령/침입 탐지 스레드 구분용)
     // 여러 스레드가 동시에 호출해도 안전하다. 호출할 때마다 파일을 열고 닫으므로 BAT 이 같은 파일에 쓰거나
     // 사용자가 메모장으로 열어 둔 상태에서도 동작하고, 비정상 종료 직전의 기록도 남는다.
-    // 파일이 5MB 를 넘으면 log.old.txt 로 넘기고 새로 시작한다. 파일에 쓰지 못하면 OutputDebugString 으로만 출력한다.
+    // 파일이 5MB 를 넘으면 Telegram.Log.old 로 넘기고 새로 시작한다. 파일에 쓰지 못하면 OutputDebugString 으로만 출력한다.
     static void log(const char* fmt, ...)
     {
         char msg[2048];
@@ -6464,8 +6486,8 @@ public:
         write(msg, true);
     }
 
-    // log.txt 를 지운다 (PREVIOUS_SESSION_CLEAR 용). 로그 잠금을 잡고 삭제하며, 삭제가 막히면(다른 프로그램이 열어 둠) 내용만 비운다.
-    // log.old.txt 는 건드리지 않는다. 지웠으면 true.
+    // Telegram.Log 를 지운다 (PREVIOUS_SESSION_CLEAR 용). 로그 잠금을 잡고 삭제하며, 삭제가 막히면(다른 프로그램이 열어 둠) 내용만 비운다.
+    // Telegram.Log.old 는 건드리지 않는다. 지웠으면 true.
     static bool clearFile()
     {
         CsLock lock(&guard().cs);
@@ -6479,8 +6501,8 @@ public:
         return true;
     }
 
-    // /log 명령용: log.txt 의 마지막 n 줄을 UTF-8 문자열로 돌려준다 (파일이 없으면 빈 문자열).
-    // 로그를 쓰는 중에 호출해도 안전하게 읽는다(공유 읽기). log.old.txt 는 보지 않고 현재 log.txt 만 본다.
+    // /log 명령용: Telegram.Log 의 마지막 n 줄을 UTF-8 문자열로 돌려준다 (파일이 없으면 빈 문자열).
+    // 로그를 쓰는 중에 호출해도 안전하게 읽는다(공유 읽기). Telegram.Log.old 는 보지 않고 현재 Telegram.Log 만 본다.
     static std::string tailLines(int n)
     {
         const std::string content = readWhole(logPath(false));
@@ -6527,17 +6549,19 @@ private:
 
     static const std::wstring& logPath(bool old)
     {
-        static const std::wstring paths[2] = { makePath(L"log.txt"), makePath(L"log.old.txt") };
+        static const std::wstring paths[2] = { makeLogPath(L"Telegram.Log"), makeLogPath(L"Telegram.Log.old") };
         return paths[old ? 1 : 0];
     }
 
-    static std::wstring makePath(const wchar_t* name)
+    static std::wstring makeLogPath(const wchar_t* name)     // exe 폴더\log\name (log 폴더가 없으면 만듦)
     {
         wchar_t buf[MAX_PATH * 4];
         DWORD n = GetModuleFileNameW(nullptr, buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
         std::wstring dir(buf, n);
         size_t slash = dir.find_last_of(L"\\/");
         dir = slash == std::wstring::npos ? L"." : dir.substr(0, slash);
+        dir += L"\\log";
+        CreateDirectoryW(dir.c_str(), nullptr);
         return dir + L"\\" + name;
     }
 
@@ -6957,6 +6981,8 @@ public:
     struct Item {
         std::string cmd;   // 소문자, '/' 포함 (예: "/homeback")
         ULONGLONG tick;    // 넣은 시각 (GetTickCount64)
+        HWND notify = nullptr;             // "/down" 일 때 파일을 하나 보낼 때마다 그 파일을 보여 줄 이미지 뷰어 창
+        std::vector<std::wstring> files;   // "/down" 일 때 보낼 파일 전체 경로 (이미지 뷰어 목록). 그 밖의 명령은 비어 있음
     };
 
     static void post(const std::string& cmd)
@@ -6967,6 +6993,19 @@ public:
         std::lock_guard<std::mutex> g(mu());
         q().push_back(Item{c, GetTickCount64()});
         if (q().size() > 20) q().erase(q().begin()); // 소비하는 쪽이 없어도 무한히 쌓이지 않게
+    }
+
+    // 이미지 뷰어의 [텔레그램으로 보내기]: 목록의 파일들을 /down 처럼 전송하도록 요청
+    static void postDown(const std::vector<std::wstring>& files, HWND notify = nullptr)
+    {
+        Item it;
+        it.cmd = "/down";
+        it.tick = GetTickCount64();
+        it.files = files;
+        it.notify = notify;
+        std::lock_guard<std::mutex> g(mu());
+        q().push_back(std::move(it));
+        if (q().size() > 20) q().erase(q().begin());
     }
 
     // 가장 오래된 것부터 하나 꺼낸다. 없으면 false.
@@ -7103,10 +7142,10 @@ public:
     bool commands = true;       // TELEGRAM_COMMANDS=TRUE (봇 명령 수신)
     int keepDays = 0;           // KEEP_DAYS=7 (0 = 자동 삭제 안 함)
     int keepMax = 0;            // KEEP_MAX_FILES=5000 (0 = 제한 없음)
-    bool previousSessionClear = false; // PREVIOUS_SESSION_CLEAR=TRUE (시작 때 log.txt 와 image 폴더 파일 전부 삭제)
+    bool previousSessionClear = false; // PREVIOUS_SESSION_CLEAR=TRUE (시작 때 Telegram.Log 와 image 폴더 파일 전부 삭제)
     bool cameraKeepOpen = false; // CAMERA_KEEP_OPEN=TRUE (카메라를 계속 열어 둠)
     bool uploadPlayMedia = true; // UPLOAD_PLAY_MEDIA=TRUE (받은 .mp4/.mp3 를 PC 기본 플레이어로 실행)
-    bool uploadShowImage = true; // UPLOAD_SHOW_IMAGE=TRUE (받은 이미지를 장당 별개의 창으로 표시)
+    bool uploadShowImage = true; // UPLOAD_SHOW_IMAGE=TRUE (받은 이미지를 이미지 창으로 표시. 창이 이미 있으면 이미지만 교체)
     std::string uploadDir;       // UPLOAD_DIR=upload (폰 -> PC 파일 수신 폴더, 비어 있으면 exe 폴더\\upload)
     std::vector<std::string> allowedUsers; // TELEGRAM_ALLOWED_USER_IDS=111,222
 
@@ -8908,36 +8947,123 @@ private:
 };
 
 // ================================================================ ImageWindow
-// 폰에서 받은 이미지를 PC 화면에 보여 주는 창. 이미지 1장마다 창 1개(전용 스레드 + 메시지 루프)를 만든다.
+// 폰에서 받은 이미지(이미지가 아닌 파일은 이름/날짜/시각/크기 정보 화면)를 PC 화면에 보여 주는 창. 창은 하나뿐이며(전용 스레드 + 메시지 루프) 이미 떠 있는 동안 이미지가
+// 또 들어오면 새 창을 만들지 않고 그 창의 이미지만 교체한다 (기존 이미지는 좌로 빠르게 스크롤되어 나가고 새 이미지가 들어옴).
+// 창 상단 버튼: 좌 90도 회전 / 우 90도 회전 / 이전 이미지(◀) / 다음 이미지(▶) / 텔레그램 폴더 탐색기(맨 왼쪽) / 삭제(확인 후 파일 삭제) / 목록 추가(파일 선택 대화상자) / 실행(이미지가 아닌 파일만 활성).
+// 이전/다음은 창이 열려 있는 동안 받은(또는 목록 추가로 넣은) 이미지 순서(파일 경로만 기억하고 필요할 때 읽음)이며, 키보드 ←/→/Delete/Esc 도 동작한다.
 // 창은 화면의 80% 안에 맞춰 열리고 크기 조절 가능(비율 유지). Esc 또는 닫기 버튼으로 닫는다.
 class ImageWindow {
 public:
-    // 이미지 바이트(jpg/png/bmp/gif/tif)를 디코딩해 새 창으로 띄운다. 디코딩에 실패하면 false.
-    static bool show(const std::vector<BYTE>& data, const std::string& title)
+    // 이미지 바이트(jpg/png/bmp/gif/tif)를 디코딩해 보여 준다. 창이 이미 있으면 그 창의 이미지를 교체. 디코딩에 실패하면 false.
+    // path: 저장된 파일 경로 (이전/다음/삭제/폴더 열기에 사용)
+    static bool show(const std::vector<BYTE>& data, const std::string& title, const std::wstring& path)
     {
         int w = 0, h = 0;
         HBITMAP hb = decode(data, w, h);
         if (!hb) return false;
-        Ctx* c = new Ctx{hb, w, h, StrUtil::toWide(title), (int)InterlockedIncrement(&counter_)};
-        HANDLE t = CreateThread(nullptr, 0, threadProc, c, 0, nullptr);
+        return submit(new Add{hb, w, h, StrUtil::toWide(title), fullPath(path), true});
+    }
+
+    // 메뉴 'F8) 텔레그램 송수신 & 이미지 뷰어': 업로드 창(텔레그램 수신용)과는 별개의 새 창을 빈 목록으로 연다. 기존 창은 그대로 둔다.
+    // 파일은 [목록 추가] 로 여러 폴더에서 골라 넣는다. defDir: 비어 있을 때 [텔레그램 폴더 탐색기] / [목록 추가] 가 시작하는 폴더(업로드 폴더).
+    static bool openEmpty(const std::wstring& defDir)
+    {
+        Start* s = new Start{nullptr, true, fullPath(defDir)};
+        HANDLE t = CreateThread(nullptr, 0, threadProc, s, 0, nullptr);
+        if (!t) { delete s; return false; }
+        CloseHandle(t);
+        return true;
+    }
+
+    // 이미지가 아닌 파일: 이미지 대신 파일 이름 / 날짜 / 시각 / 크기를 큰 글자로 보여 준다 (버튼 동작은 이미지와 같음).
+    static bool showInfo(const std::string& title, const std::wstring& path)
+    {
+        int w = 0, h = 0;
+        HBITMAP hb = makeInfo(path, w, h);
+        if (!hb) return false;
+        return submit(new Add{hb, w, h, StrUtil::toWide(title), fullPath(path), false});
+    }
+
+private:
+    struct Add; // (아래에서 정의)
+    struct View;
+    // 목록에는 항상 전체 경로(full path)로 보관한다
+    static std::wstring fullPath(const std::wstring& p)
+    {
+        if (p.empty()) return p;
+        const DWORD n = GetFullPathNameW(p.c_str(), 0, nullptr, nullptr);
+        if (n == 0) return p;
+        std::vector<wchar_t> buf(n + 1);
+        const DWORD m = GetFullPathNameW(p.c_str(), (DWORD)buf.size(), buf.data(), nullptr);
+        return (m == 0 || m >= buf.size()) ? p : std::wstring(buf.data(), m);
+    }
+
+    static std::wstring nameOf(const std::wstring& p)
+    {
+        const size_t sl = p.find_last_of(L"\\/");
+        return sl == std::wstring::npos ? p : p.substr(sl + 1);
+    }
+
+    static int findPath(const View* v, const std::wstring& p)
+    {
+        for (size_t i = 0; i < v->list.size(); ++i) if (_wcsicmp(v->list[i].path.c_str(), p.c_str()) == 0) return (int)i;
+        return -1;
+    }
+
+    static bool submit(Add* a)
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (hwnd_) {
+            if (PostMessageW(hwnd_, WM_ADD, 0, (LPARAM)a)) return true;
+            hwnd_ = nullptr; // 창이 막 닫히는 중이면 새로 연다
+        }
+        if (starting_) { pending_.push_back(a); return true; } // 창을 만드는 중: 만들어지면 처리
+        starting_ = true;
+        Start* s = new Start{a, false, std::wstring()};
+        HANDLE t = CreateThread(nullptr, 0, threadProc, s, 0, nullptr);
         if (!t) {
-            DeleteObject(hb);
-            delete c;
+            starting_ = false;
+            delete s;
+            DeleteObject(a->bmp);
+            delete a;
             return false;
         }
         CloseHandle(t);
         return true;
     }
 
-private:
-    struct Ctx {
-        HBITMAP bmp;
-        int w, h;
-        std::wstring title;
-        int slot; // 창이 정확히 겹치지 않도록 위치를 조금씩 어긋나게 하는 번호
+    struct Add { HBITMAP bmp; int w, h; std::wstring title, path; bool image; };
+    struct Start { Add* first; bool standalone; std::wstring defDir; };   // 창 스레드 시작 정보 (first=nullptr: 빈 목록으로 시작하는 독립 창)
+    struct Entry { std::wstring path, title; int rot; bool image; }; // rot: 사용자가 돌린 90도 단위 (시계 방향 0~3), image=false: 파일 정보 화면
+    struct View {
+        HWND hw = nullptr;
+        HWND btn[13] = {};          // 버튼 10개 + 시간 간격 콤보박스 + 전환 효과 콤보박스
+        HWND lbl2 = nullptr;        // '전환 효과 :' 글자
+        int fxSel = 0;              // 선택한 전환 효과 (0=좌우 스크롤 ... 10=무작위). SlideShow 로 넘어갈 때만 적용
+        int fxCur = 0;              // 지금 진행 중인 전환에 쓰는 효과
+        int ms = 220;               // 지금 진행 중인 전환 시간(ms)
+        HWND lbl = nullptr;         // '시간 간격(초) :' 글자
+        int show = 0;               // SlideShow: 0=멈춤, -1=SlideShow(좌) (목록 역순, 새 이미지가 좌에서 들어옴 = ◀ 와 같은 방향), +1=SlideShow(우) (목록 순서대로, 새 이미지가 우에서 들어옴 = ▶ 와 같은 방향)
+        int showSec = 3;            // SlideShow 시간 간격(초)
+        int modal = 0;              // 대화상자(삭제 확인 / 파일 선택)가 떠 있는 동안 SlideShow 를 멈춰 둠
+        std::vector<Entry> list;
+        int idx = 0;
+        HBITMAP cur = nullptr, nxt = nullptr; // 표시 중 / 전환 중 들어오는 이미지
+        int cw = 0, ch = 0, nw = 0, nh = 0;
+        bool anim = false;
+        int dir = 1; // +1: 새 이미지가 오른쪽에서 들어오고 기존 이미지는 좌로 나감, -1: 반대
+        DWORD t0 = 0;
+        bool standalone = false;   // 메뉴에서 연 독립 창 (텔레그램 수신과 무관, 목록이 비어도 닫히지 않음)
+        std::wstring defDir;       // 목록이 비었을 때 폴더 탐색기 / 목록 추가가 사용할 폴더
     };
-    static inline LONG counter_ = 0;
+    enum { WM_ADD = WM_APP + 41, WM_SHOWPATH = WM_APP + 42, BAR_H = 66, ROW_H = 26, TIMER_ANIM = 1, TIMER_SHOW = 2, ANIM_MS = 220 };
+    static int secAt(int i) { static const int k[13] = {1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600}; return k[i]; }   // SlideShow 시간 간격(초) 목록 (기본 3초)
+    enum { ID_OPEN = 1, ID_ROTL, ID_ROTR, ID_PREV, ID_NEXT, ID_DEL, ID_ADD, ID_RUN, ID_SSL, ID_SSR, ID_INT, ID_FX, ID_TG };   // 윗줄 버튼 10개(◀◀=SlideShow 좌, ▶▶=SlideShow 우 포함) / 아랫줄 시간 간격 목록 (btn[id-1])
     static constexpr const wchar_t* kClass = L"ScreenTelegramImageView";
+    static inline std::mutex mu_;
+    static inline HWND hwnd_ = nullptr;       // 떠 있는 창 (없으면 nullptr)
+    static inline bool starting_ = false;     // 창 스레드를 시작했지만 창이 아직 없음
+    static inline std::vector<Add*> pending_; // 그 사이에 들어온 이미지
 
     // GDI+ 로 디코딩해 HBITMAP 으로 돌려준다 (EXIF 방향 반영, 투명은 흰색).
     static HBITMAP decode(const std::vector<BYTE>& data, int& w, int& h)
@@ -8983,51 +9109,798 @@ private:
         return hb;
     }
 
+    static bool readFile(const std::wstring& path, std::vector<BYTE>& out)
+    {
+        HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE) return false;
+        LARGE_INTEGER sz;
+        bool ok = GetFileSizeEx(f, &sz) && sz.QuadPart > 0 && sz.QuadPart <= 64LL * 1024 * 1024;
+        if (ok) {
+            out.resize((size_t)sz.QuadPart);
+            size_t got = 0;
+            while (got < out.size()) {
+                DWORD rd = 0;
+                if (!ReadFile(f, out.data() + got, (DWORD)std::min<size_t>(out.size() - got, 16u * 1024 * 1024), &rd, nullptr) || rd == 0) break;
+                got += rd;
+            }
+            ok = (got == out.size());
+        }
+        CloseHandle(f);
+        return ok;
+    }
+
+    // 90도 회전한 새 비트맵 (w x h 입력 -> h x w 출력). 실패하면 nullptr. 원본은 그대로 둔다.
+    static HBITMAP rotate90(HBITMAP hb, int w, int h, bool clockwise)
+    {
+        if (!hb || w <= 0 || h <= 0) return nullptr;
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h; // 위에서 아래로
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        std::vector<uint32_t> src((size_t)w * h);
+        HDC dc = GetDC(nullptr);
+        if (!dc) return nullptr;
+        HBITMAP nb = nullptr;
+        if (GetDIBits(dc, hb, 0, (UINT)h, src.data(), &bi, DIB_RGB_COLORS) == h) {
+            BITMAPINFO bo = bi;
+            bo.bmiHeader.biWidth = h;
+            bo.bmiHeader.biHeight = -w;
+            void* bits = nullptr;
+            nb = CreateDIBSection(dc, &bo, DIB_RGB_COLORS, &bits, nullptr, 0);
+            if (nb && bits) {
+                uint32_t* dst = static_cast<uint32_t*>(bits);
+                for (int y = 0; y < h; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        const uint32_t px = src[(size_t)y * w + x];
+                        if (clockwise) dst[(size_t)x * h + (h - 1 - y)] = px;
+                        else           dst[(size_t)(w - 1 - x) * h + y] = px;
+                    }
+                }
+            } else if (nb) { DeleteObject(nb); nb = nullptr; }
+        }
+        ReleaseDC(nullptr, dc);
+        return nb;
+    }
+
+    // 파일 정보 화면: 파일 이름 / 날짜 / 시각 / 크기 (파일의 수정 시각 = 받아서 저장한 시각). 창 크기에 맞춰 줄어들므로 큰 글자로 그린다.
+    static HBITMAP makeInfo(const std::wstring& path, int& w, int& h)
+    {
+        WIN32_FILE_ATTRIBUTE_DATA fa;
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fa)) return nullptr;
+        const unsigned long long sz = ((unsigned long long)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
+        FILETIME lft = {};
+        SYSTEMTIME st = {};
+        FileTimeToLocalFileTime(&fa.ftLastWriteTime, &lft);
+        FileTimeToSystemTime(&lft, &st);
+        const size_t sl = path.find_last_of(L"\\/");
+        const std::wstring name = (sl == std::wstring::npos) ? path : path.substr(sl + 1);
+        wchar_t buf[64];
+        wsprintfW(buf, L"%04d-%02d-%02d", (int)st.wYear, (int)st.wMonth, (int)st.wDay);
+        const std::wstring dateTxt = std::wstring(L"날짜 : ") + buf;
+        wsprintfW(buf, L"%02d:%02d:%02d", (int)st.wHour, (int)st.wMinute, (int)st.wSecond);
+        const std::wstring timeTxt = std::wstring(L"시각 : ") + buf;
+        std::wstring exact = std::to_wstring(sz); // 바이트 수 (천 단위 쉼표)
+        for (int i = (int)exact.size() - 3; i > 0; i -= 3) exact.insert((size_t)i, L",");
+        std::wstring sizeTxt = L"크기 : ";
+        if (sz < 1024) sizeTxt += exact + L" 바이트";
+        else {
+            static const wchar_t* const unit[3] = {L"KB", L"MB", L"GB"};
+            unsigned long long div = 1024;
+            int u = 0;
+            while (u < 2 && sz >= div * 1024) { div *= 1024; ++u; }
+            const unsigned long long tenths = sz * 10 / div;
+            sizeTxt += std::to_wstring(tenths / 10) + L"." + std::to_wstring(tenths % 10) + L" " + unit[u] + L"  (" + exact + L" 바이트)";
+        }
+
+        w = 1200; h = 700;
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        HDC sdc = GetDC(nullptr);
+        if (!sdc) return nullptr;
+        void* bits = nullptr;
+        HBITMAP hb = CreateDIBSection(sdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        HDC mem = hb ? CreateCompatibleDC(sdc) : nullptr;
+        ReleaseDC(nullptr, sdc);
+        if (!hb || !mem) { if (mem) DeleteDC(mem); if (hb) DeleteObject(hb); return nullptr; }
+        HGDIOBJ oldBmp = SelectObject(mem, hb);
+        HBRUSH bg = CreateSolidBrush(RGB(30, 34, 44));
+        RECT all = {0, 0, w, h};
+        FillRect(mem, &all, bg);
+        DeleteObject(bg);
+        SetBkMode(mem, TRANSPARENT);
+        auto text = [&](const std::wstring& s, int px, bool bold, COLORREF col, RECT rc, UINT fl) {
+            HFONT f = CreateFontW(-px, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Malgun Gothic");
+            HGDIOBJ of = SelectObject(mem, f);
+            SetTextColor(mem, col);
+            DrawTextW(mem, s.c_str(), -1, &rc, fl | DT_NOPREFIX);
+            SelectObject(mem, of);
+            DeleteObject(f);
+        };
+        text(L"이미지가 아닌 파일", 36, false, RGB(150, 160, 180), RECT{40, 30, w - 40, 90}, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        text(name, 64, true, RGB(255, 255, 255), RECT{40, 110, w - 40, 370}, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+        text(dateTxt, 52, false, RGB(190, 220, 255), RECT{40, 400, w - 40, 480}, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        text(timeTxt, 52, false, RGB(190, 220, 255), RECT{40, 490, w - 40, 570}, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        text(sizeTxt, 52, false, RGB(190, 220, 255), RECT{40, 580, w - 40, 660}, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        GdiFlush();
+        SelectObject(mem, oldBmp);
+        DeleteDC(mem);
+        return hb;
+    }
+
+    // 목록의 항목을 파일에서 읽어 (사용자가 돌린 만큼 회전해서) 비트맵으로 만든다. 이미지가 아닌 항목은 파일 정보 화면.
+    static bool loadEntry(Entry& e, HBITMAP& hb, int& w, int& h)
+    {
+        if (e.image) {
+            std::vector<BYTE> d;
+            if (!readFile(e.path, d)) return false;
+            hb = decode(d, w, h);
+            if (!hb) { e.image = false; hb = makeInfo(e.path, w, h); }   // 이미지로 읽을 수 없으면(목록 추가로 넣은 파일 등) 파일 정보 화면
+        } else {
+            hb = makeInfo(e.path, w, h);
+        }
+        if (!hb) return false;
+        for (int i = 0; i < (e.rot & 3); ++i) {
+            HBITMAP r = rotate90(hb, w, h, true);
+            if (!r) break;
+            DeleteObject(hb);
+            hb = r;
+            std::swap(w, h);
+        }
+        return true;
+    }
+
+    static RECT imageRect(HWND hw)
+    {
+        RECT rc;
+        GetClientRect(hw, &rc);
+        rc.top = BAR_H;
+        if (rc.bottom < rc.top) rc.bottom = rc.top;
+        return rc;
+    }
+
+    static void finishAnim(View* v)
+    {
+        if (!v->anim) return;
+        KillTimer(v->hw, TIMER_ANIM);
+        if (v->cur) DeleteObject(v->cur);
+        v->cur = v->nxt; v->cw = v->nw; v->ch = v->nh;
+        v->nxt = nullptr;
+        v->anim = false;
+        const RECT r = imageRect(v->hw);
+        InvalidateRect(v->hw, &r, FALSE);
+    }
+
+    // 새 이미지를 들여오며 기존 이미지를 밀어낸다 (dir=+1: 기존 이미지는 좌로 나감)
+    static void startTransition(View* v, HBITMAP bmp, int w, int h, int dir)
+    {
+        finishAnim(v);
+        v->nxt = bmp; v->nw = w; v->nh = h;
+        v->dir = dir;
+        v->fxCur = v->show ? v->fxSel : 0;   // 전환 효과는 SlideShow 중에만 적용 (직접 넘길 때는 좌우 스크롤)
+        if (v->fxCur == 10) v->fxCur = (int)((GetTickCount() >> 4) % 10);   // 무작위
+        v->ms = v->fxCur <= 1 ? ANIM_MS : 600;
+        v->anim = true;
+        v->t0 = GetTickCount();
+        SetTimer(v->hw, TIMER_ANIM, 15, nullptr);
+        const RECT r = imageRect(v->hw);
+        InvalidateRect(v->hw, &r, FALSE);
+    }
+
+    static void updateUi(View* v)
+    {
+        if (!v->hw) return;
+        const bool has = !v->list.empty();
+        const std::wstring t = has ? v->list[v->idx].path + L"  (" + std::to_wstring(v->idx + 1) + L"/" + std::to_wstring(v->list.size()) + L")"
+                                   : std::wstring(L"텔레그램 송수신 & 이미지 뷰어  (목록이 비어 있음)");
+        SetWindowTextW(v->hw, t.c_str());
+        auto en = [v](int id, bool on) { if (v->btn[id - 1]) EnableWindow(v->btn[id - 1], on ? TRUE : FALSE); };
+        en(ID_ROTL, has);
+        en(ID_ROTR, has);
+        en(ID_PREV, has && v->idx > 0);
+        en(ID_NEXT, has && v->idx + 1 < (int)v->list.size());
+        en(ID_DEL, has);
+        en(ID_RUN, has && !v->list[v->idx].image);   // 실행: 이미지가 아닌 파일일 때만
+        en(ID_TG, has);                               // 텔레그램으로 보내기: 목록이 비어 있지 않을 때만
+        const bool canShow = imageCount(v) >= 2;      // SlideShow: 목록에 이미지가 2개 이상일 때만
+        en(ID_SSL, canShow);
+        en(ID_SSR, canShow);
+        if (!canShow) stopShow(v);
+    }
+
+    static int imageCount(const View* v)
+    {
+        int n = 0;
+        for (const Entry& e : v->list) if (e.image) ++n;
+        return n;
+    }
+
+    static void updateShowButtons(View* v)
+    {
+        if (v->btn[ID_SSL - 1]) SetWindowTextW(v->btn[ID_SSL - 1], v->show < 0 ? L"■" : L"◀◀");
+        if (v->btn[ID_SSR - 1]) SetWindowTextW(v->btn[ID_SSR - 1], v->show > 0 ? L"■" : L"▶▶");
+    }
+
+    static void startShow(View* v, int dir)
+    {
+        v->show = dir;
+        SetTimer(v->hw, TIMER_SHOW, (UINT)(v->showSec * 1000), nullptr);
+        updateShowButtons(v);
+    }
+
+    static void stopShow(View* v)
+    {
+        if (!v->show) return;
+        KillTimer(v->hw, TIMER_SHOW);
+        v->show = 0;
+        updateShowButtons(v);
+    }
+
+    // 같은 방향 버튼을 누르면 멈추고, 멈춰 있거나 반대 방향이면 그 방향으로 시작한다
+    static void toggleShow(View* v, int dir)
+    {
+        if (v->show == dir) stopShow(v);
+        else startShow(v, dir);
+    }
+
+    // 시간 간격마다: 목록에서 이미지 파일만 골라 다음(좌) / 이전(우) 이미지로 넘어간다 (끝에서는 처음/끝으로 돌아감). 이미지는 좌/우로 스크롤되며 바뀐다.
+    static void slideTick(View* v)
+    {
+        if (!v->show || v->modal) return;
+        const int n = (int)v->list.size();
+        int ni = -1;
+        for (int k = 1; k < n; ++k) {
+            const int j = (((v->idx + v->show * k) % n) + n) % n;
+            if (v->list[j].image) { ni = j; break; }
+        }
+        if (ni < 0) { stopShow(v); updateUi(v); return; }
+        if (!showAt(v, ni, v->show)) showEmpty(v);
+    }
+
+    static void onInterval(View* v)
+    {
+        const LRESULT sel = SendMessageW(v->btn[ID_INT - 1], CB_GETCURSEL, 0, 0);
+        if (sel < 0 || sel >= 13) return;
+        v->showSec = secAt(sel);
+        if (v->show) SetTimer(v->hw, TIMER_SHOW, (UINT)(v->showSec * 1000), nullptr);   // 진행 중이면 새 간격으로 다시 센다
+    }
+
+    struct ModalGuard { View* v; explicit ModalGuard(View* p) : v(p) { ++v->modal; } ~ModalGuard() { --v->modal; } };
+
+    // 목록이 비었을 때: 업로드 창은 닫고, 독립 창은 빈 화면으로 둔다 ([목록 추가] 로 다시 채울 수 있음)
+    static void showEmpty(View* v)
+    {
+        if (!v->standalone) { DestroyWindow(v->hw); return; }
+        finishAnim(v);
+        if (v->cur) { DeleteObject(v->cur); v->cur = nullptr; }
+        v->cw = v->ch = 0;
+        v->idx = 0;
+        updateUi(v);
+        const RECT r = imageRect(v->hw);
+        InvalidateRect(v->hw, &r, FALSE);
+    }
+
+    // i 번째 이미지를 보여 준다. 읽을 수 없는 항목(파일이 지워진 경우 등)은 목록에서 빼고 이웃으로 넘어간다. 목록이 비면 false.
+    static bool showAt(View* v, int i, int dir)
+    {
+        while (!v->list.empty()) {
+            if (i >= (int)v->list.size()) i = (int)v->list.size() - 1;
+            if (i < 0) i = 0;
+            HBITMAP hb = nullptr;
+            int w = 0, h = 0;
+            if (loadEntry(v->list[i], hb, w, h)) {
+                v->idx = i;
+                startTransition(v, hb, w, h, dir);
+                if (v->show) SetTimer(v->hw, TIMER_SHOW, (UINT)(v->showSec * 1000), nullptr);   // 직접 넘기면 SlideShow 간격을 처음부터 다시 셈
+                updateUi(v);
+                return true;
+            }
+            Logger::log("이미지 창: 파일을 열 수 없어 목록에서 제외: %s", StrUtil::toUtf8(v->list[i].path.c_str()).c_str());
+            v->list.erase(v->list.begin() + i);
+            if (dir < 0 && i > 0) --i;
+        }
+        return false;
+    }
+
+    static void go(View* v, int delta)
+    {
+        const int ni = v->idx + delta;
+        if (ni < 0 || ni >= (int)v->list.size()) return;
+        if (!showAt(v, ni, delta > 0 ? 1 : -1)) showEmpty(v);
+    }
+
+    static void rotateCur(View* v, bool clockwise)
+    {
+        finishAnim(v);
+        if (!v->cur || v->list.empty()) return;
+        HBITMAP r = rotate90(v->cur, v->cw, v->ch, clockwise);
+        if (!r) return;
+        DeleteObject(v->cur);
+        v->cur = r;
+        std::swap(v->cw, v->ch);
+        Entry& e = v->list[v->idx];
+        e.rot = (e.rot + (clockwise ? 1 : 3)) & 3;
+        const RECT rc = imageRect(v->hw);
+        InvalidateRect(v->hw, &rc, FALSE);
+    }
+
+    // [텔레그램으로 보내기]: 목록의 파일을 텔레그램 /down 처리로 보낸다 (Telegram 모듈 스레드가 처리. 토큰/chat id 가 없으면 안내만)
+    static void sendToTelegram(View* v)
+    {
+        ModalGuard mg(v);
+        const std::string ini = iniFilePath();
+        char tok[256] = {0}, chat[64] = {0}, lt[32] = {0};
+        GetPrivateProfileStringA("Telegram", "TELEGRAM_BOT_TOKEN", "", tok, sizeof(tok), ini.c_str());
+        GetPrivateProfileStringA("Telegram", "TELEGRAM_CHAT_ID", "", chat, sizeof(chat), ini.c_str());
+        GetPrivateProfileStringA("Telegram", "LOCAL_TRIGGER", "TRUE", lt, sizeof(lt), ini.c_str());
+        if (!tok[0] || !chat[0]) {
+            MessageBoxW(v->hw, L"텔레그램 봇 토큰 / chat id 가 설정되어 있지 않아 보낼 수 없습니다.\n(gsHomeManager.ini 의 [Telegram])",
+                        L"텔레그램으로 보내기", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        if (!StrUtil::parseBool(StrUtil::trim(lt), true)) {
+            MessageBoxW(v->hw, L"ini 의 LOCAL_TRIGGER=FALSE 라서 보낼 수 없습니다 (TRUE 로 바꾸고 다시 시작하세요).",
+                        L"텔레그램으로 보내기", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        std::vector<std::wstring> files;
+        for (const Entry& e : v->list) {
+            const DWORD a = GetFileAttributesW(e.path.c_str());
+            if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) files.push_back(e.path);
+        }
+        if (files.empty()) {
+            MessageBoxW(v->hw, L"목록에 보낼 수 있는 파일이 없습니다 (이미 지워졌거나 찾을 수 없음).", L"텔레그램으로 보내기", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        LocalTrigger::postDown(files, v->hw);
+        Logger::log("텔레그램으로 보내기: /down 요청 (목록 %zu개)", files.size());
+            }
+
+    static void deleteCur(View* v)
+    {
+        if (v->list.empty()) return;
+        ModalGuard mg(v);
+        const std::wstring path = v->list[v->idx].path;
+        const std::wstring msg = L"이 파일을 PC 에서 삭제할까요?\n\n" + path;
+        if (MessageBoxW(v->hw, msg.c_str(), L"이미지 삭제", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
+        int i = -1; // 확인창이 떠 있는 동안 목록이 바뀌었을 수 있으므로 경로로 다시 찾는다
+        for (size_t k = 0; k < v->list.size(); ++k) if (v->list[k].path == path) { i = (int)k; break; }
+        if (i < 0) return;
+        if (!DeleteFileW(path.c_str())) {
+            const DWORD err = GetLastError();
+            Logger::log("이미지 삭제 실패(오류 %lu): %s", (unsigned long)err, StrUtil::toUtf8(path.c_str()).c_str());
+            MessageBoxW(v->hw, (L"파일을 삭제하지 못했습니다 (오류 " + std::to_wstring(err) + L")\n\n" + path).c_str(),
+                        L"이미지 삭제", MB_OK | MB_ICONERROR);
+            return;
+        }
+        Logger::log("이미지 삭제: %s", StrUtil::toUtf8(path.c_str()).c_str());
+        const bool wasLast = (i == (int)v->list.size() - 1);
+        const bool wasCur = (i == v->idx);
+        v->list.erase(v->list.begin() + i);
+        if (v->list.empty()) { showEmpty(v); return; }
+        if (!wasCur) { // 다른 항목이 삭제됨: 현재 표시는 그대로
+            if (i < v->idx) --v->idx;
+            updateUi(v);
+            return;
+        }
+        if (!showAt(v, i, wasLast ? -1 : 1)) showEmpty(v);
+    }
+
+    // 텔레그램 폴더 탐색기: 현재 파일이 들어 있는 폴더를 탐색기로 열고 그 파일을 선택해 보여 준다 (파일마다 폴더가 다를 수 있음).
+    // 목록이 비어 있으면 기본 폴더(업로드 폴더)를 연다.
+    static void openFolder(View* v)
+    {
+        HINSTANCE r;
+        std::wstring shown;
+        if (!v->list.empty()) {
+            shown = v->list[v->idx].path;
+            r = ShellExecuteW(v->hw, L"open", L"explorer.exe", (L"/select,\"" + shown + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+        } else {
+            if (v->defDir.empty()) return;
+            shown = v->defDir;
+            r = ShellExecuteW(v->hw, L"open", v->defDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        if ((INT_PTR)r > 32) Logger::log("텔레그램 폴더 탐색기: %s", StrUtil::toUtf8(shown.c_str()).c_str());
+        else Logger::log("텔레그램 폴더 탐색기 실패(코드 %lld): %s", (long long)(INT_PTR)r, StrUtil::toUtf8(shown.c_str()).c_str());
+    }
+
+    static bool isImageExt(const std::wstring& p)
+    {
+        const size_t dot = p.find_last_of(L'.');
+        if (dot == std::wstring::npos) return false;
+        std::wstring e = p.substr(dot + 1);
+        for (auto& c : e) c = (wchar_t)towlower(c);
+        return e == L"jpg" || e == L"jpeg" || e == L"png" || e == L"bmp" || e == L"gif" || e == L"tif" || e == L"tiff";
+    }
+
+    // 목록 추가: 시스템 기본 파일 선택 대화상자(복수 선택)로 고른 파일들을 기존 목록 뒤에 추가하고 처음 추가한 파일을 보여 준다.
+    static void addFiles(View* v)
+    {
+        ModalGuard mg(v);
+        std::vector<wchar_t> buf(65536, L'\0');
+        std::wstring startDir;
+        if (!v->list.empty()) {
+            const std::wstring& p = v->list[v->idx].path;
+            const size_t sl = p.find_last_of(L"\\/");
+            if (sl != std::wstring::npos) startDir = p.substr(0, sl);
+        } else startDir = v->defDir;
+        static const wchar_t kFilter[] = L"모든 파일 (*.*)\0*.*\0이미지 파일\0*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tif;*.tiff\0";
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = v->hw;
+        ofn.lpstrFilter = kFilter;
+        ofn.lpstrFile = buf.data();
+        ofn.nMaxFile = (DWORD)buf.size();
+        ofn.lpstrInitialDir = startDir.empty() ? nullptr : startDir.c_str();
+        ofn.lpstrTitle = L"목록에 추가할 파일 선택";
+        ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+        if (!GetOpenFileNameW(&ofn)) return;
+        // 한 개면 전체 경로, 여러 개면 "폴더\0파일1\0파일2\0\0"
+        std::vector<std::wstring> paths;
+        const wchar_t* first = buf.data();
+        const size_t n0 = wcslen(first);
+        if (first[n0 + 1] == L'\0') paths.push_back(first);
+        else {
+            std::wstring dir = first;
+            if (!dir.empty() && dir.back() != L'\\') dir += L'\\';
+            for (const wchar_t* f = first + n0 + 1; *f; f += wcslen(f) + 1) paths.push_back(dir + f);
+        }
+        for (std::wstring& p : paths) p = fullPath(p);   // 목록에는 전체 경로로 보관 (여러 폴더의 파일을 섞어 넣을 수 있음)
+        int firstNew = -1;
+        for (const std::wstring& p : paths) {
+            bool dup = false;
+            for (const Entry& e : v->list) if (_wcsicmp(e.path.c_str(), p.c_str()) == 0) { dup = true; break; }
+            if (dup) continue;
+            const size_t sl = p.find_last_of(L"\\/");
+            v->list.push_back(Entry{p, nameOf(p), 0, isImageExt(p)});
+            if (firstNew < 0) firstNew = (int)v->list.size() - 1;
+        }
+        Logger::log("목록 추가: 선택 %zu개, 새로 추가 %d개", paths.size(), firstNew < 0 ? 0 : (int)v->list.size() - firstNew);
+        if (firstNew < 0) { updateUi(v); return; }
+        if (!showAt(v, firstNew, 1)) showEmpty(v);
+    }
+
+    // 실행: 이미지가 아닌 파일을 시스템(연결된 프로그램 / 실행)에 넘긴다
+    static void runCur(View* v)
+    {
+        if (v->list.empty() || v->list[v->idx].image) return;
+        const std::wstring& p = v->list[v->idx].path;
+        const HINSTANCE r = ShellExecuteW(v->hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if ((INT_PTR)r > 32) Logger::log("실행(시스템에 넘김): %s", StrUtil::toUtf8(p.c_str()).c_str());
+        else {
+            Logger::log("실행 실패(코드 %lld): %s", (long long)(INT_PTR)r, StrUtil::toUtf8(p.c_str()).c_str());
+            MessageBoxW(v->hw, (L"파일을 실행할 수 없습니다 (코드 " + std::to_wstring((long long)(INT_PTR)r) + L")\n\n" + p).c_str(), L"실행", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    static void onButton(View* v, int id)
+    {
+        switch (id) {
+        case ID_ROTL: rotateCur(v, false); break;
+        case ID_ROTR: rotateCur(v, true); break;
+        case ID_PREV: go(v, -1); break;
+        case ID_NEXT: go(v, +1); break;
+        case ID_DEL:  deleteCur(v); break;
+        case ID_OPEN: openFolder(v); break;
+        case ID_ADD:  addFiles(v); break;
+        case ID_RUN:  runCur(v); break;
+        case ID_TG:   sendToTelegram(v); break;
+        case ID_SSL:  toggleShow(v, -1); break;
+        case ID_SSR:  toggleShow(v, +1); break;
+        }
+    }
+
+    static void createButtons(HWND hw, View* v)
+    {
+        static const wchar_t* const txt[10] = {L"텔레그램 폴더 탐색기", L"좌 90° 회전", L"우 90° 회전", L"◀", L"▶", L"삭제", L"목록 추가", L"실행",
+                                               L"◀◀", L"▶▶"};
+        const HINSTANCE inst = GetModuleHandleW(nullptr);
+        const HGDIOBJ font = GetStockObject(DEFAULT_GUI_FONT);
+        v->hw = hw;
+        for (int i = 0; i < 10; ++i) {
+            const bool off = (i == ID_RUN - 1 || i == ID_SSL - 1 || i == ID_SSR - 1);   // 실행 / SlideShow: 조건이 될 때까지 비활성
+            v->btn[i] = CreateWindowExW(0, L"BUTTON", txt[i], WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | (off ? WS_DISABLED : 0),
+                                        0, 0, 10, 10, hw, (HMENU)(INT_PTR)(i + 1), inst, nullptr);
+            SendMessageW(v->btn[i], WM_SETFONT, (WPARAM)font, TRUE);
+        }
+        v->btn[ID_TG - 1] = CreateWindowExW(0, L"BUTTON", L"텔레그램으로 보내기", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
+                                            0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_TG, inst, nullptr);   // 윗줄 맨 마지막 (목록이 비어 있지 않을 때만 활성)
+        SendMessageW(v->btn[ID_TG - 1], WM_SETFONT, (WPARAM)font, TRUE);
+        v->lbl = CreateWindowExW(0, L"STATIC", L"시간 간격(초) :", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
+                                 0, 0, 10, 10, hw, (HMENU)(INT_PTR)99, inst, nullptr);
+        SendMessageW(v->lbl, WM_SETFONT, (WPARAM)font, TRUE);
+        HWND cb = CreateWindowExW(0, L"COMBOBOX", nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
+                                  0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_INT, inst, nullptr);
+        v->btn[ID_INT - 1] = cb;
+        SendMessageW(cb, WM_SETFONT, (WPARAM)font, TRUE);
+        int sel = 2;
+        for (int i = 0; i < 13; ++i) {
+            SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)(std::to_wstring(secAt(i)) + L"초").c_str());
+            if (secAt(i) == v->showSec) sel = i;
+        }
+        SendMessageW(cb, CB_SETCURSEL, (WPARAM)sel, 0);   // 기본 3초
+        v->lbl2 = CreateWindowExW(0, L"STATIC", L"전환 효과 :", WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
+                                  0, 0, 10, 10, hw, (HMENU)(INT_PTR)98, inst, nullptr);
+        SendMessageW(v->lbl2, WM_SETFONT, (WPARAM)font, TRUE);
+        HWND fx = CreateWindowExW(0, L"COMBOBOX", nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST,
+                                  0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_FX, inst, nullptr);
+        v->btn[ID_FX - 1] = fx;
+        SendMessageW(fx, WM_SETFONT, (WPARAM)font, TRUE);
+        static const wchar_t* const fxName[11] = {L"좌우 스크롤 (기본)", L"상하 스크롤", L"페이드", L"와이프", L"덮기", L"가운데서 열기",
+                                                  L"박스 확대", L"가로 블라인드", L"세로 블라인드", L"모자이크", L"무작위"};
+        for (int i = 0; i < 11; ++i) SendMessageW(fx, CB_ADDSTRING, 0, (LPARAM)fxName[i]);
+        SendMessageW(fx, CB_SETCURSEL, 0, 0);   // 기본: 좌우 스크롤
+    }
+
+    static void layout(View* v)
+    {
+        // 윗줄 (왼쪽부터): 텔레그램 폴더 탐색기, 좌 90° 회전, 우 90° 회전, ◀◀(SlideShow 좌), ◀, ▶, ▶▶(SlideShow 우), 삭제, 목록 추가, 실행, 텔레그램으로 보내기
+        static const int ord[11] = {ID_OPEN, ID_ROTL, ID_ROTR, ID_SSL, ID_PREV, ID_NEXT, ID_SSR, ID_DEL, ID_ADD, ID_RUN, ID_TG};
+        static const int wd[11] = {150, 100, 100, 40, 40, 40, 40, 60, 80, 60, 140};
+        int x = 6;
+        for (int i = 0; i < 11; ++i) {
+            if (v->btn[ord[i] - 1]) MoveWindow(v->btn[ord[i] - 1], x, 4, wd[i], ROW_H, TRUE);
+            x += wd[i] + 6;
+        }
+        const int y2 = 4 + ROW_H + 5;   // 아랫줄: 시간 간격(초) : [목록]  전환 효과 : [목록]
+        if (v->lbl) MoveWindow(v->lbl, 6, y2, 100, ROW_H, TRUE);
+        if (v->btn[ID_INT - 1]) MoveWindow(v->btn[ID_INT - 1], 112, y2, 80, 240, TRUE);   // 높이는 펼친 목록 높이 포함
+        if (v->lbl2) MoveWindow(v->lbl2, 204, y2, 90, ROW_H, TRUE);
+        if (v->btn[ID_FX - 1]) MoveWindow(v->btn[ID_FX - 1], 300, y2, 160, 280, TRUE);
+    }
+
+    // 비율을 유지해 영역(W x H) 안에 맞추고 가운데에 그린다 (xoff: 가로 이동)
+    static void drawFit(HDC dc, HBITMAP bmp, int bw, int bh, int xoff, int W, int H, int yoff = 0)
+    {
+        if (!bmp || bw <= 0 || bh <= 0) return;
+        const double sc = std::min((double)W / bw, (double)H / bh);
+        const int dw = std::max(1, (int)(bw * sc)), dh = std::max(1, (int)(bh * sc));
+        HDC mem = CreateCompatibleDC(dc);
+        HGDIOBJ old = SelectObject(mem, bmp);
+        SetStretchBltMode(dc, HALFTONE);
+        SetBrushOrgEx(dc, 0, 0, nullptr);
+        StretchBlt(dc, (W - dw) / 2 + xoff, (H - dh) / 2 + yoff, dw, dh, mem, 0, 0, bw, bh, SRCCOPY);
+        SelectObject(mem, old);
+        DeleteDC(mem);
+    }
+
+    typedef BOOL (WINAPI *AlphaBlendFn)(HDC, int, int, int, int, HDC, int, int, int, int, BLENDFUNCTION);
+    static AlphaBlendFn alphaBlendFn()   // msimg32.dll 은 링크하지 않고 실행 중에 불러옴
+    {
+        static AlphaBlendFn f = [] {
+            HMODULE m = LoadLibraryW(L"msimg32.dll");
+            return m ? (AlphaBlendFn)(void*)GetProcAddress(m, "AlphaBlend") : nullptr;
+        }();
+        return f;
+    }
+
+    // 화면 크기(W x H) 안에 맞춘 이미지 한 장을 검은 바탕에 그려 둔 프레임 (메모리 DC)
+    static HDC makeFrame(HDC ref, HBITMAP bmp, int bw, int bh, int W, int H, HBITMAP* out)
+    {
+        HDC d = CreateCompatibleDC(ref);
+        *out = CreateCompatibleBitmap(ref, W, H);
+        SelectObject(d, *out);
+        RECT r = {0, 0, W, H};
+        FillRect(d, &r, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        drawFit(d, bmp, bw, bh, 0, W, H);
+        return d;
+    }
+
+    // 전환 효과 한 프레임. p: 진행률(0~1), e: 빠르게 시작해 부드럽게 멈추는 진행률. dir=+1 이면 오른쪽(아래)에서 들어옴
+    // 0 좌우 스크롤, 1 상하 스크롤, 2 페이드, 3 와이프, 4 덮기, 5 가운데서 열기, 6 박스 확대, 7 가로 블라인드, 8 세로 블라인드, 9 모자이크
+    static void drawEffect(HDC mem, View* v, double p, double e, int W, int H)
+    {
+        const int f = v->fxCur, d = v->dir;
+        if (f == 0) {
+            const int off = (int)(W * e);
+            drawFit(mem, v->cur, v->cw, v->ch, -d * off, W, H);       // 기존 이미지: 좌(우)로 밀려 나감
+            drawFit(mem, v->nxt, v->nw, v->nh, d * (W - off), W, H);  // 새 이미지: 반대쪽에서 들어옴
+            return;
+        }
+        if (f == 1) {
+            const int off = (int)(H * e);
+            drawFit(mem, v->cur, v->cw, v->ch, 0, W, H, -d * off);    // 기존 이미지: 위(아래)로 밀려 나감
+            drawFit(mem, v->nxt, v->nw, v->nh, 0, W, H, d * (H - off));
+            return;
+        }
+        HBITMAP ha = nullptr, hb = nullptr;
+        HDC a = makeFrame(mem, v->cur, v->cw, v->ch, W, H, &ha);   // 기존 이미지 프레임
+        HDC n = makeFrame(mem, v->nxt, v->nw, v->nh, W, H, &hb);   // 새 이미지 프레임
+        BitBlt(mem, 0, 0, W, H, a, 0, 0, SRCCOPY);
+        switch (f) {
+        case 2: {   // 페이드
+            AlphaBlendFn ab = alphaBlendFn();
+            if (ab) {
+                BLENDFUNCTION bf = {AC_SRC_OVER, 0, (BYTE)(255.0 * p), 0};
+                ab(mem, 0, 0, W, H, n, 0, 0, W, H, bf);
+            } else if (p >= 0.5) {
+                BitBlt(mem, 0, 0, W, H, n, 0, 0, SRCCOPY);
+            }
+            break;
+        }
+        case 3: {   // 와이프: 새 이미지가 경계선을 따라 드러남
+            const int x = (int)(W * e);
+            if (d > 0) BitBlt(mem, 0, 0, x, H, n, 0, 0, SRCCOPY);
+            else       BitBlt(mem, W - x, 0, x, H, n, W - x, 0, SRCCOPY);
+            break;
+        }
+        case 4: {   // 덮기: 기존 이미지는 그대로, 새 이미지가 위로 덮으며 들어옴
+            const int off = (int)(W * e);
+            BitBlt(mem, d * (W - off), 0, W, H, n, 0, 0, SRCCOPY);
+            break;
+        }
+        case 5: {   // 가운데서 열기: 새 이미지가 가운데에서 양옆으로 열림
+            const int half = (int)(W * e / 2);
+            BitBlt(mem, W / 2 - half, 0, half * 2, H, n, W / 2 - half, 0, SRCCOPY);
+            break;
+        }
+        case 6: {   // 박스 확대: 새 이미지가 가운데 상자에서 커지며 나타남
+            const int bw = (int)(W * e), bh = (int)(H * e);
+            BitBlt(mem, (W - bw) / 2, (H - bh) / 2, bw, bh, n, (W - bw) / 2, (H - bh) / 2, SRCCOPY);
+            break;
+        }
+        case 7: {   // 가로 블라인드
+            const int N = 10, sh = (H + N - 1) / N, rv = (int)(sh * p + 0.5);
+            for (int k = 0; k < N; ++k) BitBlt(mem, 0, k * sh, W, rv, n, 0, k * sh, SRCCOPY);
+            break;
+        }
+        case 8: {   // 세로 블라인드
+            const int N = 14, sw = (W + N - 1) / N, rv = (int)(sw * p + 0.5);
+            for (int k = 0; k < N; ++k) BitBlt(mem, k * sw, 0, rv, H, n, k * sw, 0, SRCCOPY);
+            break;
+        }
+        case 9: {   // 모자이크: 작은 칸들이 무작위 순서로 새 이미지로 바뀜
+            const int cols = 16, rows = 10, tw = (W + cols - 1) / cols, th = (H + rows - 1) / rows;
+            for (int r = 0; r < rows; ++r)
+                for (int c = 0; c < cols; ++c) {
+                    const unsigned k = (unsigned)(r * cols + c);
+                    const double thr = (double)(((k * 2654435761u) >> 8) & 0xFFFF) / 65536.0;
+                    if (p >= thr) BitBlt(mem, c * tw, r * th, tw, th, n, c * tw, r * th, SRCCOPY);
+                }
+            break;
+        }
+        }
+        DeleteDC(a);
+        DeleteDC(n);
+        DeleteObject(ha);
+        DeleteObject(hb);
+    }
+
     static LRESULT CALLBACK wndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
     {
-        Ctx* c = reinterpret_cast<Ctx*>(GetWindowLongPtrW(hw, GWLP_USERDATA));
+        View* v = reinterpret_cast<View*>(GetWindowLongPtrW(hw, GWLP_USERDATA));
         switch (msg) {
         case WM_NCCREATE:
             SetWindowLongPtrW(hw, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
             break;
+        case WM_CREATE:
+            if (v) createButtons(hw, v);
+            return 0;
         case WM_ERASEBKGND:
             return 1; // WM_PAINT 에서 전체를 칠한다 (깜빡임 방지)
         case WM_SIZE:
+            if (v) layout(v);
             InvalidateRect(hw, nullptr, FALSE);
+            return 0;
+        case WM_COMMAND:
+            if (v && LOWORD(wp) == ID_FX && HIWORD(wp) == CBN_SELCHANGE) {   // 전환 효과 선택
+                const LRESULT sel = SendMessageW(v->btn[ID_FX - 1], CB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < 11) v->fxSel = (int)sel;
+                SetFocus(hw);
+                return 0;
+            }
+            if (v && LOWORD(wp) == ID_INT && HIWORD(wp) == CBN_SELCHANGE) {   // 시간 간격 선택
+                onInterval(v);
+                SetFocus(hw);
+                return 0;
+            }
+            if (v && HIWORD(wp) == BN_CLICKED) {
+                onButton(v, (int)LOWORD(wp));
+                if (IsWindow(hw)) SetFocus(hw); // 키보드(←/→/Delete/Esc)가 계속 동작하도록
+            }
             return 0;
         case WM_KEYDOWN:
             if (wp == VK_ESCAPE) DestroyWindow(hw);
+            else if (v && wp == VK_LEFT) go(v, -1);
+            else if (v && wp == VK_RIGHT) go(v, +1);
+            else if (v && wp == VK_DELETE) deleteCur(v);
+            return 0;
+        case WM_ADD: { // 새 이미지가 들어옴: 새 창을 만들지 않고 이 창의 이미지를 교체
+            Add* a = reinterpret_cast<Add*>(lp);
+            if (!v || !a) { if (a) { DeleteObject(a->bmp); delete a; } return 0; }
+            int at = findPath(v, a->path);
+            if (at < 0) { v->list.push_back(Entry{a->path, a->title, 0, a->image}); at = (int)v->list.size() - 1; }
+            else { v->list[at].rot = 0; v->list[at].image = a->image; } // 이미 목록에 있으면 그 항목을 보여 줌 (비트맵은 방금 읽은 원본)
+            v->idx = at;
+            startTransition(v, a->bmp, a->w, a->h, 1);
+            updateUi(v);
+            delete a;
+            return 0;
+        }
+        case WM_SHOWPATH: {   // 텔레그램으로 보내는 중인 파일을 이 창에 보여 줌 (lp: new std::wstring, 여기서 해제)
+            std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lp));
+            if (v && path) {
+                const int at = findPath(v, *path);
+                if (at >= 0 && at != v->idx) { if (!showAt(v, at, at > v->idx ? 1 : -1)) showEmpty(v); }
+            }
+            return 0;
+        }
+        case WM_TIMER:
+            if (v && wp == TIMER_ANIM && v->anim) {
+                if (GetTickCount() - v->t0 >= (DWORD)v->ms) finishAnim(v);
+                else { const RECT r = imageRect(hw); InvalidateRect(hw, &r, FALSE); }
+            } else if (v && wp == TIMER_SHOW) {
+                slideTick(v);
+            }
             return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC dc = BeginPaint(hw, &ps);
             RECT rc;
             GetClientRect(hw, &rc);
-            FillRect(dc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
-            if (c && c->bmp && c->w > 0 && c->h > 0 && rc.right > 0 && rc.bottom > 0) {
-                const double sc = std::min((double)rc.right / c->w, (double)rc.bottom / c->h);
-                const int dw = std::max(1, (int)(c->w * sc)), dh = std::max(1, (int)(c->h * sc));
+            RECT bar = {0, 0, rc.right, std::min<LONG>(BAR_H, rc.bottom)};
+            FillRect(dc, &bar, GetSysColorBrush(COLOR_BTNFACE));
+            const int W = rc.right, H = rc.bottom - BAR_H;
+            if (v && W > 0 && H > 0) {
                 HDC mem = CreateCompatibleDC(dc);
-                HGDIOBJ old = SelectObject(mem, c->bmp);
-                SetStretchBltMode(dc, HALFTONE);
-                SetBrushOrgEx(dc, 0, 0, nullptr);
-                StretchBlt(dc, (rc.right - dw) / 2, (rc.bottom - dh) / 2, dw, dh, mem, 0, 0, c->w, c->h, SRCCOPY);
-                SelectObject(mem, old);
+                HBITMAP buf = CreateCompatibleBitmap(dc, W, H);
+                HGDIOBJ ob = SelectObject(mem, buf);
+                RECT all = {0, 0, W, H};
+                FillRect(mem, &all, (HBRUSH)GetStockObject(BLACK_BRUSH));
+                if (v->list.empty() && !v->anim) {   // 빈 목록 안내
+                    HGDIOBJ of = SelectObject(mem, GetStockObject(DEFAULT_GUI_FONT));
+                    SetBkMode(mem, TRANSPARENT);
+                    SetTextColor(mem, RGB(150, 160, 180));
+                    DrawTextW(mem, L"[목록 추가] 버튼으로 파일을 추가하세요", -1, &all, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    SelectObject(mem, of);
+                } else if (v->anim) {
+                    double p = (double)(GetTickCount() - v->t0) / (double)v->ms;
+                    p = std::min(1.0, std::max(0.0, p));
+                    const double e = 1.0 - (1.0 - p) * (1.0 - p); // 빠르게 시작해 부드럽게 멈춤
+                    drawEffect(mem, v, p, e, W, H);
+                } else {
+                    drawFit(mem, v->cur, v->cw, v->ch, 0, W, H);
+                }
+                BitBlt(dc, 0, BAR_H, W, H, mem, 0, 0, SRCCOPY);
+                SelectObject(mem, ob);
+                DeleteObject(buf);
                 DeleteDC(mem);
             }
             EndPaint(hw, &ps);
             return 0;
         }
-        case WM_DESTROY:
+        case WM_DESTROY: {
+            { std::lock_guard<std::mutex> lk(mu_); if (hwnd_ == hw) hwnd_ = nullptr; }
             PostQuitMessage(0);
             return 0;
+        }
         }
         return DefWindowProcW(hw, msg, wp, lp);
     }
 
     static DWORD WINAPI threadProc(LPVOID param)
     {
-        std::unique_ptr<Ctx> c(static_cast<Ctx*>(param));
+        std::unique_ptr<Start> st(static_cast<Start*>(param));
+        std::unique_ptr<Add> first(st->first);   // nullptr: 빈 목록으로 시작하는 독립 창 (메뉴)
+        const bool standalone = st->standalone;
+        const HRESULT coHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // 텔레그램 폴더 탐색기(ShellExecute) 용
+        View view;
+        view.standalone = standalone;
+        view.defDir = st->defDir;
+        if (first) {
+            view.list.push_back(Entry{first->path, first->title, 0, first->image});
+            view.cur = first->bmp; view.cw = first->w; view.ch = first->h;
+        }
+
         const HINSTANCE inst = GetModuleHandleW(nullptr);
         WNDCLASSEXW wc = {};
         wc.cbSize = sizeof(wc);
@@ -9039,26 +9912,50 @@ private:
 
         RECT wa;
         SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
-        const double sc = std::min(1.0, std::min((wa.right - wa.left) * 0.8 / c->w, (wa.bottom - wa.top) * 0.8 / c->h));
-        RECT r = {0, 0, std::max(200, (int)(c->w * sc)), std::max(150, (int)(c->h * sc))};
-        AdjustWindowRectEx(&r, WS_OVERLAPPEDWINDOW, FALSE, 0);
-        const int off = (c->slot % 10) * 32;
-        HWND hw = CreateWindowExW(0, kClass, c->title.c_str(), WS_OVERLAPPEDWINDOW,
-                                  wa.left + 40 + off, wa.top + 40 + off, r.right - r.left, r.bottom - r.top,
-                                  nullptr, nullptr, inst, c.get());
+        const int iw = first ? view.cw : 800, ih = first ? view.ch : 500;   // 빈 창은 기본 크기
+        // 기본 가로폭 = 모니터 가로폭의 80%. 이미지가 그보다 크면 이미지 크기에 맞춤 (모니터를 넘지 않게). 처음 위치는 모니터 중앙
+        RECT fr = {0, 0, 0, 0};
+        AdjustWindowRectEx(&fr, WS_OVERLAPPEDWINDOW, FALSE, 0);   // 테두리/제목줄이 차지하는 크기
+        const int waW = wa.right - wa.left, waH = wa.bottom - wa.top;
+        const int frW = fr.right - fr.left, frH = fr.bottom - fr.top;
+        int cW = std::max((int)(waW * 0.8), first ? iw : 0);
+        cW = std::max(100, std::min(cW, waW - frW));
+        const int maxH = std::max(150, waH - frH - BAR_H);
+        const double sc = std::min(1.0, std::min((double)cW / iw, (double)maxH / ih));
+        const int cH = std::max(150, (int)(ih * sc)) + BAR_H;
+        const int winW = cW + frW, winH = cH + frH;
+        const int off = standalone ? 40 : 0;   // 독립 창은 업로드 창과 정확히 겹치지 않게 조금만 어긋나게
+        HWND hw = CreateWindowExW(0, kClass, first ? first->path.c_str() : L"텔레그램 송수신 & 이미지 뷰어", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                                  wa.left + (waW - winW) / 2 + off, wa.top + (waH - winH) / 2 + off, winW, winH,
+                                  nullptr, nullptr, inst, &view);
+        std::vector<Add*> pend;
+        if (!standalone) {   // 업로드 창만 전역 상태(hwnd_ / starting_ / pending_)를 쓴다
+            std::lock_guard<std::mutex> lk(mu_);
+            if (hw) hwnd_ = hw;
+            starting_ = false;
+            pend.swap(pending_);
+        }
         if (hw) {
+            updateUi(&view);
             ShowWindow(hw, SW_SHOW);
             // 다른 창 뒤에 숨지 않도록 잠깐 최상위로 올렸다가 되돌린다 (계속 최상위로 남기지는 않음)
             SetWindowPos(hw, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             SetWindowPos(hw, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             SetForegroundWindow(hw);
+            for (Add* a : pend) { // 창을 만드는 동안 들어온 이미지
+                if (!PostMessageW(hw, WM_ADD, 0, (LPARAM)a)) { DeleteObject(a->bmp); delete a; }
+            }
             MSG m;
             while (GetMessageW(&m, nullptr, 0, 0) > 0) {
                 TranslateMessage(&m);
                 DispatchMessageW(&m);
             }
+        } else {
+            for (Add* a : pend) { DeleteObject(a->bmp); delete a; }
         }
-        DeleteObject(c->bmp);
+        if (view.cur) DeleteObject(view.cur);
+        if (view.nxt) DeleteObject(view.nxt);
+        if (SUCCEEDED(coHr)) CoUninitialize();
         return 0;
     }
 };
@@ -9111,7 +10008,7 @@ public:
             const size_t n = SysUtil::clearFolderFiles(imageDir_, failed);
             Logger::log("==================== 프로그램 시작 (이전 세션 정리 후) ====================");
             Logger::log("%s v%s, PID %lu", APP_NAME, APP_VERSION_STR, (unsigned long)GetCurrentProcessId());
-            Logger::log("PREVIOUS_SESSION_CLEAR=TRUE: log.txt %s, image 폴더 파일 %zu개 삭제%s",
+            Logger::log("PREVIOUS_SESSION_CLEAR=TRUE: Telegram.Log %s, image 폴더 파일 %zu개 삭제%s",
                         logOk ? "삭제" : "삭제 실패", n,
                         failed ? (", 삭제 실패 " + std::to_string(failed) + "개").c_str() : "");
         }
@@ -9295,13 +10192,19 @@ private:
     void triggerLoop(const TelegramClient& telegram)
     {
         // 시작할 때 이미 큐에 있는 트리거(부팅 직후 WiFiScan 이 먼저 넘긴 첫 판정)도 처리한다. 오래된 것은 아래 나이 검사에서 버려진다.
-        Logger::log("로컬 트리거 수신 시작 (WiFiScan 감시 -> 텔레그램 명령, 허용: /HomeBack /NotHome /detectOn /detectOff, %lld초 안의 것만)", kTriggerMaxAgeSec);
+        Logger::log("로컬 트리거 수신 시작 (WiFiScan 감시 -> 텔레그램 명령, 허용: /HomeBack /NotHome /detectOn /detectOff /down(이미지 뷰어 목록), %lld초 안의 것만)", kTriggerMaxAgeSec);
         while (!stop_.wait(1000)) {
             LocalTrigger::Item it;
             while (!stop_.requested() && LocalTrigger::take(it)) {
                 const long long ageSec = (long long)((GetTickCount64() - it.tick) / 1000);
                 if (ageSec > kTriggerMaxAgeSec) {
                     Logger::log("로컬 트리거 무시: 오래된 요청 (%lld초 전) %s", ageSec, it.cmd.c_str());
+                    continue;
+                }
+                if (it.cmd == "/down" && !it.files.empty()) {   // 이미지 뷰어 [텔레그램으로 보내기]
+                    Logger::log("로컬 트리거 수신: /down (이미지 뷰어 목록 %zu개)", it.files.size());
+                    CsLock lk(cmdCs_);
+                    handleDownList(it.files, SysUtil::hostName(), telegram, it.notify);
                     continue;
                 }
                 if (it.cmd != "/homeback" && it.cmd != "/nothome" && it.cmd != "/detecton" && it.cmd != "/detectoff") {
@@ -9403,6 +10306,7 @@ private:
             {"log", "📜 실행 로그 전송 (/log [n|all])"},
             {"cmd", "💻 PC 에서 명령 실행 (/CMD 명령)"},
             {"download", "📥 PC 에서 파일을 골라 전송"},
+            {"down", "📂 PC 폴더의 파일 전송 (/down 사진|동영상|음악|문서|폴더경로)"},
             {"github", "🌐 PC 브라우저로 GitHub ReadMe 열기"},
             {"homeback", "🏠 귀가 인사 + 침입 탐지 끄기"},
             {"nothome", "🚪 외출 인사 + 침입 탐지 켜기"},
@@ -9702,6 +10606,8 @@ private:
             handleGithub(host, telegram);
         } else if (cmd == "/download") {
             handleDownload(host, telegram);
+        } else if (cmd == "/down") {
+            handleDown(arg, host, telegram);
         } else if (cmd == "/cmd") {
             handleCmdCmd(arg, host, telegram);
         } else if (cmd == "/ini") {
@@ -9788,6 +10694,7 @@ private:
                     "/NotHome - 외출 인사 전송 후 침입 탐지 켜기\n"
                     "/github - PC 기본 브라우저로 GitHub ReadMe 페이지 열기\n"
                     "/download - PC 에 파일 선택 창을 띄워 고른 파일(여러 개)을 전송\n"
+                    "/down 사진|동영상|음악|문서|폴더경로 - 해당 폴더의 파일을 모두 전송 (하위 폴더 제외)\n"
                     "(파일 첨부) - 봇 채팅에 파일을 보내면 PC 의 upload 폴더에 저장 (20MB 까지), 이미지는 창으로 표시, mp4/mp3 는 기본 플레이어로 실행\n"
                     "/version - 버전 표시\n"
                     "/restart - 프로그램 재시작 (Yes/No 확인)\n/stop - 프로그램 종료 (Yes/No 확인)\n/help 또는 // - 도움말";
@@ -9795,15 +10702,15 @@ private:
         }
     }
 
-    // /log [n] : log.txt 의 마지막 n 줄(기본 50, 1~2000)을 보낸다. 텔레그램 메시지 길이(4096자)를 넘으면
-    // 텍스트 문서(.txt)로 보낸다. "/log all" 은 log.txt 전체를 문서로 보낸다. (명령 스레드에서 호출)
+    // /log [n] : Telegram.Log 의 마지막 n 줄(기본 50, 1~2000)을 보낸다. 텔레그램 메시지 길이(4096자)를 넘으면
+    // 텍스트 문서(.txt)로 보낸다. "/log all" 은 Telegram.Log 전체를 문서로 보낸다. (명령 스레드에서 호출)
     void handleLogCmd(const std::string& arg, const std::string& host, const TelegramClient& telegram)
     {
         std::string resp;
         const std::string pre = "[" + host + "] ";
         const std::string usage = "\n사용법: /log (최근 " + std::to_string(kDefaultLogLines) +
                                   "줄) / /log n (최근 n줄, 1~" + std::to_string(kMaxLogLines) +
-                                  ") / /log all (log.txt 전체, 문서로)";
+                                  ") / /log all (Telegram.Log 전체, 문서로)";
         const bool all = StrUtil::upper(arg) == "ALL";
 
         int n = kDefaultLogLines;
@@ -9819,13 +10726,13 @@ private:
 
         const std::string text = all ? Logger::tailLines(kMaxLogLines) : Logger::tailLines(n);
         if (text.empty()) {
-            telegram.sendMessage(pre + "log.txt 가 없거나 비어 있습니다." + usage, resp);
+            telegram.sendMessage(pre + "Telegram.Log 가 없거나 비어 있습니다." + usage, resp);
             return;
         }
 
         // 메시지로 보내기엔 너무 길면(텔레그램 한도 4096자, 캡션/안내문 여유분 확보) 문서로 전환
         if (!all && text.size() <= 3500) {
-            if (!telegram.sendMessage(pre + "log.txt 최근 " + std::to_string(n) + "줄\n\n" + text, resp))
+            if (!telegram.sendMessage(pre + "Telegram.Log 최근 " + std::to_string(n) + "줄\n\n" + text, resp))
                 Logger::log("/log 전송 실패: %s", resp.substr(0, 150).c_str());
             return;
         }
@@ -9835,7 +10742,7 @@ private:
         struct tm tmv;
         localtime_s(&tmv, &t);
         strftime(fname, sizeof(fname), "log_%Y%m%d_%H%M%S.txt", &tmv);
-        const std::string caption = pre + (all ? "log.txt 전체" : ("log.txt 최근 " + std::to_string(n) + "줄")) +
+        const std::string caption = pre + (all ? "Telegram.Log 전체" : ("Telegram.Log 최근 " + std::to_string(n) + "줄")) +
                                     " (" + std::to_string(text.size() / 1024) + " KB)";
         if (!telegram.sendTextDocument(caption, fname, text, resp)) {
             telegram.sendMessage(pre + "로그 전송 실패: " + resp.substr(0, 200), resp);
@@ -10033,6 +10940,7 @@ private:
         const std::string pre = "[" + SysUtil::hostName() + "] ";
         const std::string label = ev.fileName.empty() ? ev.fileKind : ev.fileName;
         Logger::log("파일 수신: %s (%lld바이트)", label.c_str(), ev.fileSize);
+        ScanEvents::Uploading("텔레그램으로부터 업로드 중입니다");   // 파일 1개마다 화면 중앙에 큰 글자로 1초
 
         if (ev.fileSize > (long long)kUploadMaxBytes) {
             telegram.sendMessage(pre + "파일이 너무 커서 받을 수 없습니다: " + label + " (" +
@@ -10092,10 +11000,11 @@ private:
             return;
         }
         Logger::log("파일 저장: %s (%zu바이트)", saved.c_str(), data.size());
-        if (cfg_.uploadShowImage && isImage(ev, outPath)) { // 이미지면 PC 화면에 장당 별개의 창으로 표시
+        if (cfg_.uploadShowImage) { // 이미지면 PC 화면의 이미지 창에 표시 (창이 이미 있으면 이미지만 교체). 이미지가 아니면(또는 표시할 수 없는 형식이면) 파일 정보 화면
             const size_t sl = outPath.find_last_of(L"\\/");
             const std::string title = StrUtil::toUtf8((sl == std::wstring::npos ? outPath : outPath.substr(sl + 1)).c_str());
-            if (!ImageWindow::show(data, title)) Logger::log("이미지 창 표시 실패(지원하지 않는 형식): %s", saved.c_str());
+            if (!(isImage(ev, outPath) && ImageWindow::show(data, title, outPath)) && !ImageWindow::showInfo(title, outPath))
+                Logger::log("이미지 창 표시 실패: %s", saved.c_str());
         }
         if (cfg_.uploadPlayMedia && (hasExt(outPath, L"mp4") || hasExt(outPath, L"mp3"))) { // .mp4/.mp3 만 PC 기본 플레이어로 실행 (다른 확장자는 실행하지 않음)
             ComScope com; // ShellExecute 는 COM 초기화된 스레드에서 호출하도록 권장
@@ -10260,6 +11169,173 @@ private:
         std::string msg = pre + "/download 완료: 성공 " + std::to_string(okCnt) + "개, 실패 " +
                           std::to_string(failCnt) + "개 (선택 " + std::to_string(files.size()) + "개)";
         if (!failList.empty()) msg += failList;
+        telegram.sendMessage(msg, resp);
+    }
+
+    // /down 옵션 : 사진|동영상|음악|문서 (한글/영문, 대소문자 무시) 또는 폴더 전체 경로.
+    // 사진/동영상/음악은 해당 사용자 폴더에서 그 종류의 확장자 파일만, 문서와 폴더 경로는 모든 파일을 보낸다. 하위 폴더는 제외.
+    static std::wstring lowerW(std::wstring w) { for (auto& c : w) c = (wchar_t)towlower(c); return w; }
+
+    static bool extIn(const std::wstring& name, const wchar_t* const* list)
+    {
+        const size_t dot = name.find_last_of(L'.');
+        if (dot == std::wstring::npos) return false;
+        const std::wstring ext = lowerW(name.substr(dot + 1));
+        for (; *list; ++list) if (ext == *list) return true;
+        return false;
+    }
+
+    // /down [사진|동영상|음악|문서|폴더_full_path] : 폴더의 파일(하위 폴더 제외)을 하나씩 문서로 전송한다. (명령 스레드에서 호출)
+    void handleDown(const std::string& argIn, const std::string& host, const TelegramClient& telegram)
+    {
+        static const wchar_t* const kImg[] = {L"jpg", L"jpeg", L"png", L"bmp", L"gif", L"tif", L"tiff", L"webp", L"heic", L"heif", nullptr};
+        static const wchar_t* const kVid[] = {L"mp4", L"mkv", L"avi", L"mov", L"wmv", L"flv", L"webm", L"mpg", L"mpeg", L"m4v", L"3gp", L"ts", nullptr};
+        static const wchar_t* const kMus[] = {L"mp3", L"wav", L"flac", L"m4a", L"aac", L"ogg", L"wma", L"opus", L"mid", L"midi", nullptr};
+
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const std::string usage = "\n사용법: /down 사진 | 동영상 | 음악 | 문서 | 폴더_full_path\n"
+                                  "(사진=image/photo, 동영상=video, 음악=music, 문서=document 도 가능. 하위 폴더는 제외)";
+        std::string arg = StrUtil::trim(argIn);
+        if (arg.size() >= 2 && ((arg.front() == '"' && arg.back() == '"') || (arg.front() == '\'' && arg.back() == '\'')))
+            arg = StrUtil::trim(arg.substr(1, arg.size() - 2));
+        if (arg.empty()) {
+            telegram.sendMessage(pre + "옵션이 없습니다." + usage, resp);
+            return;
+        }
+
+        const std::wstring warg = StrUtil::toWide(arg);
+        const std::wstring key = lowerW(warg);
+        int csidl = -1;
+        const wchar_t* const* filter = nullptr; // nullptr 이면 모든 파일
+        std::string label;
+        auto is = [&](std::initializer_list<const wchar_t*> names) {
+            for (const wchar_t* n : names) if (key == n) return true;
+            return false;
+        };
+        if (is({L"사진", L"이미지", L"photo", L"photos", L"image", L"images", L"picture", L"pictures"})) {
+            csidl = CSIDL_MYPICTURES; filter = kImg; label = "사진";
+        } else if (is({L"동영상", L"비디오", L"video", L"videos", L"movie", L"movies"})) {
+            csidl = CSIDL_MYVIDEO; filter = kVid; label = "동영상";
+        } else if (is({L"음악", L"music", L"audio", L"song", L"songs"})) {
+            csidl = CSIDL_MYMUSIC; filter = kMus; label = "음악";
+        } else if (is({L"문서", L"document", L"documents", L"doc", L"docs"})) {
+            csidl = CSIDL_PERSONAL; filter = nullptr; label = "문서";
+        }
+
+        std::wstring dir;
+        if (csidl >= 0) {
+            wchar_t buf[MAX_PATH] = {};
+            if (FAILED(SHGetFolderPathW(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, buf)) || !buf[0]) {
+                telegram.sendMessage(pre + "'" + label + "' 폴더 위치를 알 수 없습니다.", resp);
+                Logger::log("/down: %s 폴더 조회 실패", label.c_str());
+                return;
+            }
+            dir = buf;
+        } else {
+            dir = warg;
+            label = "폴더";
+        }
+        while (dir.size() > 3 && (dir.back() == L'\\' || dir.back() == L'/')) dir.pop_back(); // "C:\" 는 유지
+        const DWORD attr = GetFileAttributesW(dir.c_str());
+        if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            telegram.sendMessage(pre + "폴더를 찾을 수 없습니다: " + StrUtil::toUtf8(dir.c_str()) + usage, resp);
+            Logger::log("/down: 폴더 없음 %s", StrUtil::toUtf8(dir.c_str()).c_str());
+            return;
+        }
+
+        // 폴더 안의 파일 목록 (하위 폴더/숨김 시스템 항목 제외, 이름순)
+        std::vector<std::wstring> names;
+        const std::wstring base = (dir.back() == L'\\') ? dir : dir + L"\\";
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((base + L"*").c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_SYSTEM)) continue;
+                if (filter && !extIn(fd.cFileName, filter)) continue;
+                names.push_back(fd.cFileName);
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        std::sort(names.begin(), names.end(), [](const std::wstring& a, const std::wstring& b) { return lowerW(a) < lowerW(b); });
+
+        const std::string dirU = StrUtil::toUtf8(dir.c_str());
+        Logger::log("/down: %s '%s' 파일 %zu개", label.c_str(), dirU.c_str(), names.size());
+        if (names.empty()) {
+            telegram.sendMessage(pre + "보낼 파일이 없습니다: " + dirU, resp);
+            return;
+        }
+        const size_t total = names.size();
+        const size_t todo = total < kDownMaxFiles ? total : (size_t)kDownMaxFiles;
+        telegram.sendMessage(pre + "/down " + label + ": " + dirU + "\n파일 " + std::to_string(total) + "개 중 " +
+                             std::to_string(todo) + "개를 전송합니다.", resp);
+
+        int okCnt = 0, failCnt = 0;
+        std::string failList;
+        for (size_t i = 0; i < todo; ++i) {
+            if (stop_.requested()) break;
+            const std::string name = StrUtil::toUtf8(names[i].c_str());
+            std::vector<BYTE> data;
+            std::string e;
+            if (readWholeFile(base + names[i], data, e)) {
+                if (telegram.sendFileDocument(pre + name, name, data, resp)) {
+                    ++okCnt;
+                    Logger::log("/down 전송: %s (%zu바이트)", name.c_str(), data.size());
+                    continue;
+                }
+                e = "전송 실패: " + resp.substr(0, 100);
+            }
+            ++failCnt;
+            if (failCnt <= 20) failList += "\n- " + name + " : " + e;
+            Logger::log("/down 실패: %s : %s", name.c_str(), e.c_str());
+        }
+        std::string msg = pre + "/down 완료: 성공 " + std::to_string(okCnt) + "개, 실패 " + std::to_string(failCnt) + "개";
+        if (total > todo) msg += ", 건너뜀 " + std::to_string(total - todo) + "개 (한 번에 최대 " + std::to_string(kDownMaxFiles) + "개)";
+        if (!failList.empty()) msg += failList;
+        if (failCnt > 20) msg += "\n... 외 " + std::to_string(failCnt - 20) + "개";
+        telegram.sendMessage(msg, resp);
+    }
+
+    // 이미지 뷰어 [텔레그램으로 보내기]: 목록의 파일(전체 경로)을 /down 과 같은 방식(문서로 하나씩, 49MB 한도, 최대 kDownMaxFiles 개)으로 보낸다.
+    void handleDownList(const std::vector<std::wstring>& files, const std::string& host, const TelegramClient& telegram, HWND notify)
+    {
+        std::string resp;
+        const std::string pre = "[" + host + "] ";
+        const size_t total = files.size();
+        const size_t todo = total < kDownMaxFiles ? total : (size_t)kDownMaxFiles;
+        telegram.sendMessage(pre + "/down 이미지 뷰어 목록: 파일 " + std::to_string(total) + "개 중 " + std::to_string(todo) + "개를 전송합니다.", resp);
+        int okCnt = 0, failCnt = 0;
+        std::string failList;
+        for (size_t i = 0; i < todo; ++i) {
+            if (stop_.requested()) break;
+            const std::wstring& w = files[i];
+            const size_t pos = w.find_last_of(L"\\/");
+            const std::string name = StrUtil::toUtf8((pos == std::wstring::npos ? w : w.substr(pos + 1)).c_str());
+            // 파일마다: 큰 글자 팝업(1초) + 이미지 뷰어 창에 그 파일을 보여 줌
+            ScanEvents::Uploading("텔레그램으로 보내는 중입니다 (" + std::to_string(i + 1) + "/" + std::to_string(todo) + ")\n" +
+                                  (name.size() > 80 ? name.substr(0, 80) + "..." : name));
+            if (notify && IsWindow(notify)) {
+                std::wstring* pw = new std::wstring(w);
+                if (!PostMessageW(notify, WM_APP + 42, 0, (LPARAM)pw)) delete pw;   // ImageWindow::WM_SHOWPATH
+            }
+            std::vector<BYTE> data;
+            std::string e;
+            if (readWholeFile(w, data, e)) {
+                if (telegram.sendFileDocument(pre + name, name, data, resp)) {
+                    ++okCnt;
+                    Logger::log("/down(뷰어 목록) 전송: %s (%zu바이트)", name.c_str(), data.size());
+                    continue;
+                }
+                e = "전송 실패: " + resp.substr(0, 100);
+            }
+            ++failCnt;
+            if (failCnt <= 20) failList += "\n- " + name + " : " + e;
+            Logger::log("/down(뷰어 목록) 실패: %s : %s", name.c_str(), e.c_str());
+        }
+        std::string msg = pre + "/down 완료: 성공 " + std::to_string(okCnt) + "개, 실패 " + std::to_string(failCnt) + "개";
+        if (total > todo) msg += ", 건너뜀 " + std::to_string(total - todo) + "개 (한 번에 최대 " + std::to_string(kDownMaxFiles) + "개)";
+        if (!failList.empty()) msg += failList;
+        if (failCnt > 20) msg += "\n... 외 " + std::to_string(failCnt - 20) + "개";
         telegram.sendMessage(msg, resp);
     }
 
@@ -10602,6 +11678,7 @@ private:
     static constexpr size_t kUploadMaxBytes = 20u * 1024 * 1024;   // 폰 -> PC 수신 한도 (봇 API getFile 20MB)
     static constexpr UINT kDownloadTimeoutMs = 300000;            // /download 파일 선택 창 대기 시간(5분)
     static constexpr size_t kDownloadMaxBytes = 49000000;         // /download 파일 1개 한도 (sendDocument 50MB)
+    static constexpr size_t kDownMaxFiles = 200;                  // /down 한 번에 보내는 최대 파일 수 (넘으면 나머지는 건너뜀)
     static constexpr size_t kPickBufChars = 262144;               // 파일 선택 창 결과 버퍼(문자 수)
     static constexpr DWORD kCmdTimeoutMs = 60000;                 // /CMD 최대 실행 시간
     static constexpr size_t kCmdMaxOut = 20u * 1024u * 1024u;     // /CMD 출력 최대 크기 (sendDocument 50MB 한도에 여유)
@@ -10650,6 +11727,24 @@ void PostTrigger(const std::string& cmd)
     LocalTrigger::post(cmd);
 }
 
+// 메뉴 'F8) 텔레그램 송수신 & 이미지 뷰어': 빈 목록의 새 이미지 창을 연다 (기존 창은 유지). 기본 폴더는 업로드 폴더(ini [Telegram] UPLOAD_DIR, 기본 exe 폴더\\upload).
+// Telegram 모듈(토큰)이 꺼져 있어도 동작한다. 실패하면 false + msg(UTF-8).
+bool BrowseUploads(std::string& msg)
+{
+    char buf[1024] = {0};
+    GetPrivateProfileStringA("Telegram", "UPLOAD_DIR", "", buf, sizeof(buf), iniFilePath().c_str());
+    std::string d = buf;
+    for (const char* mark : {" ;", " #", "\t;", "\t#"}) { const size_t k = d.find(mark); if (k != std::string::npos) d.resize(k); }  // 값 뒤 주석 제거
+    d = StrUtil::trim(d);
+    while (!d.empty() && (d.back() == '\\' || d.back() == '/')) d.pop_back();
+    if (d.empty()) d = SysUtil::exeDir() + "\\upload";
+    else if (!(d.size() >= 2 && (d[1] == ':' || (d[0] == '\\' && d[1] == '\\')))) d = SysUtil::exeDir() + "\\" + d;
+    const bool ok = ImageWindow::openEmpty(StrUtil::toWide(d));   // 새 창, 빈 목록 (기존 이미지 창은 그대로)
+    if (ok) Logger::log("텔레그램 송수신 & 이미지 뷰어 창 열기 (빈 목록, 기본 폴더 %s)", d.c_str());
+    else { msg = "창을 만들 수 없습니다."; Logger::log("텔레그램 송수신 & 이미지 뷰어 창 열기 실패"); }
+    return ok;
+}
+
 static DWORD WINAPI moduleThread(LPVOID)
 {
     try {
@@ -10662,7 +11757,7 @@ static DWORD WINAPI moduleThread(LPVOID)
     return 0;
 }
 
-// 처리되지 않은 SEH 예외(접근 위반 등)가 나면 원인을 log.txt 에 남기고 종료한다.
+// 처리되지 않은 SEH 예외(접근 위반 등)가 나면 원인을 Telegram.Log 에 남기고 종료한다.
 static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep)
 {
     const EXCEPTION_RECORD* r = ep ? ep->ExceptionRecord : nullptr;
@@ -10708,21 +11803,21 @@ static void ensureIniSection(const std::string& ini)
     "; 캡처할 모니터 (MONITOR1, MONITOR2, ... 미기재 시 TRUE)\r\n"
     "MONITOR1=TRUE\r\n"
     "MONITOR2=TRUE\r\n"
-    "; 웹캠 캡처 (기본 FALSE) / 사용할 카메라 번호 (0부터, 목록은 log.txt 에 출력)\r\n"
+    "; 웹캠 캡처 (기본 FALSE) / 사용할 카메라 번호 (0부터, 목록은 Telegram.Log 에 출력)\r\n"
     "CAMERA=FALSE\r\n"
     "CAMERA_INDEX=0\r\n"
     "; 캡처/전송 반복 횟수 (0 = 무제한)\r\n"
     "MAX_LOOP=0\r\n"
     "; TRUE 이면 이미지를 텔레그램으로 보내지 않고 image 폴더에 저장만 합니다 (/shot 은 전송)\r\n"
     "SAVE_ONLY=FALSE\r\n"
-    "; 텔레그램 봇 명령 수신 (/shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL /ini /log /CMD /download /github /HomeBack /NotHome /version /restart /stop /help)\r\n"
+    "; 텔레그램 봇 명령 수신 (/shot /screen /photo /pause /resume /status /detectOn /detectOff /INTERVAL /ini /log /CMD /download /down /github /HomeBack /NotHome /version /restart /stop /help)\r\n"
     "TELEGRAM_COMMANDS=TRUE\r\n"
     "; 명령을 내릴 수 있는 텔레그램 사용자 ID (쉼표로 구분). 비우면 개인 chat 만 허용, TELEGRAM_CHAT_ID 가 그룹이면 반드시 설정\r\n"
     "TELEGRAM_ALLOWED_USER_IDS=\r\n"
     "; image 폴더 자동 정리: N일 지난 이미지 삭제 / 최대 파일 수 (0 = 하지 않음)\r\n"
     "KEEP_DAYS=7\r\n"
     "KEEP_MAX_FILES=5000\r\n"
-    "; TRUE 이면 시작할 때 log.txt 와 image 폴더의 모든 파일을 삭제\r\n"
+    "; TRUE 이면 시작할 때 Telegram.Log 와 image 폴더의 모든 파일을 삭제\r\n"
     "PREVIOUS_SESSION_CLEAR=FALSE\r\n"
     "; 폰 -> PC 파일 수신 저장 폴더 (상대 경로는 exe 폴더 기준) / 받은 이미지를 창으로 표시 / 받은 mp4, mp3 를 기본 플레이어로 실행\r\n"
     "UPLOAD_DIR=upload\r\n"
@@ -12016,7 +13111,7 @@ private:
         TID_SCROLL_TIME = 3,        // 시분초 스크롤
         TID_SCROLL_DATE = 4,        // 년월일 스크롤
         TID_CLOSE       = 5,        // 알람 플레이어 자동 닫기 감시 (1초 간격, 필요할 때만)
-        TID_CLICK       = 6,        // 한 번 클릭 확정 대기 (더블클릭이 아니면 시계 모드 변경)
+        TID_CLICK       = 6,        // 한 번 클릭 확정 대기 (더블클릭이 아니면 팝업 메뉴 표시)
         TID_ANIM        = 7,        // 아날로그 애니메이션 프레임 (켰을 때만)
 
         CMD_BACKCOLOR   = 101,      // 메뉴 명령
@@ -12029,13 +13124,15 @@ private:
         CMD_ALLDESK     = 108,
         CMD_COMPANION   = 116,      // 앱 동작 설정 > 동반 실행 앱 등록 (대화상자: 최대 5개 -> ini companion_app1~5)
         CMD_AUTORUN     = 115,      // 앱 동작 설정 > 자동 실행 on/off (Windows 시작 시 자동 실행: 레지스트리 Run)
-        CMD_HELP        = 730,      // 730 About, 731 ReadMe.MD, 732 홈페이지, 733 최신 버전 다운로드, 734 음력 API 키값 등록
+        CMD_HELP        = 730,      // 730 About, 731 ReadMe.MD, 732 홈페이지, 733 최신 버전 다운로드, 734 음력 API 키값 등록, 735~738 로그 보기(Notepad)
         CMD_SCAN        = 740,      // WiFiScan 대화상자
         CMD_MYPHONE     = 741,      // 앱 동작 설정 > 내 폰 등록 (WiFiScan 대화상자 + 안내 문구)
         CMD_IPREG       = 742,      // IP cam > IP cam 등록
         CMD_IPVIEW      = 743,      // IP cam > 카메라 영상 (WebCam1 / WebCam2 / IP Cam)
         CMD_PHONE       = 744,      // IP cam / 폰 연결 > 폰 탐색기
         CMD_RDPSRV      = 745,      // IP cam / 폰 연결 > 다른 PC(서버)
+        CMD_GODIGITAL   = 751,      // 최상위 메뉴 F3) 디지탈 시계 를 클릭: 디지탈 시계로 변경
+        CMD_GOANALOG    = 752,      // 최상위 메뉴 F4) 아나로그 시계 를 클릭: 아날로그 시계로 변경
         CMD_RDPCLI      = 746,      // IP cam / 폰 연결 > 다른 PC(클라이언트)
         CMD_TFMT        = 700,      // 시분초 표시 형식 700~709
         CMD_DFMT        = 720,      // 년월일 표시 형식 720~729
@@ -12059,6 +13156,7 @@ private:
         CMD_CITY        = 300,      // 300 + 도시 인덱스
         CMD_MOVE        = 400,      // 400 + 이동 간격 선택지 인덱스
         CMD_PROG        = 610,      // 610 사용, 611 시각, 612 파일, 613 메모, 614 지우기, 615 테스트
+        CMD_UPLOADS     = 750,      // IP cam / 폰 연결 > 텔레그램 송수신 & 이미지 뷰어 (텔레그램으로 받은 파일 이미지 창)
         CMD_DETECT      = 747,      // 작동시간 및 알람 설정 > 침입 탐지 시간
         CMD_CHIME       = 748,      // 작동시간 및 알람 설정 > 시보 설정
         CMD_SCANSET     = 749,      // WiFiScan > HomeBack / NotHome 탐지 시간 및 프로그램 설정
@@ -12160,12 +13258,11 @@ private:
             if (!owner_ && w == VK_F1) { ShowPopupMenu(); return 0; }
             if (!owner_ && w >= VK_F2 && w < VK_F2 + TOP_MENU_COUNT) {
                 const int k = (int)(w - VK_F2);
-                if ((k == TOP_DIGITAL && cfg_.clockMode == 2) || (k == TOP_ANALOG && cfg_.clockMode != 2)) return 0;   // 비활성 메뉴는 열지 않음
                 ShowPopupMenu(menuTop_[k]);
                 return 0;
             }
             break;
-        case WM_LBUTTONDOWN:                                      // 한 번 클릭: 시계 모드 순환 [타이틀 & 디지털] -> [디지털] -> [아날로그] (더블클릭이 아님이 확인되면)
+        case WM_LBUTTONDOWN:                                      // 한 번 클릭: 팝업 메뉴 표시 (더블클릭이 아님이 확인되면)
             pressed_ = true;
             downPt_.x = (short)LOWORD(l);
             downPt_.y = (short)HIWORD(l);
@@ -12191,9 +13288,9 @@ private:
                 SetTimer(hwnd_, TID_CLICK, GetDoubleClickTime(), NULL);   // 시간 안에 더블클릭이 오면 취소
             }
             return 0;
-        case WM_LBUTTONDBLCLK:                                    // 더블클릭: 팝업 메뉴 표시 (다른 곳을 한 번 더 클릭하면 닫힘)
+        case WM_LBUTTONDBLCLK:                                    // 더블클릭: 시계 모드 순환 [타이틀 & 디지털] -> [디지털] -> [아날로그]
             KillTimer(hwnd_, TID_CLICK);
-            ShowPopupMenu();
+            CycleClockMode();
             return 0;
         case WM_NCLBUTTONDBLCLK:
             if (owner_ && w == HTCAPTION) { owner_->ArrangeCities(); return 0; }   // 도시 창 타이틀바 더블클릭: 본 창 밑으로 정렬
@@ -12219,8 +13316,28 @@ private:
     }
 
     // ---- 핸들러
+    // 마우스가 시계 창(디지탈/아나로그, 도시 창 포함) 위에서 잠시 멈추면 도움말 풍선을 띄움 (창이 닫힐 때 함께 없어짐)
+    void CreateHoverTip() {
+        INITCOMMONCONTROLSEX ic = { sizeof(ic), ICC_WIN95_CLASSES };
+        InitCommonControlsEx(&ic);
+        HWND tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+                                   CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                   hwnd_, NULL, GetModuleHandleW(NULL), NULL);
+        if (!tip) return;
+        TOOLINFOW ti = {};
+        ti.cbSize   = TTTOOLINFOW_V1_SIZE;
+        ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;      // 창 전체가 대상, 마우스 메시지는 자동으로 전달됨
+        ti.hwnd     = hwnd_;
+        ti.uId      = (UINT_PTR)hwnd_;
+        ti.lpszText = (LPWSTR)L"마우스를 클릭 또는 더블 클릭하세요";
+        SendMessageW(tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+        SendMessageW(tip, TTM_SETDELAYTIME, TTDT_INITIAL, 1000);    // 1초 멈추면 표시
+        SendMessageW(tip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 5000);    // 5초 뒤 사라짐
+    }
+
     void OnCreate() {
         if (!owner_) ScanEvents::SetWindow(hwnd_);      // 작업 스레드의 상태/팝업 알림을 받음
+        CreateHoverTip();
         ApplyStyle();
         RestartTimers();
         ScheduleSecondTick();
@@ -12257,7 +13374,7 @@ private:
             return;
         case TID_CLICK:
             KillTimer(hwnd_, TID_CLICK);
-            CycleClockMode();
+            ShowPopupMenu();
             return;
         case TID_SCROLL_TIME:
             if (cfg_.clockMode == 2) return;    // 아날로그: 글자 스크롤 없음 -> 다시 그리지 않음
@@ -12278,7 +13395,8 @@ private:
     void OnScanEvents() {
         for (const ScanEvents::Item& it : ScanEvents::Take()) {
             if (it.kind == 4) { Log::Put("텔레그램 명령으로 앱 종료"); RequestExit(); return; }   // /stop, /restart (텔레그램에서 이미 Yes 확인함)
-            if (it.kind == 1) MemoWindow::Show(hi_, it.text.c_str(), 5);
+            if (it.kind == 5) MemoWindow::Show(hi_, it.text.c_str(), 1, 48);   // 텔레그램 업로드 안내: 큰 글자, 1초
+            else if (it.kind == 1) MemoWindow::Show(hi_, it.text.c_str(), 5);
             else if (it.kind >= 2) RunHomeProg(it.kind - 2);
             else statusText_ = it.text;
         }
@@ -12625,6 +13743,7 @@ private:
         AddMenu(ipc, 0, CMD_IPREG,  "IP cam 등록(&R)...");
         AddMenu(ipc, 0, CMD_IPVIEW, "카메라 영상(&V)");
         AddMenu(ipc, 0, CMD_PHONE,  "폰 탐색기(&E)...");
+        AddMenu(ipc, 0, CMD_UPLOADS, "텔레그램 송수신 && 이미지 뷰어(&F)");         // 4번째: 텔레그램으로 받은 파일(upload 폴더)을 이미지 창으로 탐색
         AppendMenuA(ipc, MF_SEPARATOR, 0, NULL);
         AddMenu(ipc, 0, CMD_RDPSRV, "다른 PC(서버)(&S)...");           // 이 PC 를 원격 제어하게 함 (rdp_server)
         AddMenu(ipc, 0, CMD_RDPCLI, "다른 PC(클라이언트)(&C)...");     // 다른 PC 를 원격 제어 (rdp_client)
@@ -12636,6 +13755,12 @@ private:
         AddMenu(help, 0, CMD_HELP + 2, "홈페이지(&H)");
         AddMenu(help, 0, CMD_HELP + 3, "최신 버전 다운로드(&D)");
         AddMenu(help, 0, CMD_HELP + 4, "음력 API 키값 등록(&K)");
+        HMENU logm = CreatePopupMenu();         // 로그 보기: 각 로그 파일(.\log)을 Notepad 로 연다
+        AddMenu(logm, 0, CMD_HELP + 5, "gsHomeManager.log (시계 / WiFiScan / IP cam)(&1)");
+        AddMenu(logm, 0, CMD_HELP + 6, "Telegram.Log (Telegram 모듈)(&2)");
+        AddMenu(logm, 0, CMD_HELP + 7, "WiFiScan_watch.log (WiFiScan 감시)(&3)");
+        AddMenu(logm, 0, CMD_HELP + 8, "ipcam.log (카메라 영상)(&4)");
+        AddMenu(help, MF_POPUP, (UINT_PTR)logm, "로그 보기(&L)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)help, "F9) Help(&H)");
         for (int i = 0; i < TOP_MENU_COUNT; i++) menuTop_[i] = GetSubMenu(bar, i);     // F2 ~ F9 단축키용
         return bar;
@@ -13542,9 +14667,9 @@ private:
         if (menuATheme_) CheckMenuItem(menuATheme_, CMD_ANEON, MF_BYCOMMAND | (cfg_.analogNeon ? MF_CHECKED : MF_UNCHECKED));
         if (menuATheme_) CheckMenuRadioItem(menuATheme_, CMD_ATHEME, CMD_ATHEME + ATHEME_COUNT - 1,
                                             CMD_ATHEME + cfg_.analogTheme, MF_BYCOMMAND);
-        if (menu_) {                            // 아날로그 모드: 디지탈 시계 비활성 / 디지탈 모드: 아나로그 시계 비활성
-            EnableMenuItem(menu_, TOP_DIGITAL, MF_BYPOSITION | (cfg_.clockMode == 2 ? MF_GRAYED : MF_ENABLED));
-            EnableMenuItem(menu_, TOP_ANALOG,  MF_BYPOSITION | (cfg_.clockMode == 2 ? MF_ENABLED : MF_GRAYED));
+        if (menu_) {                            // F3) 디지탈 시계 / F4) 아나로그 시계: 현재 모양에 체크 (둘 다 항상 활성)
+            CheckMenuItem(menu_, TOP_DIGITAL, MF_BYPOSITION | (cfg_.clockMode != 2 ? MF_CHECKED : MF_UNCHECKED));
+            CheckMenuItem(menu_, TOP_ANALOG,  MF_BYPOSITION | (cfg_.clockMode == 2 ? MF_CHECKED : MF_UNCHECKED));
         }
         CheckMenuItem(menuSet_, CMD_TOPMOST, MF_BYCOMMAND | (cfg_.topmost ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menuSet_, CMD_ALLMON,  MF_BYCOMMAND | (cfg_.allMon  ? MF_CHECKED : MF_UNCHECKED));
@@ -13570,6 +14695,7 @@ private:
         case CMD_IPREG:     n = "IP cam > IP cam 등록"; break;
         case CMD_IPVIEW:    n = "IP cam / 폰 연결 > 카메라 영상"; break;
         case CMD_PHONE:     n = "IP cam / 폰 연결 > 폰 탐색기"; break;
+        case CMD_UPLOADS:   n = "IP cam / 폰 연결 > 텔레그램 송수신 & 이미지 뷰어"; break;
         case CMD_RDPSRV:    n = "IP cam / 폰 연결 > 다른 PC(서버)"; break;
         case CMD_RDPCLI:    n = "IP cam / 폰 연결 > 다른 PC(클라이언트)"; break;
         case CMD_SHOWDATE:  n = "년월일 보이기/숨기기 토글"; break;
@@ -13630,6 +14756,8 @@ private:
         int ai = 0, aact = 0;
         LogCommand(id);
         if (id == CMD_EXIT)            ConfirmExit();
+        else if (id == CMD_GODIGITAL)  { if (cfg_.clockMode == 2) CycleClockMode(lastDigital_); }
+        else if (id == CMD_GOANALOG)   { if (cfg_.clockMode != 2) CycleClockMode(2); }
         else if (id == CMD_SHOWCLOCK)  SetClockVisible(!cfg_.visible);
         else if (id == CMD_SCAN)       ScanCommand();
         else if (id == CMD_SCANSET)    ScanSetCommand();
@@ -13637,9 +14765,11 @@ private:
         else if (id == CMD_IPREG)      IpCamRegister();
         else if (id == CMD_IPVIEW)     IpCamView();
         else if (id == CMD_PHONE)      PhoneExplorer();
+        else if (id == CMD_UPLOADS)    BrowseUploadsCommand();
         else if (id == CMD_RDPSRV)     RdpServerCommand();
         else if (id == CMD_RDPCLI)     RdpClientCommand();
         else if (id >= CMD_HELP && id <= CMD_HELP + 4) HelpCommand(id - CMD_HELP);
+        else if (id >= CMD_HELP + 5 && id <= CMD_HELP + 8) OpenLogFile(id - CMD_HELP - 5);
         else if (id == CMD_SHOWLUNAR) {
             if (!cfg_.LunarReady()) return;
             cfg_.showLunar = !cfg_.showLunar;
@@ -13769,6 +14899,12 @@ private:
         else if (id >= CMD_ATHEME && id < CMD_ATHEME + ATHEME_COUNT) {
             cfg_.analogTheme = id - CMD_ATHEME;
             cfg_.SaveAnalogTheme();
+            cfg_.analogBg = 1;                                  // 테마 선택: 배경색 설정과 시침/분침/초침/테두리/눈금 색을 모두 '테마 적용' 으로 되돌림
+            cfg_.SaveAnalogBg();
+            for (int i = 0; i < 5; i++) cfg_.analogColOn[i] = false;
+            cfg_.SaveAnalogCol();
+            cfg_.analogBgAlpha = 100;                           // 배경 투명도도 100%(불투명)로
+            cfg_.SaveAnalogBgAlpha();
             UpdateOptionChecks();
             ForAll(&ClockWindow::ApplyFormat);
         }
@@ -14116,7 +15252,7 @@ private:
     }
 
     // 마우스 한 번 클릭: 모드를 다음으로 (모든 창에 적용, ini 에 저장). 아래로 쌓인 도시 창은 바로 밑에 다시 붙임
-    void CycleClockMode() {
+    void CycleClockMode(int to = -1) {      // to: 바로 바꿀 모드 (0~2). 생략하면 다음 모드로 순환
         ClockWindow* root = owner_ ? owner_ : this;
         if (root->cfg_.analogFull) { root->cfg_.analogFull = false; root->cfg_.SaveAnalogFull(); root->ApplyAnalogFull(); }   // 아날로그를 벗어나기 전에 전체화면 해제
         ClockWindow* w[CITY_COUNT + 1];
@@ -14128,7 +15264,8 @@ private:
         for (int i = 0; i < n; i++) GetWindowRect(w[i]->hwnd_, &old[i]);
         for (int i = 1; i < n; i++) adj[i] = old[i].left == old[i - 1].left && old[i].top == old[i - 1].bottom;
 
-        root->cfg_.clockMode = (root->cfg_.clockMode + 1) % 3;
+        root->cfg_.clockMode = (to >= 0 && to <= 2) ? to : (root->cfg_.clockMode + 1) % 3;
+        if (root->cfg_.clockMode != 2) root->lastDigital_ = root->cfg_.clockMode;   // 마지막 디지탈 모양 기억
         root->cfg_.SaveClockMode();
         static const char* const name[3] = {"타이틀 & 디지털", "디지털", "아날로그"};
         Log::Put("시계 모드: %s", name[root->cfg_.clockMode]);
@@ -14585,8 +15722,32 @@ private:
         GetWindowRect(hwnd_, &wr);
         if (m != menu_ && !PtInRect(&wr, pt)) { pt.x = wr.left; pt.y = wr.bottom; }   // 마우스가 창 밖이면 창 아래쪽에 표시
         SetForegroundWindow(hwnd_);
+        HHOOK hook = NULL;
+        if (m == menu_) {                           // 전체 메뉴: F3) / F4) 항목을 마우스로 클릭하면 그 시계로 변경 (하위 메뉴는 그대로 열림)
+            hookWnd_ = this;
+            hook = SetWindowsHookExW(WH_MSGFILTER, MenuHookProc, NULL, GetCurrentThreadId());
+        }
         TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, NULL);
+        if (hook) UnhookWindowsHookEx(hook);
+        hookWnd_ = NULL;
         PostMessageA(hwnd_, WM_NULL, 0, 0);
+    }
+
+    static inline ClockWindow* hookWnd_ = NULL;
+    static LRESULT CALLBACK MenuHookProc(int code, WPARAM w, LPARAM l) {
+        ClockWindow* self = hookWnd_;
+        if (code == MSGF_MENU && self && l) {
+            const MSG* ms = (const MSG*)l;
+            if (ms->message == WM_LBUTTONUP) {
+                const int pos = MenuItemFromPoint(self->hwnd_, self->menu_, ms->pt);
+                if (pos == TOP_DIGITAL || pos == TOP_ANALOG) {
+                    EndMenu();
+                    PostMessageW(self->hwnd_, WM_COMMAND, pos == TOP_DIGITAL ? CMD_GODIGITAL : CMD_GOANALOG, 0);
+                    return 1;
+                }
+            }
+        }
+        return CallNextHookEx(NULL, code, w, l);
     }
 
     // ---- 설정 초기화: 바탕색/투명도/폰트/타이머/옵션을 기본값으로 (창 위치, 기준 도시는 유지)
@@ -14641,6 +15802,12 @@ private:
             if ((*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '-' || *p == '.' || *p == '_' || *p == '~') out += (char)*p;
             else { char t[4]; wsprintfA(t, "%%%02X", (unsigned)*p); out += t; }
         }
+    }
+
+    // F8) 텔레그램 송수신 & 이미지 뷰어: 업로드 폴더의 파일을 이미지 창으로 연다 (이미 열려 있으면 앞으로 가져옴)
+    void BrowseUploadsCommand() {
+        std::string msg;
+        if (!tg::BrowseUploads(msg)) ShowInfo("텔레그램 송수신 & 이미지 뷰어", msg.empty() ? "표시할 파일이 없습니다." : msg.c_str());
     }
 
     void PhoneExplorer() {
@@ -14749,6 +15916,37 @@ private:
         ResizeAll();                            // 키를 비우면 음력 줄이 사라지므로 높이 조정
         ForAll(&ClockWindow::ApplyFormat);
         UpdateOptionChecks();                   // '음력 보이기' 활성/비활성 갱신
+    }
+
+    // Help > 로그 보기: .\log 의 로그 파일을 Notepad.exe 로 연다 (파일이 없으면 안내)
+    void OpenLogFile(int idx) {
+        static const wchar_t* const N[4] = {L"", L"Telegram.Log", L"WiFiScan_watch.log", L"ipcam.log"};
+        wchar_t path[MAX_PATH * 3];
+        if (idx == 0) {                                     // gsHomeManager.log: Log 클래스가 쓰는 경로 그대로
+            if (!MultiByteToWideChar(CP_ACP, 0, Log::Path(), -1, path, MAX_PATH * 3)) return;
+        } else {
+            wchar_t exe[MAX_PATH * 2];
+            DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH * 2);
+            if (n == 0 || n >= MAX_PATH * 2) return;
+            wchar_t* sl = wcsrchr(exe, L'\\');
+            if (sl) sl[1] = 0;
+            lstrcpynW(path, exe, MAX_PATH * 3);
+            lstrcatW(path, L"log\\");
+            lstrcatW(path, N[idx]);
+        }
+        char u8[MAX_PATH * 4];
+        WideCharToMultiByte(CP_UTF8, 0, path, -1, u8, sizeof(u8), NULL, NULL);
+        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+            Log::Put("메뉴: Help > 로그 보기 - 파일 없음: %s", u8);
+            char m[MAX_PATH * 4 + 64];
+            wsprintfA(m, "로그 파일이 아직 없습니다.\r\n\r\n%s", u8);
+            ShowInfo("로그 보기", m);
+            return;
+        }
+        wchar_t args[MAX_PATH * 3 + 4];
+        wsprintfW(args, L"\"%s\"", path);
+        HINSTANCE r = ShellExecuteW(hwnd_, L"open", L"notepad.exe", args, NULL, SW_SHOWNORMAL);
+        Log::Put("메뉴: Help > 로그 보기 > Notepad 로 열기: %s (결과코드 %d)", u8, (int)(INT_PTR)r);
     }
 
     void HelpCommand(int act) {
@@ -15159,6 +16357,7 @@ private:
     HFONT        dateFont_     = NULL;
     HBRUSH       bgBrush_      = NULL;
     HMENU        menu_         = NULL;  // 본 창만 (더블클릭 팝업 메뉴)
+    int          lastDigital_  = 0;     // 마지막 디지탈 모양 (0=타이틀 & 디지털, 1=디지털). 최상위 메뉴 F3) 를 누르면 이 모양으로 돌아감
     enum { TOP_DIGITAL = 1, TOP_ANALOG = 2 };           // 최상위 메뉴 위치: F3 디지탈 시계 / F4 아나로그 시계
     static constexpr int TOP_MENU_COUNT = 8;            // 최상위 메뉴 개수 (F2 ~ F9. F1 은 전체 메뉴)
     HMENU        menuTop_[TOP_MENU_COUNT] = {};         // 최상위 메뉴의 하위 팝업 (순서대로 F2 ~ F9)
@@ -15366,7 +16565,7 @@ static void EnsureWavPlayer() {
 int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
     Log::Init();
     EnsureWavPlayer();                          // .\WAV\WAVPlayer.exe (시보 재생) 가 없으면 GitHub 에서 내려받음 (백그라운드)
-    tg::InstallCrashHandlers();                 // 처리되지 않은 예외는 원인을 log.txt 에 남기고 종료
+    tg::InstallCrashHandlers();                 // 처리되지 않은 예외는 원인을 Telegram.Log 에 남기고 종료
     SingleInstance guard("gsHomeManager_SingleInstance");   // 중복 실행 방지
     if (!guard.IsFirst()) {                     // 이미 실행 중이면 기존 앱을 종료시키고 이 프로세스가 대신 실행
         Log::Put("기존 실행 중인 앱 감지: 기존 프로세스를 종료하고 새로 시작");
@@ -15402,7 +16601,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
         Log::Put("WiFiScan: 탐지 사용 안 함 또는 지정 시간 밖이므로 시작할 때 scan Off");
     }
     tg::Start();                                // Telegram 모듈 (전용 스레드). ini [Telegram] 에 토큰/chat id 가 없으면 스스로 사용 안 함
-    Log::Put("Telegram 모듈 시작 (ini [Telegram], 로그 log.txt)");
+    Log::Put("Telegram 모듈 시작 (ini [Telegram], 로그 Telegram.Log)");
     if (cfg.DetectWantedNow()) {                // 침입 탐지 시간: 항상(프로그램 시작과 동시에), 또는 시작했을 때 이미 시간대 안이면 /detectOn
         Log::Put("침입 탐지 시간: 프로그램 시작 -> /detectOn");
         tg::PostTrigger("/detectOn");
