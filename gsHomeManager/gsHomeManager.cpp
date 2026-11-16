@@ -63,6 +63,7 @@
 #include <ctime>
 #include <string>
 #include <vector>
+#include <deque>
 #include <map>
 #include <set>
 #include <memory>
@@ -133,6 +134,7 @@ public:
         char line[900];
         int n = wsprintfA(line, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] %s\r\n",
                           t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, msg);
+        if (sink_) sink_(line);                 // 로그 창 등에도 같은 내용을 보냄 (어느 스레드에서든 호출됨)
         HANDLE h = Open();
         if (h == INVALID_HANDLE_VALUE) return;
         LARGE_INTEGER sz;
@@ -151,6 +153,7 @@ public:
     }
 
     static const char* Path() { return path_; }       // 로그 파일 전체 경로 (Help > 로그 보기용)
+    static void SetSink(void (*f)(const char*)) { sink_ = f; }      // 로그 한 줄(UTF-8, 시각 포함, 끝에 \r\n)을 받을 함수
 
 private:
     static HANDLE Open() {
@@ -158,6 +161,7 @@ private:
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     }
     static inline char path_[MAX_PATH + 8] = "";
+    static inline void (*sink_)(const char*) = nullptr;
 };
 
 // ---------------------------------------------------------------- SingleInstance
@@ -8964,7 +8968,7 @@ public:
         return submit(new Add{hb, w, h, StrUtil::toWide(title), fullPath(path), true});
     }
 
-    // 메뉴 'F8) 텔레그램 송수신 & 이미지 뷰어': 업로드 창(텔레그램 수신용)과는 별개의 새 창을 빈 목록으로 연다. 기존 창은 그대로 둔다.
+    // 메뉴 'F8) 텔레그램/클라이언트 송수신 뷰어': 업로드 창(텔레그램 수신용)과는 별개의 새 창을 빈 목록으로 연다. 기존 창은 그대로 둔다.
     // 파일은 [목록 추가] 로 여러 폴더에서 골라 넣는다. defDir: 비어 있을 때 [텔레그램 폴더 탐색기] / [목록 추가] 가 시작하는 폴더(업로드 폴더).
     static bool openEmpty(const std::wstring& defDir)
     {
@@ -9301,7 +9305,7 @@ private:
         if (!v->hw) return;
         const bool has = !v->list.empty();
         const std::wstring t = has ? v->list[v->idx].path + L"  (" + std::to_wstring(v->idx + 1) + L"/" + std::to_wstring(v->list.size()) + L")"
-                                   : std::wstring(L"텔레그램 송수신 & 이미지 뷰어  (목록이 비어 있음)");
+                                   : std::wstring(L"텔레그램/클라이언트 송수신 뷰어  (목록이 비어 있음)");
         SetWindowTextW(v->hw, t.c_str());
         auto en = [v](int id, bool on) { if (v->btn[id - 1]) EnableWindow(v->btn[id - 1], on ? TRUE : FALSE); };
         en(ID_ROTL, has);
@@ -9925,7 +9929,7 @@ private:
         const int cH = std::max(150, (int)(ih * sc)) + BAR_H;
         const int winW = cW + frW, winH = cH + frH;
         const int off = standalone ? 40 : 0;   // 독립 창은 업로드 창과 정확히 겹치지 않게 조금만 어긋나게
-        HWND hw = CreateWindowExW(0, kClass, first ? first->path.c_str() : L"텔레그램 송수신 & 이미지 뷰어", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        HWND hw = CreateWindowExW(0, kClass, first ? first->path.c_str() : L"텔레그램/클라이언트 송수신 뷰어", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                                   wa.left + (waW - winW) / 2 + off, wa.top + (waH - winH) / 2 + off, winW, winH,
                                   nullptr, nullptr, inst, &view);
         std::vector<Add*> pend;
@@ -11727,7 +11731,7 @@ void PostTrigger(const std::string& cmd)
     LocalTrigger::post(cmd);
 }
 
-// 메뉴 'F8) 텔레그램 송수신 & 이미지 뷰어': 빈 목록의 새 이미지 창을 연다 (기존 창은 유지). 기본 폴더는 업로드 폴더(ini [Telegram] UPLOAD_DIR, 기본 exe 폴더\\upload).
+// 메뉴 'F8) 텔레그램/클라이언트 송수신 뷰어': 빈 목록의 새 이미지 창을 연다 (기존 창은 유지). 기본 폴더는 업로드 폴더(ini [Telegram] UPLOAD_DIR, 기본 exe 폴더\\upload).
 // Telegram 모듈(토큰)이 꺼져 있어도 동작한다. 실패하면 false + msg(UTF-8).
 bool BrowseUploads(std::string& msg)
 {
@@ -11740,8 +11744,8 @@ bool BrowseUploads(std::string& msg)
     if (d.empty()) d = SysUtil::exeDir() + "\\upload";
     else if (!(d.size() >= 2 && (d[1] == ':' || (d[0] == '\\' && d[1] == '\\')))) d = SysUtil::exeDir() + "\\" + d;
     const bool ok = ImageWindow::openEmpty(StrUtil::toWide(d));   // 새 창, 빈 목록 (기존 이미지 창은 그대로)
-    if (ok) Logger::log("텔레그램 송수신 & 이미지 뷰어 창 열기 (빈 목록, 기본 폴더 %s)", d.c_str());
-    else { msg = "창을 만들 수 없습니다."; Logger::log("텔레그램 송수신 & 이미지 뷰어 창 열기 실패"); }
+    if (ok) Logger::log("텔레그램/클라이언트 송수신 뷰어 창 열기 (빈 목록, 기본 폴더 %s)", d.c_str());
+    else { msg = "창을 만들 수 없습니다."; Logger::log("텔레그램/클라이언트 송수신 뷰어 창 열기 실패"); }
     return ok;
 }
 
@@ -11924,7 +11928,10 @@ namespace rdp {
 struct Hdr { uint8_t type; uint32_t len; };
 #pragma pack(pop)
 struct Ev { int32_t t, a, b, m; };                       // m = 모니터 번호 (마우스 이동)
-enum { RM_AUTH = 1, RM_FRAME = 2, RM_INPUT = 3, RM_INFO = 4 };
+enum { RM_AUTH = 1, RM_FRAME = 2, RM_INPUT = 3, RM_INFO = 4, RM_FILE = 5 };
+// RM_FILE 내용 = 종류 1바이트 + 자료. 클라이언트 -> 서버: BEGIN(파일 크기 8바이트 + UTF-8 파일명) / DATA(파일 조각) / END / ABORT. 서버 -> 클라이언트: ACK(성공 여부 1바이트)
+enum { FT_BEGIN = 0, FT_DATA = 1, FT_END = 2, FT_ABORT = 3, FT_ACK = 4 };
+static constexpr uint32_t kFileChunk = 64 * 1024, kFileMsgMax = kFileChunk + 1024;
 enum { EV_MOVE = 1, EV_BTN = 2, EV_WHEEL = 3 };
 
 static bool sendAll(SOCKET s, const void* p, int n) {
@@ -11940,6 +11947,47 @@ static bool recvAll(SOCKET s, void* p, int n) {
 static bool sendMsg(SOCKET s, uint8_t type, const void* p, uint32_t len) {
     Hdr h{type, len};
     return sendAll(s, &h, sizeof h) && (len == 0 || sendAll(s, p, (int)len));
+}
+
+// 서버에 저장할 파일명 정리: 경로, 금지 문자, 예약어 제거 (비면 빈 문자열)
+static std::wstring SafeName(const std::string& utf8) {
+    std::wstring w = tg::StrUtil::toWide(utf8);
+    const size_t pos = w.find_last_of(L"\\/");
+    if (pos != std::wstring::npos) w = w.substr(pos + 1);
+    for (auto& c : w)
+        if (c < 32 || wcschr(L"<>:\"/\\|?*", c)) c = L'_';
+    if (w.size() > 150) {
+        const size_t dot = w.rfind(L'.');
+        const std::wstring ext = (dot != std::wstring::npos && w.size() - dot <= 16) ? w.substr(dot) : L"";
+        w = w.substr(0, 150 - ext.size()) + ext;
+    }
+    while (!w.empty() && (w.back() == L' ' || w.back() == L'.')) w.pop_back();
+    size_t b = 0;
+    while (b < w.size() && w[b] == L' ') ++b;
+    w = w.substr(b);
+    if (w.empty()) return L"";
+    std::wstring stem = w.substr(0, w.find(L'.'));
+    for (auto& c : stem) c = (wchar_t)towupper(c);
+    bool reserved = stem == L"CON" || stem == L"PRN" || stem == L"AUX" || stem == L"NUL";
+    if (stem.size() == 4 && (stem.compare(0, 3, L"COM") == 0 || stem.compare(0, 3, L"LPT") == 0) && stem[3] >= L'1' && stem[3] <= L'9') reserved = true;
+    if (reserved) w = L"_" + w;
+    return w;
+}
+
+// dir\name 으로 새 파일을 만든다 (이미 있으면 name_1.ext, name_2.ext ... CREATE_NEW 라 덮어쓰지 않음)
+static bool CreateUnique(const std::wstring& dir, const std::wstring& name, std::wstring& outPath, HANDLE& h) {
+    const size_t dot = name.rfind(L'.');
+    const bool hasExt = dot != std::wstring::npos && dot > 0;
+    const std::wstring stem = hasExt ? name.substr(0, dot) : name;
+    const std::wstring ext = hasExt ? name.substr(dot) : L"";
+    for (int i = 0; i < 1000; ++i) {
+        const std::wstring cand = dir + L"\\" + stem + (i ? L"_" + std::to_wstring(i) : L"") + ext;
+        h = CreateFileW(cand.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h != INVALID_HANDLE_VALUE) { outPath = cand; return true; }
+        const DWORD e = GetLastError();
+        if (e != ERROR_FILE_EXISTS && e != ERROR_ALREADY_EXISTS) return false;
+    }
+    return false;
 }
 
 // UTF-8 메시지 상자 (어느 스레드에서나 호출 가능)
@@ -11970,6 +12018,102 @@ static std::string LocalIps() {
     return out;
 }
 
+// 원격 서버 연결 로그 창: log 파일에 남기는 "원격 서버: ..." 줄을 같은 내용으로 보여 주는 텍스트 창. 서버 [시작] 을 누르면 열린다.
+// 창을 닫았다 다시 열어도 마지막 500줄은 다시 보여 준다.
+class LogWin {
+public:
+    static void Install() { Log::SetSink(&Sink); }
+
+    // 창을 만들거나 이미 있으면 앞으로 가져옴 (호출한 스레드가 메시지 루프를 돌아야 함: 대화상자/메인 스레드)
+    static void Open() {
+        if (hw_ && IsWindow(hw_)) { ShowWindow(hw_, SW_SHOWNORMAL); SetForegroundWindow(hw_); return; }
+        HINSTANCE hi = GetModuleHandleW(NULL);
+        WNDCLASSW wc = {};
+        wc.lpfnWndProc = Proc;
+        wc.hInstance = hi;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hIcon = LoadIcon(hi, MAKEINTRESOURCE(1));
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.lpszClassName = L"gsHomeManagerRdpLog";
+        RegisterClassW(&wc);
+        hw_ = CreateWindowW(L"gsHomeManagerRdpLog", L"원격 서버 연결 로그", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
+                            780, 380, NULL, NULL, hi, NULL);
+        if (!hw_) return;
+        ShowWindow(hw_, SW_SHOWNORMAL);
+        UpdateWindow(hw_);
+    }
+
+    static void Sink(const char* line) {
+        if (!strstr(line, "원격 서버")) return;
+        std::lock_guard<std::mutex> g(mu_);
+        hist_.push_back(line);
+        if (hist_.size() > 500) hist_.pop_front();
+        if (hw_) { pend_.push_back(line); PostMessageW(hw_, WM_LOGADD, 0, 0); }
+    }
+
+private:
+    static constexpr UINT WM_LOGADD = WM_APP + 30;
+    static inline HWND hw_ = NULL, ed_ = NULL;
+    static inline HFONT font_ = NULL;
+    static inline std::mutex mu_;
+    static inline std::deque<std::string> hist_;
+    static inline std::vector<std::string> pend_;
+
+    static void Append(const std::string& u8) {
+        if (!ed_ || u8.empty()) return;
+        std::wstring w = tg::StrUtil::toWide(u8);
+        if (GetWindowTextLengthW(ed_) > 200000) {           // 너무 길면 앞부분을 지움
+            SendMessageW(ed_, EM_SETSEL, 0, 100000);
+            SendMessageW(ed_, EM_REPLACESEL, FALSE, (LPARAM)L"");
+        }
+        SendMessageW(ed_, EM_SETSEL, (WPARAM)-1, (LPARAM)-1);
+        SendMessageW(ed_, EM_REPLACESEL, FALSE, (LPARAM)w.c_str());
+    }
+
+    static LRESULT CALLBACK Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
+        switch (m) {
+        case WM_CREATE: {
+            ed_ = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 10, 10,
+                                w, (HMENU)1, GetModuleHandleW(NULL), NULL);
+            HDC sd = GetDC(NULL);
+            int dpi = sd ? GetDeviceCaps(sd, LOGPIXELSY) : 96;
+            if (sd) ReleaseDC(NULL, sd);
+            font_ = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                CLEARTYPE_QUALITY, FIXED_PITCH | FF_DONTCARE, L"Malgun Gothic");
+            if (font_) SendMessageW(ed_, WM_SETFONT, (WPARAM)font_, TRUE);
+            SendMessageW(ed_, EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
+            std::string all;
+            {
+                std::lock_guard<std::mutex> g(mu_);
+                for (auto& l : hist_) all += l;
+                pend_.clear();
+            }
+            Append(all);
+            return 0; }
+        case WM_SIZE:
+            if (ed_) MoveWindow(ed_, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
+            return 0;
+        case WM_SETFOCUS:
+            if (ed_) SetFocus(ed_);
+            return 0;
+        case WM_LOGADD: {
+            std::vector<std::string> v;
+            { std::lock_guard<std::mutex> g(mu_); v.swap(pend_); }
+            std::string all;
+            for (auto& l : v) all += l;
+            Append(all);
+            return 0; }
+        case WM_DESTROY: {
+            std::lock_guard<std::mutex> g(mu_);
+            hw_ = NULL;
+            ed_ = NULL;
+            if (font_) { DeleteObject(font_); font_ = NULL; }
+            return 0; }
+        }
+        return DefWindowProcW(w, m, wp, lp);
+    }
+};
+
 // ================================================================ 서버 (조작당하는 PC)
 class Server {
 public:
@@ -11992,6 +12136,7 @@ public:
         if (th_.joinable()) Stop();
         if (c.port < 1 || c.port > 65535) { err = "port 번호는 1 ~ 65535 사이여야 합니다"; return false; }
         if (c.pw.empty()) { err = "비밀번호가 비어 있습니다"; return false; }
+        LogWin::Install();                      // 연결 로그를 로그 창에도 보여 주기 위해 (창이 없어도 최근 500줄은 모아 둠)
         WSADATA wd;
         WSAStartup(MAKEWORD(2, 2), &wd);
         SOCKET ls = socket(AF_INET, SOCK_STREAM, 0);
@@ -12151,6 +12296,100 @@ private:
         SendInput(1, &in, sizeof(INPUT));
     }
 
+    static std::wstring BaseName(const std::wstring& p) {
+        const size_t sl = p.find_last_of(L"\\/");
+        return sl == std::wstring::npos ? p : p.substr(sl + 1);
+    }
+
+    // 받은 파일을 송수신 뷰어 창(텔레그램으로 받은 파일과 같은 창)의 목록에 넣는다. 이미지면 화면을 보여 주고, 아니면 파일 정보 화면
+    static void ShowReceived(const std::wstring& path) {
+        const std::string title = tg::StrUtil::toUtf8(BaseName(path).c_str());
+        const size_t dot = path.rfind(L'.');
+        std::wstring ext = dot == std::wstring::npos ? L"" : path.substr(dot + 1);
+        for (auto& ch : ext) ch = (wchar_t)towlower(ch);
+        const bool img = ext == L"jpg" || ext == L"jpeg" || ext == L"png" || ext == L"bmp" || ext == L"gif" || ext == L"tif" || ext == L"tiff";
+        if (img) {
+            HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (h != INVALID_HANDLE_VALUE) {
+                LARGE_INTEGER sz = {};
+                std::vector<BYTE> data;
+                if (GetFileSizeEx(h, &sz) && sz.QuadPart > 0 && sz.QuadPart <= (64LL << 20)) {
+                    data.resize((size_t)sz.QuadPart);
+                    DWORD got = 0;
+                    if (!ReadFile(h, data.data(), (DWORD)data.size(), &got, NULL) || got != data.size()) data.clear();
+                }
+                CloseHandle(h);
+                if (!data.empty() && tg::ImageWindow::show(data, title, path)) return;
+            }
+        }
+        if (!tg::ImageWindow::showInfo(title, path)) Log::Put("원격 서버: 뷰어 창 표시 실패: %s", title.c_str());
+    }
+
+    // 클라이언트 -> 서버 파일 수신 상태 (한 번에 파일 하나)
+    struct FileRx {
+        HANDLE h = INVALID_HANDLE_VALUE;
+        std::wstring path;
+        unsigned long long size = 0, got = 0;
+        bool bad = true;
+        void Drop() {                           // 끝나지 않은 파일은 지움
+            if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); h = INVALID_HANDLE_VALUE; DeleteFileW(path.c_str()); }
+            bad = true;
+        }
+    };
+
+    void AckFile(SOCKET c, bool ok) {
+        uint8_t p[2] = {FT_ACK, (uint8_t)(ok ? 1 : 0)};
+        std::lock_guard<std::mutex> g(wmtx_);
+        sendMsg(c, RM_FILE, p, 2);
+    }
+
+    // 파일 조각 처리: 저장 폴더 = exe 폴더\rdp_recv (같은 이름이 있으면 _1, _2 ...)
+    void OnFile(SOCKET c, const std::vector<char>& b, FileRx& f) {
+        const uint8_t sub = (uint8_t)b[0];
+        if (sub == FT_BEGIN) {
+            f.Drop();
+            f.got = 0;
+            f.size = 0;
+            if (b.size() < 10) return;
+            memcpy(&f.size, b.data() + 1, 8);
+            std::wstring name = SafeName(std::string(b.begin() + 9, b.end()));
+            if (name.empty()) name = L"file";
+            const std::wstring dir = tg::StrUtil::toWide(tg::SysUtil::exeDir()) + L"\\rdp_recv";
+            CreateDirectoryW(dir.c_str(), nullptr);
+            ScanEvents::Uploading("클라이언트로부터 파일 수신중입니다");      // 파일 1개마다 화면 중앙에 큰 글자로 1초
+            if (CreateUnique(dir, name, f.path, f.h)) {
+                f.bad = false;
+                Log::Put("원격 서버: 파일 수신 시작: %s (%lu KB)", tg::StrUtil::toUtf8(BaseName(f.path).c_str()).c_str(), (unsigned long)(f.size >> 10));
+            } else {
+                Log::Put("원격 서버: 파일을 만들 수 없음 (오류 %d)", (int)GetLastError());
+            }
+        } else if (sub == FT_DATA) {
+            if (f.bad || f.h == INVALID_HANDLE_VALUE) return;
+            DWORD w = 0;
+            const DWORD n = (DWORD)(b.size() - 1);
+            if (!WriteFile(f.h, b.data() + 1, n, &w, nullptr) || w != n) {
+                Log::Put("원격 서버: 파일 쓰기 실패 (오류 %d)", (int)GetLastError());
+                f.bad = true;
+            } else {
+                f.got += w;
+            }
+        } else if (sub == FT_END) {
+            const bool ok = !f.bad && f.h != INVALID_HANDLE_VALUE && f.got == f.size;
+            if (f.h != INVALID_HANDLE_VALUE) {
+                CloseHandle(f.h);
+                f.h = INVALID_HANDLE_VALUE;
+                if (!ok) DeleteFileW(f.path.c_str());
+            }
+            Log::Put("원격 서버: 파일 수신 %s: %s (%lu KB)", ok ? "완료" : "실패", tg::StrUtil::toUtf8(BaseName(f.path).c_str()).c_str(), (unsigned long)(f.got >> 10));
+            f.bad = true;
+            AckFile(c, ok);
+            if (ok) ShowReceived(f.path);       // [텔레그램/클라이언트 송수신 뷰어] 목록에 넣고 보여 줌
+        } else if (sub == FT_ABORT) {
+            if (f.h != INVALID_HANDLE_VALUE) Log::Put("원격 서버: 파일 수신 취소: %s", tg::StrUtil::toUtf8(BaseName(f.path).c_str()).c_str());
+            f.Drop();
+        }
+    }
+
     // 대기 스레드: 한 번에 클라이언트 한 명
     void Run() {
         tg::enableThreadDpiAwareness();         // 실제 해상도로 캡처 / 좌표 계산 (이 스레드만 DPI 인식. 시계 창에는 영향 없음)
@@ -12241,7 +12480,15 @@ private:
         std::thread rx([&] {                    // 클라이언트 -> 서버: 마우스 입력
             tg::enableThreadDpiAwareness();
             Hdr h;
+            FileRx fs;
             while (recvAll(c, &h, sizeof h)) {
+                if (h.type == RM_FILE) {                // 파일 전송 (조각마다 한 메시지)
+                    if (h.len == 0 || h.len > kFileMsgMax) break;
+                    std::vector<char> fb(h.len);
+                    if (!recvAll(c, fb.data(), (int)h.len)) break;
+                    OnFile(c, fb, fs);
+                    continue;
+                }
                 if (h.len > 1024) break;
                 Ev e;
                 if (h.type == RM_INPUT && h.len == sizeof e) {
@@ -12252,6 +12499,7 @@ private:
                     if (h.len && !recvAll(c, skip.data(), (int)h.len)) break;
                 }
             }
+            fs.Drop();                          // 연결이 끊겨 끝나지 않은 파일은 지움
             alive = false;
         });
 
@@ -12303,7 +12551,10 @@ private:
                     void* p = GlobalLock(hg);
                     Hdr fh{RM_FRAME, ss.cbSize.LowPart + 4};         // 내용 = 모니터 번호 + JPEG
                     int32_t idx = (int32_t)i;
-                    sentOk = sendAll(c, &fh, sizeof fh) && sendAll(c, &idx, 4) && sendAll(c, p, (int)ss.cbSize.LowPart);
+                    {
+                        std::lock_guard<std::mutex> wl(wmtx_);      // 파일 수신 응답(ACK)과 섞이지 않게
+                        sentOk = sendAll(c, &fh, sizeof fh) && sendAll(c, &idx, 4) && sendAll(c, p, (int)ss.cbSize.LowPart);
+                    }
                     GlobalUnlock(hg);
                     if (sentOk) { sentFrames++; sentBytes += ss.cbSize.LowPart; frames_++; }
                 } else {
@@ -12334,6 +12585,7 @@ private:
     std::atomic<unsigned long> frames_{0};
     std::set<std::string>   trusted_;                // 한 번 허용한 클라이언트 IP (accept=once. 서버를 다시 시작하면 비움)
     std::mutex              mtx_;
+    std::mutex              wmtx_;                   // 클라이언트 소켓 송신 직렬화 (화면 프레임 + 파일 응답)
     int                     state_ = ST_STOPPED;
     std::string             peer_;
 };
@@ -12389,6 +12641,140 @@ private:
     static inline std::vector<HWND> wnd_;           // 서버 모니터마다 창 1개
     static inline std::vector<HBITMAP> bmp_;        // 모니터마다 마지막 화면
     static inline std::mutex mtx_;
+
+    // ---- 파일 전송 (클라이언트 -> 서버): 창 맨 위 [파일 전송] 버튼 ----
+    static constexpr int IDC_FILE = 9001;
+    static constexpr UINT WM_FPROG = WM_APP + 20;   // 진행 글자(ptext_)를 버튼에 표시
+    static constexpr UINT WM_FDONE = WM_APP + 21;   // 전송 끝: 결과(ptext_)를 알림창으로 표시
+    static inline std::vector<HWND> btn_;           // 창마다 버튼 1개
+    static inline std::thread ft_;                  // 파일 전송 스레드 (창 스레드가 멈추지 않게)
+    static inline HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
+    static inline std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false};
+    static inline std::mutex smtx_, pmtx_;          // smtx_ = 소켓 송신 직렬화 (마우스 입력 + 파일), pmtx_ = ptext_
+    static inline std::wstring ptext_;
+    static inline int tb_ = 32;                     // 버튼 줄 높이 (픽셀)
+    static inline HFONT font_ = NULL;
+
+    static bool SendLocked(uint8_t type, const void* p, uint32_t len) {
+        std::lock_guard<std::mutex> g(smtx_);
+        return !closing_ && sendMsg(sock_, type, p, len);
+    }
+
+    static void PostText(UINT m, const std::wstring& t) {
+        { std::lock_guard<std::mutex> g(pmtx_); ptext_ = t; }
+        if (!wnd_.empty() && wnd_[0]) PostMessageW(wnd_[0], m, 0, 0);
+    }
+
+    // 파일 하나 전송: BEGIN -> DATA 조각들 -> END -> 서버 응답(ACK) 대기. 실패하면 why 에 사유
+    static bool SendOne(const std::wstring& path, size_t no, size_t total, std::wstring& why) {
+        const size_t sl = path.find_last_of(L"\\/");
+        const std::wstring base = sl == std::wstring::npos ? path : path.substr(sl + 1);
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+        if (h == INVALID_HANDLE_VALUE) { why = L"파일을 열 수 없음"; return false; }
+        LARGE_INTEGER sz = {};
+        if (!GetFileSizeEx(h, &sz)) { CloseHandle(h); why = L"파일 크기를 알 수 없음"; return false; }
+        const unsigned long long size = (unsigned long long)sz.QuadPart;
+        const std::string name = tg::StrUtil::toUtf8(base.c_str());
+        std::vector<char> pk(9 + name.size());
+        pk[0] = FT_BEGIN;
+        memcpy(&pk[1], &size, 8);
+        memcpy(&pk[9], name.data(), name.size());
+        ResetEvent(ackEv_);
+        bool ok = SendLocked(RM_FILE, pk.data(), (uint32_t)pk.size());
+        if (!ok) why = L"연결이 끊어짐";
+        std::vector<char> buf(1 + kFileChunk);
+        buf[0] = FT_DATA;
+        unsigned long long sent = 0;
+        DWORD last = 0;
+        while (ok && sent < size) {
+            DWORD n = 0;
+            if (!ReadFile(h, &buf[1], kFileChunk, &n, NULL) || n == 0) { why = L"파일을 읽을 수 없음"; ok = false; break; }
+            if ((unsigned long long)n > size - sent) n = (DWORD)(size - sent);
+            if (!SendLocked(RM_FILE, buf.data(), n + 1)) { why = L"연결이 끊어짐"; ok = false; break; }
+            sent += n;
+            const DWORD now = GetTickCount();
+            if (now - last >= 200 || sent == size) {
+                last = now;
+                wchar_t t[96];
+                wsprintfW(t, L"전송 중 %d/%d (%d%%)", (int)no, (int)total, size ? (int)(sent * 100 / size) : 100);
+                PostText(WM_FPROG, t);
+            }
+        }
+        CloseHandle(h);
+        if (!ok) {
+            if (!closing_) { uint8_t a = FT_ABORT; SendLocked(RM_FILE, &a, 1); }
+            return false;
+        }
+        const uint8_t e = FT_END;
+        if (!SendLocked(RM_FILE, &e, 1)) { why = L"연결이 끊어짐"; return false; }
+        bool got = false;
+        for (int i = 0; i < 600 && !closing_; i++)
+            if (WaitForSingleObject(ackEv_, 100) == WAIT_OBJECT_0) { got = true; break; }
+        if (!got) { why = L"서버 응답 없음"; return false; }
+        if (!ackOk_) { why = L"서버가 저장하지 못함 (디스크/권한 확인)"; return false; }
+        return true;
+    }
+
+    static void SendFiles(std::vector<std::wstring> files) {
+        int okN = 0;
+        std::wstring fails;
+        for (size_t i = 0; i < files.size() && !closing_; i++) {
+            std::wstring why;
+            const size_t sl = files[i].find_last_of(L"\\/");
+            const std::wstring base = sl == std::wstring::npos ? files[i] : files[i].substr(sl + 1);
+            if (SendOne(files[i], i + 1, files.size(), why)) {
+                okN++;
+                Log::Put("원격 클라이언트: 파일 전송 완료: %s", tg::StrUtil::toUtf8(base.c_str()).c_str());
+            } else {
+                fails += L"\n - " + base + L" : " + why;
+                Log::Put("원격 클라이언트: 파일 전송 실패: %s (%s)", tg::StrUtil::toUtf8(base.c_str()).c_str(), tg::StrUtil::toUtf8(why.c_str()).c_str());
+            }
+        }
+        std::wstring r = std::to_wstring(okN) + L" / " + std::to_wstring(files.size()) + L" 개 전송 완료\n(서버 PC 의 rdp_recv 폴더에 저장됨)";
+        if (!fails.empty()) r += L"\n\n실패:" + fails;
+        PostText(WM_FDONE, r);
+    }
+
+    // 파일 선택 대화상자 (여러 개 선택 가능). 취소하면 false
+    static bool PickFiles(HWND owner, std::vector<std::wstring>& files) {
+        files.clear();
+        std::vector<wchar_t> buf(65536, L'\0');
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof ofn;
+        ofn.hwndOwner = owner;
+        ofn.lpstrFile = buf.data();
+        ofn.nMaxFile = (DWORD)buf.size();
+        ofn.lpstrFilter = L"모든 파일 (*.*)\0*.*\0";
+        ofn.lpstrTitle = L"서버 PC 로 보낼 파일 선택 (여러 개 선택 가능)";
+        ofn.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+        if (!GetOpenFileNameW(&ofn)) return false;
+        // 1개 선택: "전체경로\0\0". 여러 개: "폴더\0파일1\0파일2\0\0"
+        const wchar_t* p = buf.data();
+        const std::wstring first = p;
+        p += first.size() + 1;
+        if (*p == L'\0') {
+            files.push_back(first);
+        } else {
+            const std::wstring dir = (!first.empty() && first.back() == L'\\') ? first : first + L"\\";
+            while (*p) {
+                std::wstring nm = p;
+                files.push_back(dir + nm);
+                p += nm.size() + 1;
+            }
+        }
+        return !files.empty();
+    }
+
+    static void OnFileButton(HWND w) {
+        if (sending_) return;
+        std::vector<std::wstring> files;
+        if (!PickFiles(w, files)) return;
+        sending_ = true;
+        for (HWND b : btn_) EnableWindow(b, FALSE);
+        if (ft_.joinable()) ft_.join();
+        Log::Put("원격 클라이언트: 파일 %d 개 전송 시작", (int)files.size());
+        ft_ = std::thread([files] { SendFiles(files); });
+    }
 
     static const char* ErrText(int e) {
         switch (e) {
@@ -12530,7 +12916,8 @@ private:
 
     static void SendEv(int t, int a, int b = 0, int m = 0) {
         Ev e{t, a, b, m};
-        sendMsg(sock_, RM_INPUT, &e, sizeof e);
+        std::lock_guard<std::mutex> g(smtx_);
+        if (!closing_) sendMsg(sock_, RM_INPUT, &e, sizeof e);
     }
 
     // 서버 -> 클라이언트: 화면 프레임 수신
@@ -12541,6 +12928,10 @@ private:
             if (h.len > (64u << 20)) { Log::Put("원격 클라이언트: 프레임이 너무 큼 (%u 바이트), 연결을 닫음", (unsigned)h.len); break; }
             std::vector<char> buf(h.len);
             if (h.len && !recvAll(sock_, buf.data(), (int)h.len)) break;
+            if (h.type == RM_FILE) {            // 서버의 파일 저장 결과
+                if (h.len >= 2 && (uint8_t)buf[0] == FT_ACK) { ackOk_ = buf[1] != 0; SetEvent(ackEv_); }
+                continue;
+            }
             if (h.type != RM_FRAME || h.len <= 4) continue;
             int32_t idx;
             memcpy(&idx, buf.data(), 4);
@@ -12579,15 +12970,17 @@ private:
             std::lock_guard<std::mutex> lk(mtx_);
             int mi = MonOf(w);
             HBITMAP cur = mi >= 0 ? bmp_[mi] : NULL;
-            if (cur) {
+            RECT rc;
+            GetClientRect(w, &rc);
+            RECT bar = {0, 0, rc.right, std::min((int)rc.bottom, tb_)};          // 맨 위 버튼 줄
+            FillRect(dc, &bar, GetSysColorBrush(COLOR_BTNFACE));
+            if (cur && rc.bottom > tb_) {
                 BITMAP bm;
                 GetObjectW(cur, sizeof bm, &bm);
-                RECT rc;
-                GetClientRect(w, &rc);
                 HDC mem = CreateCompatibleDC(dc);
                 HGDIOBJ o = SelectObject(mem, cur);
                 SetStretchBltMode(dc, HALFTONE);
-                StretchBlt(dc, 0, 0, rc.right, rc.bottom, mem, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                StretchBlt(dc, 0, tb_, rc.right, rc.bottom - tb_, mem, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
                 SelectObject(mem, o);
                 DeleteDC(mem);
             }
@@ -12598,10 +12991,29 @@ private:
         case WM_MOUSEMOVE: {
             RECT rc;
             GetClientRect(w, &rc);
-            if (rc.right > 1 && rc.bottom > 1) {
-                int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
-                SendEv(EV_MOVE, (int)((int64_t)x * 65535 / (rc.right - 1)), (int)((int64_t)y * 65535 / (rc.bottom - 1)), MonOf(w));
+            const int ih = rc.bottom - tb_;                 // 화면이 그려지는 높이 (버튼 줄 제외)
+            if (rc.right > 1 && ih > 1) {
+                int x = (short)LOWORD(lp), y = (short)HIWORD(lp) - tb_;
+                if (y < 0 && GetCapture() != w) return 0;   // 버튼 줄 위에서는 서버 마우스를 움직이지 않음
+                x = std::clamp(x, 0, (int)rc.right - 1);
+                y = std::clamp(y, 0, ih - 1);
+                SendEv(EV_MOVE, (int)((int64_t)x * 65535 / (rc.right - 1)), (int)((int64_t)y * 65535 / (ih - 1)), MonOf(w));
             }
+            return 0; }
+        case WM_COMMAND:
+            if (LOWORD(wp) == IDC_FILE && HIWORD(wp) == BN_CLICKED) { OnFileButton(w); return 0; }
+            break;
+        case WM_FPROG: {
+            std::wstring t;
+            { std::lock_guard<std::mutex> g(pmtx_); t = ptext_; }
+            for (HWND b : btn_) SetWindowTextW(b, t.c_str());
+            return 0; }
+        case WM_FDONE: {
+            std::wstring t;
+            { std::lock_guard<std::mutex> g(pmtx_); t = ptext_; }
+            for (HWND b : btn_) { SetWindowTextW(b, L"파일 전송"); EnableWindow(b, TRUE); }
+            sending_ = false;
+            if (!closing_) MessageBoxW(w, t.c_str(), L"파일 전송", MB_OK | MB_ICONINFORMATION);
             return 0; }
         case WM_LBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_LEFTDOWN); return 0;
         case WM_LBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_LEFTUP); return 0;
@@ -12634,18 +13046,32 @@ private:
         RegisterClassW(&wc);
         wnd_.assign(nMon, NULL);
         bmp_.assign(nMon, NULL);
+        btn_.assign(nMon, NULL);
+        closing_ = false;
+        sending_ = false;
+        ackEv_ = CreateEventW(NULL, FALSE, FALSE, NULL);
+        int dpi = 96;
+        if (HDC sd = GetDC(NULL)) { dpi = GetDeviceCaps(sd, LOGPIXELSY); ReleaseDC(NULL, sd); }
+        tb_ = MulDiv(32, dpi, 96);
+        font_ = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Malgun Gothic");
         for (int i = 0; i < nMon; i++) {
             int mw = info[1 + 2 * i], mh = info[2 + 2 * i];
             int cw = std::min(mw, 1280), ch = (int)((int64_t)mh * cw / mw);
-            RECT rc = {0, 0, cw, ch};
+            RECT rc = {0, 0, cw, ch + tb_};                 // 위쪽에 버튼 줄
             AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
             char t[80];
             wsprintfA(t, "원격 제어 - 모니터 %d (%dx%d)", i + 1, mw, mh);
             char16_t title[80];
             title[0] = 0;
             Utf8::ToUtf16(t, -1, title, 80);
-            wnd_[i] = CreateWindowW((LPCWSTR)u"gsHomeManagerRdpView", (LPCWSTR)title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+            wnd_[i] = CreateWindowW((LPCWSTR)u"gsHomeManagerRdpView", (LPCWSTR)title, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
                                     rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hi, NULL);
+            if (wnd_[i]) {                                  // 타이틀 바 바로 밑 버튼 줄: [파일 전송]
+                btn_[i] = CreateWindowW(L"BUTTON", L"파일 전송", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(4, dpi, 96), MulDiv(3, dpi, 96),
+                                        MulDiv(140, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_FILE, hi, NULL);
+                if (btn_[i] && font_) SendMessageW(btn_[i], WM_SETFONT, (WPARAM)font_, TRUE);
+            }
         }
         for (HWND w : wnd_) if (w) ShowWindow(w, SW_SHOW);
         std::thread net(NetThread);
@@ -12655,12 +13081,17 @@ private:
             DispatchMessageW(&msg);
         }
         Log::Put("원격 클라이언트: 창을 닫음, 연결 종료");
+        closing_ = true;                        // 파일 전송 중이면 바로 멈춤
         shutdown(sock_, SD_BOTH);
         net.join();                             // NetThread 는 recv 가 끝나면 빠져나옴 (소켓은 호출한 쪽에서 닫음)
+        if (ft_.joinable()) ft_.join();
+        if (ackEv_) { CloseHandle(ackEv_); ackEv_ = NULL; }
         for (HWND w : wnd_) if (w && IsWindow(w)) DestroyWindow(w);
         for (HBITMAP b : bmp_) if (b) DeleteObject(b);
+        if (font_) { DeleteObject(font_); font_ = NULL; }
         wnd_.clear();
         bmp_.clear();
+        btn_.clear();
     }
 };
 
@@ -12867,6 +13298,7 @@ private:
                 c->SaveRdpServer();
                 std::string err;
                 if (!rdp::Server::Get().Start(RdpServerCfg(*c), err)) RdpDlg::Warn(d, TITLE, err.c_str(), 0);
+                else rdp::LogWin::Open();                          // 연결 상황을 보여 주는 로그 창
                 Refresh(d);
                 return TRUE; }
             case IDC_STOP:
@@ -13156,7 +13588,7 @@ private:
         CMD_CITY        = 300,      // 300 + 도시 인덱스
         CMD_MOVE        = 400,      // 400 + 이동 간격 선택지 인덱스
         CMD_PROG        = 610,      // 610 사용, 611 시각, 612 파일, 613 메모, 614 지우기, 615 테스트
-        CMD_UPLOADS     = 750,      // IP cam / 폰 연결 > 텔레그램 송수신 & 이미지 뷰어 (텔레그램으로 받은 파일 이미지 창)
+        CMD_UPLOADS     = 750,      // IP cam / 폰 연결 > 텔레그램/클라이언트 송수신 뷰어 (텔레그램으로 받은 파일 이미지 창)
         CMD_DETECT      = 747,      // 작동시간 및 알람 설정 > 침입 탐지 시간
         CMD_CHIME       = 748,      // 작동시간 및 알람 설정 > 시보 설정
         CMD_SCANSET     = 749,      // WiFiScan > HomeBack / NotHome 탐지 시간 및 프로그램 설정
@@ -13743,7 +14175,7 @@ private:
         AddMenu(ipc, 0, CMD_IPREG,  "IP cam 등록(&R)...");
         AddMenu(ipc, 0, CMD_IPVIEW, "카메라 영상(&V)");
         AddMenu(ipc, 0, CMD_PHONE,  "폰 탐색기(&E)...");
-        AddMenu(ipc, 0, CMD_UPLOADS, "텔레그램 송수신 && 이미지 뷰어(&F)");         // 4번째: 텔레그램으로 받은 파일(upload 폴더)을 이미지 창으로 탐색
+        AddMenu(ipc, 0, CMD_UPLOADS, "텔레그램/클라이언트 송수신 뷰어(&F)");         // 4번째: 텔레그램으로 받은 파일(upload 폴더)을 이미지 창으로 탐색
         AppendMenuA(ipc, MF_SEPARATOR, 0, NULL);
         AddMenu(ipc, 0, CMD_RDPSRV, "다른 PC(서버)(&S)...");           // 이 PC 를 원격 제어하게 함 (rdp_server)
         AddMenu(ipc, 0, CMD_RDPCLI, "다른 PC(클라이언트)(&C)...");     // 다른 PC 를 원격 제어 (rdp_client)
@@ -14695,7 +15127,7 @@ private:
         case CMD_IPREG:     n = "IP cam > IP cam 등록"; break;
         case CMD_IPVIEW:    n = "IP cam / 폰 연결 > 카메라 영상"; break;
         case CMD_PHONE:     n = "IP cam / 폰 연결 > 폰 탐색기"; break;
-        case CMD_UPLOADS:   n = "IP cam / 폰 연결 > 텔레그램 송수신 & 이미지 뷰어"; break;
+        case CMD_UPLOADS:   n = "IP cam / 폰 연결 > 텔레그램/클라이언트 송수신 뷰어"; break;
         case CMD_RDPSRV:    n = "IP cam / 폰 연결 > 다른 PC(서버)"; break;
         case CMD_RDPCLI:    n = "IP cam / 폰 연결 > 다른 PC(클라이언트)"; break;
         case CMD_SHOWDATE:  n = "년월일 보이기/숨기기 토글"; break;
@@ -15804,10 +16236,10 @@ private:
         }
     }
 
-    // F8) 텔레그램 송수신 & 이미지 뷰어: 업로드 폴더의 파일을 이미지 창으로 연다 (이미 열려 있으면 앞으로 가져옴)
+    // F8) 텔레그램/클라이언트 송수신 뷰어: 업로드 폴더의 파일을 이미지 창으로 연다 (이미 열려 있으면 앞으로 가져옴)
     void BrowseUploadsCommand() {
         std::string msg;
-        if (!tg::BrowseUploads(msg)) ShowInfo("텔레그램 송수신 & 이미지 뷰어", msg.empty() ? "표시할 파일이 없습니다." : msg.c_str());
+        if (!tg::BrowseUploads(msg)) ShowInfo("텔레그램/클라이언트 송수신 뷰어", msg.empty() ? "표시할 파일이 없습니다." : msg.c_str());
     }
 
     void PhoneExplorer() {
