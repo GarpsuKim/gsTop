@@ -9063,10 +9063,14 @@ private:
         HWND bUp = nullptr, bDn = nullptr;   // 왼쪽 미리보기 목록의 위 / 아래 스크롤 버튼
         int first = 0;                       // 미리보기 목록에서 맨 위에 보이는 항목
         std::map<std::wstring, Thumb> thumbs; // 경로별 축소 그림 (보일 때 읽어 둠)
+        bool full = false;                   // [전체 화면]: 모니터 전체에 이미지만 보여 주는 중
+        DWORD fullExit = 0;                  // 전체 화면을 해제한 시각 (더블클릭의 두 번째 클릭이 목록 항목을 잘못 고르지 않게 잠시 무시)
+        LONG_PTR savedStyle = 0;             // 전체 화면 전의 창 스타일 / 위치
+        WINDOWPLACEMENT savedWp = {};
     };
     enum { WM_ADD = WM_APP + 41, WM_SHOWPATH = WM_APP + 42, BAR_H = 66, ROW_H = 26, LP_W = 150, CELL = 92, UPD = 22, ID_UP = 101, ID_DN = 102, TIMER_ANIM = 1, TIMER_SHOW = 2, ANIM_MS = 220 };
     static int secAt(int i) { static const int k[13] = {1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600}; return k[i]; }   // SlideShow 시간 간격(초) 목록 (기본 3초)
-    enum { ID_OPEN = 1, ID_ROTL, ID_ROTR, ID_PREV, ID_NEXT, ID_DEL, ID_ADD, ID_RUN, ID_SSL, ID_SSR, ID_INT, ID_FX, ID_TG, ID_CLR };   // 윗줄 버튼 10개(◀◀=SlideShow 좌, ▶▶=SlideShow 우 포함) / 아랫줄 시간 간격 목록 (btn[id-1])
+    enum { ID_OPEN = 1, ID_ROTL, ID_ROTR, ID_PREV, ID_NEXT, ID_DEL, ID_ADD, ID_RUN, ID_SSL, ID_SSR, ID_INT, ID_FX, ID_TG, ID_CLR, ID_FULL };   // 윗줄 버튼 10개(◀◀=SlideShow 좌, ▶▶=SlideShow 우 포함) / 아랫줄 시간 간격 목록 (btn[id-1])
     static constexpr const wchar_t* kClass = L"ScreenTelegramImageView";
     static inline std::mutex mu_;
     static inline HWND hwnd_ = nullptr;       // 떠 있는 창 (없으면 nullptr)
@@ -9271,8 +9275,10 @@ private:
     {
         RECT rc;
         GetClientRect(hw, &rc);
-        rc.top = BAR_H;
-        rc.left = LP_W;   // 왼쪽 LP_W 픽셀은 미리보기 목록, 나머지가 기존 뷰어 영역
+        const View* v = reinterpret_cast<View*>(GetWindowLongPtrW(hw, GWLP_USERDATA));
+        const bool fs = v && v->full;   // 전체 화면: 클라이언트 전체가 이미지 영역
+        rc.top = fs ? 0 : (int)BAR_H;
+        rc.left = fs ? 0 : (int)LP_W;   // 왼쪽 LP_W 픽셀은 미리보기 목록, 나머지가 기존 뷰어 영역
         if (rc.bottom < rc.top) rc.bottom = rc.top;
         if (rc.right < rc.left) rc.right = rc.left;
         return rc;
@@ -9459,6 +9465,7 @@ private:
         en(ID_RUN, has && !v->list[v->idx].image);   // 실행: 이미지가 아닌 파일일 때만
         en(ID_CLR, has);                              // 목록 비우기: 목록이 비어 있지 않을 때만
         en(ID_TG, has);                               // 텔레그램으로 보내기: 목록이 비어 있지 않을 때만
+        en(ID_FULL, has);                             // 전체 화면: 목록이 비어 있지 않을 때만
         const bool canShow = imageCount(v) >= 2;      // SlideShow: 목록에 이미지가 2개 이상일 때만
         en(ID_SSL, canShow);
         en(ID_SSR, canShow);
@@ -9748,9 +9755,40 @@ private:
         showEmpty(v, true);
     }
 
+    // [전체 화면]: 모니터 전체에 이미지만 보여 준다 (버튼/목록/제목줄 숨김). 해제하면 원래 창 모양과 위치로 복귀.
+    static void setFull(View* v, bool on)
+    {
+        if (!v || !v->hw || v->full == on) return;
+        HWND hw = v->hw;
+        if (on) {
+            MONITORINFO mi = {};
+            mi.cbSize = sizeof(mi);
+            if (!GetMonitorInfoW(MonitorFromWindow(hw, MONITOR_DEFAULTTONEAREST), &mi)) return;
+            v->savedWp.length = sizeof(WINDOWPLACEMENT);
+            GetWindowPlacement(hw, &v->savedWp);
+            v->savedStyle = GetWindowLongPtrW(hw, GWL_STYLE);
+            v->full = true;
+            for (HWND c = GetWindow(hw, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) ShowWindow(c, SW_HIDE);
+            SetWindowLongPtrW(hw, GWL_STYLE, v->savedStyle & ~(LONG_PTR)WS_OVERLAPPEDWINDOW);
+            SetWindowPos(hw, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                         mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        } else {
+            v->full = false;
+            v->fullExit = GetTickCount();
+            SetWindowLongPtrW(hw, GWL_STYLE, v->savedStyle);
+            SetWindowPlacement(hw, &v->savedWp);
+            SetWindowPos(hw, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            for (HWND c = GetWindow(hw, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) ShowWindow(c, SW_SHOW);
+            layout(v);
+        }
+        Logger::log("이미지 창: 전체 화면 %s", on ? "켬" : "끔");
+        InvalidateRect(hw, nullptr, TRUE);
+    }
+
     static void onButton(View* v, int id)
     {
         switch (id) {
+        case ID_FULL: setFull(v, true); break;
         case ID_CLR:  clearList(v); break;
         case ID_ROTL: rotateCur(v, false); break;
         case ID_ROTR: rotateCur(v, true); break;
@@ -9787,6 +9825,9 @@ private:
         v->btn[ID_CLR - 1] = CreateWindowExW(0, L"BUTTON", L"목록 비우기", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
                                              0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_CLR, inst, nullptr);   // 윗줄 맨 앞 (목록이 비어 있지 않을 때만 활성)
         SendMessageW(v->btn[ID_CLR - 1], WM_SETFONT, (WPARAM)font, TRUE);
+        v->btn[ID_FULL - 1] = CreateWindowExW(0, L"BUTTON", L"전체 화면", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
+                                              0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_FULL, inst, nullptr);   // 아랫줄 맨 끝 (목록이 비어 있지 않을 때만 활성)
+        SendMessageW(v->btn[ID_FULL - 1], WM_SETFONT, (WPARAM)font, TRUE);
         v->bUp = CreateWindowExW(0, L"BUTTON", L"▲", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, 0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_UP, inst, nullptr);
         v->bDn = CreateWindowExW(0, L"BUTTON", L"▼", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, 0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_DN, inst, nullptr);
         SendMessageW(v->bUp, WM_SETFONT, (WPARAM)font, TRUE);   // 왼쪽 미리보기 목록 위 / 아래 스크롤
@@ -9819,6 +9860,7 @@ private:
 
     static void layout(View* v)
     {
+        if (v->full) return;   // 전체 화면: 컨트롤은 모두 숨김
         // 윗줄 (왼쪽부터): 목록 비우기, up_down 탐색기, 좌 90° 회전, 우 90° 회전, ◀◀(SlideShow 좌), ◀, ▶, ▶▶(SlideShow 우), 삭제, 목록 추가, 실행, 텔레그램으로 보내기
         static const int ord[12] = {ID_CLR, ID_OPEN, ID_ROTL, ID_ROTR, ID_SSL, ID_PREV, ID_NEXT, ID_SSR, ID_DEL, ID_ADD, ID_RUN, ID_TG};
         static const int wd[12] = {90, 150, 100, 100, 40, 40, 40, 40, 60, 80, 60, 140};
@@ -9832,6 +9874,7 @@ private:
         if (v->btn[ID_INT - 1]) MoveWindow(v->btn[ID_INT - 1], 112, y2, 80, 240, TRUE);   // 높이는 펼친 목록 높이 포함
         if (v->lbl2) MoveWindow(v->lbl2, 204, y2, 90, ROW_H, TRUE);
         if (v->btn[ID_FX - 1]) MoveWindow(v->btn[ID_FX - 1], 300, y2, 160, 280, TRUE);
+        if (v->btn[ID_FULL - 1]) MoveWindow(v->btn[ID_FULL - 1], 472, y2 - 1, 100, ROW_H, TRUE);
         RECT rc;   // 왼쪽 미리보기 목록의 위 / 아래 스크롤 버튼
         GetClientRect(v->hw, &rc);
         if (v->bUp) MoveWindow(v->bUp, 0, BAR_H, LP_W, UPD, TRUE);
@@ -9990,13 +10033,15 @@ private:
             }
             return 0;
         case WM_LBUTTONDOWN:   // 왼쪽 미리보기 목록에서 항목 선택
-            if (v) { panelClick(v, (short)LOWORD(lp), (short)HIWORD(lp)); SetFocus(hw); }
+            if (v && v->full) { setFull(v, false); SetFocus(hw); }   // 전체 화면: 마우스 클릭 / 더블클릭으로 해제
+            else if (v && GetTickCount() - v->fullExit < GetDoubleClickTime()) { /* 더블클릭의 두 번째 클릭: 무시 */ }
+            else if (v) { panelClick(v, (short)LOWORD(lp), (short)HIWORD(lp)); SetFocus(hw); }
             return 0;
         case WM_MOUSEWHEEL:    // 휠: 왼쪽 미리보기 목록 상하 스크롤
-            if (v) scrollBy(v, GET_WHEEL_DELTA_WPARAM(wp) > 0 ? -1 : +1);
+            if (v && !v->full) scrollBy(v, GET_WHEEL_DELTA_WPARAM(wp) > 0 ? -1 : +1);
             return 0;
         case WM_KEYDOWN:
-            if (wp == VK_ESCAPE) DestroyWindow(hw);
+            if (wp == VK_ESCAPE) { if (v && v->full) setFull(v, false); else DestroyWindow(hw); }   // 전체 화면이면 해제만
             else if (v && wp == VK_LEFT) go(v, -1);
             else if (v && wp == VK_RIGHT) go(v, +1);
             else if (v && wp == VK_DELETE) deleteCur(v);
@@ -10034,9 +10079,11 @@ private:
             HDC dc = BeginPaint(hw, &ps);
             RECT rc;
             GetClientRect(hw, &rc);
-            RECT bar = {0, 0, rc.right, std::min<LONG>(BAR_H, rc.bottom)};
+            const bool fs = v && v->full;   // 전체 화면: 버튼줄/미리보기 목록 없이 이미지만
+            const int lpw = fs ? 0 : (int)LP_W, barh = fs ? 0 : (int)BAR_H;
+            RECT bar = {0, 0, rc.right, std::min<LONG>(barh, rc.bottom)};
             FillRect(dc, &bar, GetSysColorBrush(COLOR_BTNFACE));
-            const int W = rc.right - LP_W, H = rc.bottom - BAR_H;   // 오른쪽 큰 영역 = 기존 뷰어
+            const int W = rc.right - lpw, H = rc.bottom - barh;   // 오른쪽 큰 영역 = 기존 뷰어
             if (v && W > 0 && H > 0) {
                 HDC mem = CreateCompatibleDC(dc);
                 HBITMAP buf = CreateCompatibleBitmap(dc, W, H);
@@ -10057,12 +10104,12 @@ private:
                 } else {
                     drawFit(mem, v->cur, v->cw, v->ch, 0, W, H);
                 }
-                BitBlt(dc, LP_W, BAR_H, W, H, mem, 0, 0, SRCCOPY);
+                BitBlt(dc, lpw, barh, W, H, mem, 0, 0, SRCCOPY);
                 SelectObject(mem, ob);
                 DeleteObject(buf);
                 DeleteDC(mem);
             }
-            if (v && ps.rcPaint.left < LP_W) paintPanel(dc, v, rc);   // 왼쪽 미리보기 목록
+            if (v && !fs && ps.rcPaint.left < LP_W) paintPanel(dc, v, rc);   // 왼쪽 미리보기 목록
             EndPaint(hw, &ps);
             return 0;
         }
@@ -12121,7 +12168,7 @@ enum { RM_AUTH = 1, RM_FRAME = 2, RM_INPUT = 3, RM_INFO = 4, RM_FILE = 5 };
 // RM_FILE 내용 = 종류 1바이트 + 자료. 클라이언트 -> 서버: BEGIN(파일 크기 8바이트 + UTF-8 파일명) / DATA(파일 조각) / END / ABORT. 서버 -> 클라이언트: ACK(성공 여부 1바이트)
 enum { FT_BEGIN = 0, FT_DATA = 1, FT_END = 2, FT_ABORT = 3, FT_ACK = 4 };
 static constexpr uint32_t kFileChunk = 64 * 1024, kFileMsgMax = kFileChunk + 1024;
-enum { EV_MOVE = 1, EV_BTN = 2, EV_WHEEL = 3 };
+enum { EV_MOVE = 1, EV_BTN = 2, EV_WHEEL = 3, EV_KEY = 4 };   // EV_KEY: a = 가상 키 코드, b = 비트 1(키 뗌) | 비트 2(확장 키), m = 스캔 코드. 옛 서버는 모르는 종류라 무시함
 
 static bool sendAll(SOCKET s, const void* p, int n) {
     const char* c = (const char*)p;
@@ -12135,7 +12182,14 @@ static bool recvAll(SOCKET s, void* p, int n) {
 }
 static bool sendMsg(SOCKET s, uint8_t type, const void* p, uint32_t len) {
     Hdr h{type, len};
-    return sendAll(s, &h, sizeof h) && (len == 0 || sendAll(s, p, (int)len));
+    if (len == 0) return sendAll(s, &h, sizeof h);
+    if (len <= kFileMsgMax) {   // 머리와 본문을 한 번에 보냄 (TCP_NODELAY 에서 5바이트 머리가 작은 패킷으로 따로 나가지 않게)
+        char tb[sizeof(Hdr) + kFileMsgMax];
+        memcpy(tb, &h, sizeof h);
+        memcpy(tb + sizeof h, p, len);
+        return sendAll(s, tb, (int)(sizeof h + len));
+    }
+    return sendAll(s, &h, sizeof h) && sendAll(s, p, (int)len);
 }
 
 // 서버에 저장할 파일명 정리: 경로, 금지 문자, 예약어 제거 (비면 빈 문자열)
@@ -12638,7 +12692,7 @@ private:
     }
 
     // 클라이언트의 마우스 입력을 이 PC 에 넣음 (a, b = 모니터 m 안의 0..65535 좌표 -> 가상 데스크톱 좌표)
-    static void Inject(const Ev& e, const std::vector<RECT>& mons) {
+    static void Inject(const Ev& e, const std::vector<RECT>& mons, std::set<int>* keys = nullptr) {
         INPUT in = {};
         switch (e.t) {
         case EV_MOVE: {
@@ -12666,9 +12720,35 @@ private:
             in.mi.dwFlags = MOUSEEVENTF_WHEEL;
             in.mi.mouseData = (DWORD)e.a;
             break;
+        case EV_KEY: {                          // 클라이언트의 키 입력 (한/영 전환은 이 PC 의 IME 가 처리)
+            const int vk = e.a;
+            if (vk < 1 || vk > 254 || vk == 0xE5) return;   // 0xE5 = VK_PROCESSKEY (IME 처리 중)
+            const bool up = (e.b & 1) != 0, ext = (e.b & 2) != 0;
+            in.type = INPUT_KEYBOARD;
+            in.ki.wVk = (WORD)vk;
+            in.ki.wScan = (WORD)(e.m & 0xFF);
+            in.ki.dwFlags = (up ? KEYEVENTF_KEYUP : 0) | (ext ? KEYEVENTF_EXTENDEDKEY : 0);
+            if (keys) {                         // 눌려 있는 키를 기억 (연결이 끊기면 떼 줌)
+                const int code = vk | (ext ? 0x100 : 0) | ((e.m & 0xFF) << 16);
+                if (up) keys->erase(code); else keys->insert(code);
+            }
+            break; }
         default: return;
         }
         SendInput(1, &in, sizeof(INPUT));
+    }
+
+    // 연결이 끊길 때 눌린 채로 남은 키를 모두 뗌 (키가 계속 눌린 상태로 남지 않게)
+    static void ReleaseKeys(std::set<int>& keys) {
+        for (int code : keys) {
+            INPUT in = {};
+            in.type = INPUT_KEYBOARD;
+            in.ki.wVk = (WORD)(code & 0xFF);
+            in.ki.wScan = (WORD)((code >> 16) & 0xFF);
+            in.ki.dwFlags = KEYEVENTF_KEYUP | ((code & 0x100) ? KEYEVENTF_EXTENDEDKEY : 0);
+            SendInput(1, &in, sizeof(INPUT));
+        }
+        keys.clear();
     }
 
     static std::wstring BaseName(const std::wstring& p) {
@@ -12788,6 +12868,8 @@ private:
             }
             int nd = 1;
             setsockopt(c, IPPROTO_TCP, 1 /*TCP_NODELAY*/, (char*)&nd, sizeof nd);
+            int sb = 1 << 20;                   // 송신 버퍼 1MB (화면 프레임 / 파일 조각을 한꺼번에 밀어 넣을 수 있게)
+            setsockopt(c, SOL_SOCKET, SO_SNDBUF, (char*)&sb, sizeof sb);
             cur_ = c;
             Serve(c, ips);
             cur_ = INVALID_SOCKET;
@@ -12854,10 +12936,11 @@ private:
         }
 
         std::atomic<bool> alive(true);
-        std::thread rx([&] {                    // 클라이언트 -> 서버: 마우스 입력
+        std::thread rx([&] {                    // 클라이언트 -> 서버: 마우스 / 키보드 입력, 파일
             tg::enableThreadDpiAwareness();
             Hdr h;
             FileRx fs;
+            std::set<int> keysDown;             // 눌려 있는 키
             while (recvAll(c, &h, sizeof h)) {
                 if (h.type == RM_FILE) {                // 파일 전송 (조각마다 한 메시지)
                     if (h.len == 0 || h.len > kFileMsgMax) break;
@@ -12870,17 +12953,18 @@ private:
                 Ev e;
                 if (h.type == RM_INPUT && h.len == sizeof e) {
                     if (!recvAll(c, &e, sizeof e)) break;
-                    Inject(e, gMons);
+                    Inject(e, gMons, &keysDown);
                 } else {
                     std::vector<char> skip(h.len);
                     if (h.len && !recvAll(c, skip.data(), (int)h.len)) break;
                 }
             }
             fs.Drop();                          // 연결이 끊겨 끝나지 않은 파일은 지움
+            ReleaseKeys(keysDown);              // 눌린 채로 남은 키는 뗌
             alive = false;
         });
 
-        struct Mon { int W, H; HDC mem; HBITMAP dib; HGDIOBJ old; void* bits; size_t bytes; std::vector<uint8_t> prev; };
+        struct Mon { int W, H; HDC mem; HBITMAP dib; HGDIOBJ old; void* bits; size_t bytes; std::vector<uint8_t> prev; bool refined = true; double changedAt = 0; };
         std::vector<Mon> mons(gMons.size());
         HDC scr = GetDC(NULL);
         for (size_t i = 0; i < mons.size(); i++) {
@@ -12901,46 +12985,85 @@ private:
             m.bytes = (size_t)m.W * m.H * 4;
             m.prev.assign(m.bytes, 0);
         }
-        ULONG quality = 60;
+        ULONG quality = 60;                     // 움직임이 있을 때의 JPEG 화질. 전송이 느리거나 프레임이 크면 낮추고(최저 35), 여유가 있으면 올림(최고 75)
+        const ULONG kRefineQuality = 90;        // 화면이 멈추면 한 번 더 보내는 고화질 (글자가 또렷해짐)
+        const double kRefineMs = 400;           // 화면이 이 시간(ms) 동안 안 바뀌면 고화질로 다시 보냄
         unsigned long sentFrames = 0, sentBytes = 0;
+        auto nowMs = []() -> double {
+            LARGE_INTEGER f, t;
+            QueryPerformanceFrequency(&f);
+            QueryPerformanceCounter(&t);
+            return 1000.0 * (double)t.QuadPart / (double)f.QuadPart;
+        };
+        // 모니터 i 의 현재 화면(DIB)을 JPEG(q)로 인코딩해 보낸다. bytes = JPEG 크기, sendMs = 전송에 걸린 시간. 전송에 실패하면 false
+        auto sendFrame = [&](size_t i, ULONG q, unsigned long& bytes, double& sendMs) -> bool {
+            Mon& m = mons[i];
+            bytes = 0;
+            sendMs = 0;
+            bool sentOk = true;
+            Gdiplus::Bitmap bmp(m.W, m.H, m.W * 4, PixelFormat32bppRGB, (BYTE*)m.bits);
+            IStream* st = nullptr;
+            CreateStreamOnHGlobal(NULL, TRUE, &st);
+            Gdiplus::EncoderParameters ep;
+            ep.Count = 1;
+            ep.Parameter[0].Guid = Gdiplus::EncoderQuality;
+            ep.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+            ep.Parameter[0].NumberOfValues = 1;
+            ep.Parameter[0].Value = &q;
+            if (st && bmp.Save(st, &jpg, &ep) == Gdiplus::Ok) {
+                STATSTG ss;
+                st->Stat(&ss, STATFLAG_NONAME);
+                HGLOBAL hg;
+                GetHGlobalFromStream(st, &hg);
+                void* p = GlobalLock(hg);
+                const uint32_t cb = ss.cbSize.LowPart;
+                Hdr fh{RM_FRAME, cb + 4};                           // 내용 = 모니터 번호 + JPEG
+                int32_t idx = (int32_t)i;
+                char head[sizeof(Hdr) + 4];                         // 머리 + 모니터 번호를 한 번에 보냄 (작은 패킷 방지)
+                memcpy(head, &fh, sizeof fh);
+                memcpy(head + sizeof fh, &idx, 4);
+                const double t1 = nowMs();
+                {
+                    std::lock_guard<std::mutex> wl(wmtx_);          // 파일 수신 응답(ACK)과 섞이지 않게
+                    sentOk = sendAll(c, head, (int)sizeof head) && sendAll(c, p, (int)cb);
+                }
+                sendMs = nowMs() - t1;
+                GlobalUnlock(hg);
+                if (sentOk) { bytes = cb; sentFrames++; sentBytes += cb; frames_++; }
+            } else {
+                Log::Put("원격 서버: JPEG 인코딩 실패 (모니터 %d)", (int)i + 1);
+            }
+            if (st) st->Release();
+            return sentOk;
+        };
         while (alive && !stop_) {               // 서버 -> 클라이언트: 바뀐 모니터의 화면만 JPEG 로 전송
+            const double t0 = nowMs();
             bool sentOk = true;
             for (size_t i = 0; i < mons.size() && sentOk; i++) {
                 Mon& m = mons[i];
                 if (!m.bits) continue;
                 BitBlt(m.mem, 0, 0, m.W, m.H, scr, gMons[i].left, gMons[i].top, SRCCOPY | CAPTUREBLT);
-                if (memcmp(m.prev.data(), m.bits, m.bytes) == 0) continue;     // 이 모니터는 그대로
-                memcpy(m.prev.data(), m.bits, m.bytes);
-                Gdiplus::Bitmap bmp(m.W, m.H, m.W * 4, PixelFormat32bppRGB, (BYTE*)m.bits);
-                IStream* st = nullptr;
-                CreateStreamOnHGlobal(NULL, TRUE, &st);
-                Gdiplus::EncoderParameters ep;
-                ep.Count = 1;
-                ep.Parameter[0].Guid = Gdiplus::EncoderQuality;
-                ep.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
-                ep.Parameter[0].NumberOfValues = 1;
-                ep.Parameter[0].Value = &quality;
-                if (bmp.Save(st, &jpg, &ep) == Gdiplus::Ok) {
-                    STATSTG ss;
-                    st->Stat(&ss, STATFLAG_NONAME);
-                    HGLOBAL hg;
-                    GetHGlobalFromStream(st, &hg);
-                    void* p = GlobalLock(hg);
-                    Hdr fh{RM_FRAME, ss.cbSize.LowPart + 4};         // 내용 = 모니터 번호 + JPEG
-                    int32_t idx = (int32_t)i;
-                    {
-                        std::lock_guard<std::mutex> wl(wmtx_);      // 파일 수신 응답(ACK)과 섞이지 않게
-                        sentOk = sendAll(c, &fh, sizeof fh) && sendAll(c, &idx, 4) && sendAll(c, p, (int)ss.cbSize.LowPart);
+                unsigned long bytes = 0;
+                double ms = 0;
+                if (memcmp(m.prev.data(), m.bits, m.bytes) == 0) {              // 이 모니터는 그대로
+                    if (!m.refined && nowMs() - m.changedAt >= kRefineMs) {     // 한동안 멈춰 있으면 고화질로 한 번 더 보냄
+                        m.refined = true;
+                        sentOk = sendFrame(i, kRefineQuality, bytes, ms);
                     }
-                    GlobalUnlock(hg);
-                    if (sentOk) { sentFrames++; sentBytes += ss.cbSize.LowPart; frames_++; }
-                } else {
-                    Log::Put("원격 서버: JPEG 인코딩 실패 (모니터 %d)", (int)i + 1);
+                    continue;
                 }
-                st->Release();
+                memcpy(m.prev.data(), m.bits, m.bytes);
+                m.refined = false;
+                m.changedAt = nowMs();
+                sentOk = sendFrame(i, quality, bytes, ms);
+                if (sentOk && bytes) {                                          // 화질 자동 조절
+                    if (ms > 120 || bytes > 400000) quality = std::max<ULONG>(35, quality - 5);
+                    else if (ms < 30 && bytes < 150000) quality = std::min<ULONG>(75, quality + 3);
+                }
             }
             if (!sentOk) { Log::Put("원격 서버: 전송 실패, 세션을 끝냄"); break; }
-            Sleep(60);
+            const int el = (int)(nowMs() - t0);                                 // 한 바퀴 약 50ms (초당 20장까지)
+            Sleep(el >= 50 ? 5 : 50 - el);
         }
         shutdown(c, SD_BOTH);
         rx.join();
@@ -13029,7 +13152,8 @@ private:
     static inline std::vector<HWND> btn_;           // 창마다 버튼 1개
     static inline std::thread ft_;                  // 파일 전송 스레드 (창 스레드가 멈추지 않게)
     static inline HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
-    static inline std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false};
+    static inline std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false}, cancelFt_{false};   // cancelFt_: 전송 중 [취소]
+    static inline std::set<int> down_;              // 눌려 있는 키 (창 스레드에서만 접근)
     static inline std::mutex smtx_, pmtx_;          // smtx_ = 소켓 송신 직렬화 (마우스 입력 + 파일), pmtx_ = ptext_
     static inline std::wstring ptext_;
     static inline int tb_ = 32;                     // 버튼 줄 높이 (픽셀)
@@ -13066,7 +13190,9 @@ private:
         buf[0] = FT_DATA;
         unsigned long long sent = 0;
         DWORD last = 0;
+        const DWORD tStart = GetTickCount();
         while (ok && sent < size) {
+            if (cancelFt_) { why = L"사용자가 취소함"; ok = false; break; }
             DWORD n = 0;
             if (!ReadFile(h, &buf[1], kFileChunk, &n, NULL) || n == 0) { why = L"파일을 읽을 수 없음"; ok = false; break; }
             if ((unsigned long long)n > size - sent) n = (DWORD)(size - sent);
@@ -13076,7 +13202,9 @@ private:
             if (now - last >= 200 || sent == size) {
                 last = now;
                 wchar_t t[96];
-                wsprintfW(t, L"전송 중 %d/%d (%d%%)", (int)no, (int)total, size ? (int)(sent * 100 / size) : 100);
+                const unsigned long long bps = sent * 1000ULL / std::max<DWORD>(1, now - tStart);   // 바이트/초
+                const unsigned long long tenth = bps * 10 / (1024 * 1024);
+                wsprintfW(t, L"취소 (%d/%d, %d%%, %d.%d MB/s)", (int)no, (int)total, size ? (int)(sent * 100 / size) : 100, (int)(tenth / 10), (int)(tenth % 10));
                 PostText(WM_FPROG, t);
             }
         }
@@ -13098,7 +13226,7 @@ private:
     static void SendFiles(std::vector<std::wstring> files) {
         int okN = 0;
         std::wstring fails;
-        for (size_t i = 0; i < files.size() && !closing_; i++) {
+        for (size_t i = 0; i < files.size() && !closing_ && !cancelFt_; i++) {
             std::wstring why;
             const size_t sl = files[i].find_last_of(L"\\/");
             const std::wstring base = sl == std::wstring::npos ? files[i] : files[i].substr(sl + 1);
@@ -13112,6 +13240,7 @@ private:
         }
         std::wstring r = std::to_wstring(okN) + L" / " + std::to_wstring(files.size()) + L" 개 전송 완료\n(서버 PC 의 up_down\\날짜 폴더에 저장됨)";
         if (!fails.empty()) r += L"\n\n실패:" + fails;
+        if (cancelFt_) r += L"\n\n사용자가 전송을 취소했습니다.";
         PostText(WM_FDONE, r);
     }
 
@@ -13145,15 +13274,51 @@ private:
         return !files.empty();
     }
 
-    static void OnFileButton(HWND w) {
-        if (sending_) return;
-        std::vector<std::wstring> files;
-        if (!PickFiles(w, files)) return;
+    // 폴더면 안의 파일을 모두 모음 (하위 폴더 포함, 깊이 8 / 2000개까지. 링크는 따라가지 않음). 서버에는 한 폴더(up_down\날짜)에 모두 저장됨
+    static void CollectFiles(const std::wstring& p, std::vector<std::wstring>& out, int depth = 0) {
+        const DWORD a = GetFileAttributesW(p.c_str());
+        if (a == INVALID_FILE_ATTRIBUTES) return;
+        if (!(a & FILE_ATTRIBUTE_DIRECTORY)) { out.push_back(p); return; }
+        if (depth >= 8 || out.size() >= 2000) return;
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((p + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return;
+        do {
+            if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+            CollectFiles(p + L"\\" + fd.cFileName, out, depth + 1);
+        } while (FindNextFileW(h, &fd) && out.size() < 2000);
+        FindClose(h);
+    }
+
+    static void StartSend(const std::vector<std::wstring>& files) {
+        if (files.empty() || sending_) return;
         sending_ = true;
-        for (HWND b : btn_) EnableWindow(b, FALSE);
+        cancelFt_ = false;
         if (ft_.joinable()) ft_.join();
         Log::Put("원격 클라이언트: 파일 %d 개 전송 시작", (int)files.size());
         ft_ = std::thread([files] { SendFiles(files); });
+    }
+
+    static void OnFileButton(HWND w) {
+        if (sending_) {                                 // 전송 중에는 이 버튼이 [취소]
+            cancelFt_ = true;
+            Log::Put("원격 클라이언트: 파일 전송 취소 요청");
+            return;
+        }
+        std::vector<std::wstring> files;
+        if (!PickFiles(w, files)) return;
+        StartSend(files);
+    }
+
+    // 이 창에서는 클라이언트 PC 의 IME 를 끔: 한글 조합은 서버의 IME 가 하도록 키 입력을 그대로 보내기 위해
+    static void DisableIme(HWND w) {
+        typedef HANDLE (WINAPI *ImmAssocFn)(HWND, HANDLE);   // HIMC 는 핸들 (imm.h 없이 선언)
+        HMODULE m = GetModuleHandleW(L"imm32.dll");
+        if (!m) m = LoadLibraryW(L"imm32.dll");
+        if (!m) return;
+        ImmAssocFn f = (ImmAssocFn)(void*)GetProcAddress(m, "ImmAssociateContext");
+        if (f) f(w, NULL);
     }
 
     static const char* ErrText(int e) {
@@ -13247,6 +13412,8 @@ private:
         Log::Put("원격 클라이언트: 연결됨, 비밀번호 전송");
         int nd = 1;
         setsockopt(s, IPPROTO_TCP, 1 /*TCP_NODELAY*/, (char*)&nd, sizeof nd);
+        int sb = 1 << 20;                       // 송신 버퍼 1MB (파일 전송 속도)
+        setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)&sb, sizeof sb);
         sendMsg(s, RM_AUTH, c.pw.data(), (uint32_t)c.pw.size());
         // 서버 사용자가 허용 여부를 누를 때까지 기다림 (최대 APPROVE_SEC 초)
         if (!Wait(s, false, APPROVE_SEC, 1, err)) {
@@ -13445,7 +13612,7 @@ private:
             }
             return 0; }
         case WM_COMMAND:
-            if (LOWORD(wp) == IDC_FILE && HIWORD(wp) == BN_CLICKED) { OnFileButton(w); return 0; }
+            if (LOWORD(wp) == IDC_FILE && HIWORD(wp) == BN_CLICKED) { OnFileButton(w); SetFocus(w); return 0; }   // 키 입력이 계속 이 창으로 오게
             break;
         case WM_FPROG: {
             std::wstring t;
@@ -13459,15 +13626,45 @@ private:
             sending_ = false;
             if (!closing_) MessageBoxW(w, t.c_str(), L"파일 전송", MB_OK | MB_ICONINFORMATION);
             return 0; }
-        case WM_LBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_LEFTDOWN); return 0;
+        case WM_LBUTTONDOWN: SetCapture(w); SetFocus(w); SendEv(EV_BTN, MOUSEEVENTF_LEFTDOWN); return 0;
         case WM_LBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_LEFTUP); return 0;
-        case WM_RBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_RIGHTDOWN); return 0;
+        case WM_RBUTTONDOWN: SetCapture(w); SetFocus(w); SendEv(EV_BTN, MOUSEEVENTF_RIGHTDOWN); return 0;
         case WM_RBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_RIGHTUP); return 0;
-        case WM_MBUTTONDOWN: SetCapture(w); SendEv(EV_BTN, MOUSEEVENTF_MIDDLEDOWN); return 0;
+        case WM_MBUTTONDOWN: SetCapture(w); SetFocus(w); SendEv(EV_BTN, MOUSEEVENTF_MIDDLEDOWN); return 0;
         case WM_MBUTTONUP:   ReleaseCapture(); SendEv(EV_BTN, MOUSEEVENTF_MIDDLEUP); return 0;
         case WM_MOUSEWHEEL:
             SendEv(EV_WHEEL, (short)HIWORD(wp));
             return 0;
+        case WM_KEYDOWN: case WM_SYSKEYDOWN: case WM_KEYUP: case WM_SYSKEYUP: {   // 키보드: 서버로 전달 (Alt 조합도 이 창이 가져감)
+            const bool up = (m == WM_KEYUP || m == WM_SYSKEYUP);
+            const int vk = (int)wp;
+            if (vk < 1 || vk > 254 || vk == 0xE5) return 0;
+            const int scan = (int)((lp >> 16) & 0xFF), ext = (int)((lp >> 24) & 1);
+            const int code = vk | (ext ? 0x100 : 0) | (scan << 16);
+            if (up) down_.erase(code); else down_.insert(code);
+            SendEv(EV_KEY, vk, (up ? 1 : 0) | (ext ? 2 : 0), scan);
+            return 0; }
+        case WM_CHAR: case WM_SYSCHAR: case WM_DEADCHAR: case WM_SYSDEADCHAR:   // 글자는 서버가 키 코드로 만들므로 여기서는 무시 (Alt+글자 경고음 방지)
+            return 0;
+        case WM_KILLFOCUS:                      // 포커스를 잃으면 눌려 있던 키를 서버에서도 뗌
+            for (int code : down_) SendEv(EV_KEY, code & 0xFF, 1 | ((code & 0x100) ? 2 : 0), (code >> 16) & 0xFF);
+            down_.clear();
+            break;
+        case WM_DROPFILES: {                    // 파일 / 폴더를 창에 끌어다 놓으면 서버로 전송
+            HDROP hd = (HDROP)wp;
+            std::vector<std::wstring> files;
+            const UINT n = DragQueryFileW(hd, 0xFFFFFFFF, NULL, 0);
+            for (UINT i = 0; i < n; i++) {
+                const UINT len = DragQueryFileW(hd, i, NULL, 0);
+                std::wstring path(len, L'\0');
+                DragQueryFileW(hd, i, &path[0], len + 1);
+                CollectFiles(path, files);
+            }
+            DragFinish(hd);
+            if (sending_) MessageBoxW(w, L"이미 파일을 전송하는 중입니다. 끝난 뒤에 다시 놓아 주세요.", L"파일 전송", MB_OK | MB_ICONINFORMATION);
+            else StartSend(files);
+            SetFocus(w);
+            return 0; }
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -13513,11 +13710,14 @@ private:
                                     rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hi, NULL);
             if (wnd_[i]) {                                  // 타이틀 바 바로 밑 버튼 줄: [파일 전송]
                 btn_[i] = CreateWindowW(L"BUTTON", L"파일 전송", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(4, dpi, 96), MulDiv(3, dpi, 96),
-                                        MulDiv(140, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_FILE, hi, NULL);
+                                        MulDiv(230, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_FILE, hi, NULL);
                 if (btn_[i] && font_) SendMessageW(btn_[i], WM_SETFONT, (WPARAM)font_, TRUE);
+                DragAcceptFiles(wnd_[i], TRUE);             // 파일 / 폴더를 끌어다 놓아 전송
+                DisableIme(wnd_[i]);                        // 키 입력을 그대로 서버로 (한글 조합은 서버 IME)
             }
         }
         for (HWND w : wnd_) if (w) ShowWindow(w, SW_SHOW);
+        if (!wnd_.empty() && wnd_[0]) SetFocus(wnd_[0]);   // 바로 키 입력이 전달되게
         std::thread net(NetThread);
         MSG msg;
         while (GetMessageW(&msg, NULL, 0, 0) > 0) {
