@@ -12364,6 +12364,7 @@ private:
                 if (!connFn_ || !connFn_()) { MessageBoxW(w, L"연결된 클라이언트가 없습니다.", L"파일보내기", MB_OK | MB_ICONINFORMATION); return 0; }
                 std::vector<std::wstring> files;
                 if (!PickFilesDlg(w, L"클라이언트로 보낼 파일 선택 (여러 개 선택 가능)", files)) return 0;
+                if (MessageBoxW(w, L"선택한 파일들을 클라이언트로 보내겠습니까?(Yes/No)", L"파일보내기", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return 0;
                 if (!sendFn_ || !sendFn_(files))
                     MessageBoxW(w, L"파일을 보낼 수 없습니다.\n(연결이 끊어졌거나 이미 다른 파일을 전송 중입니다)", L"파일보내기", MB_OK | MB_ICONWARNING);
                 return 0;
