@@ -499,17 +499,20 @@ public:
     char     phHost[32] = "";           // IP address (a.b.c.d)
     int      phPort     = 2121;         // port 번호
     char     phUser[64] = "";           // 사용자명
-    // [RdpServer] 다른 PC(서버): 이 PC 를 원격으로 제어하게 함 (예전 rdp_server.ini 의 [server]). 비밀번호는 ini 에 평문으로 저장됨
+    // [RdpServer] 원격 접속(서버): 이 PC 를 원격으로 제어하게 함 (예전 rdp_server.ini 의 [server]). 비밀번호는 ini 에 평문으로 저장됨
     int      rsPort       = 7071;       // port
     char     rsPass[200]  = "";         // password
     char     rsAllow[40]  = "any";      // allowed_ip: any = 모든 IP 허용
     int      rsAccept     = 0;          // accept: 0 once(클라이언트 IP 마다 처음 한 번만 묻기) / 1 auto(묻지 않음) / 2 always(접속할 때마다 묻기)
     bool     rsAuto       = false;      // autostart: 프로그램을 시작할 때 서버를 자동으로 시작
     bool     rsOsk        = false;      // osk: 클라이언트가 연결되면 화상 키보드(osk.exe) 실행
-    // [RdpClient] 다른 PC(클라이언트) (예전 rdp_client.ini 의 [client])
+    // [RdpClient] 원격 접속(클라이언트) (예전 rdp_client.ini 의 [client])
     char     rcIp[40]     = "";         // 서버 IP address
     int      rcPort       = 7071;
     char     rcPass[200]  = "";
+    struct RcHist { std::string ip; int port = 7071; std::string pass; };   // 연결에 성공했던 서버 (최근 순, 최대 kRcHistMax 개). ini [RdpClientHistory]
+    std::vector<RcHist> rcHist;
+    static constexpr int kRcHistMax = 10;
     // [WiFiScan] 집 안팎 감시 (WiFiScan.cpp 가 screen_telegram.ini 에서 읽던 키를 여기서 읽음)
     bool     scanBt       = true;       // ScanBluetooth: 블루투스를 scan 대상으로
     bool     scanWifi     = true;       // ScanWifi: Wi-Fi(LAN)를 scan 대상으로
@@ -671,7 +674,7 @@ public:
         WritePrivateProfileStringA("Option", "tray_start", on ? "TRUE" : "FALSE", ini_);
     }
 
-    // 다른 PC(서버) 저장: [RdpServer] port / password / allowed_ip / accept / autostart
+    // 원격 접속(서버) 저장: [RdpServer] port / password / allowed_ip / accept / autostart
     void SaveRdpServer() {
         WriteInt("RdpServer", "port", rsPort);
         WritePrivateProfileStringA("RdpServer", "password", rsPass, ini_);
@@ -680,11 +683,59 @@ public:
         WriteInt("RdpServer", "autostart", rsAuto);
         WriteInt("RdpServer", "osk", rsOsk);
     }
-    // 다른 PC(클라이언트) 저장: [RdpClient] ip / port / password
+    // 원격 접속(클라이언트) 저장: [RdpClient] ip / port / password
     void SaveRdpClient() {
         WritePrivateProfileStringA("RdpClient", "ip", rcIp, ini_);
         WriteInt("RdpClient", "port", rcPort);
         WritePrivateProfileStringA("RdpClient", "password", rcPass, ini_);
+    }
+    // 연결에 성공했던 서버 목록: [RdpClientHistory] Count / Ip1 / Port1 / Pass1 ... (비밀번호는 평문. 이 ini 를 공유/업로드하지 말 것)
+    void SaveRcHist() {
+        WritePrivateProfileStringA("RdpClientHistory", NULL, NULL, ini_);        // 섹션을 비우고 다시 씀
+        WriteInt("RdpClientHistory", "Count", (int)rcHist.size());
+        for (size_t i = 0; i < rcHist.size(); i++) {
+            char k[24];
+            wsprintfA(k, "Ip%d", (int)i + 1);
+            WritePrivateProfileStringA("RdpClientHistory", k, rcHist[i].ip.c_str(), ini_);
+            wsprintfA(k, "Port%d", (int)i + 1);
+            WriteInt("RdpClientHistory", k, rcHist[i].port);
+            wsprintfA(k, "Pass%d", (int)i + 1);
+            WritePrivateProfileStringA("RdpClientHistory", k, rcHist[i].pass.c_str(), ini_);
+        }
+    }
+    void LoadRcHist() {
+        rcHist.clear();
+        const int n = std::min<int>((int)kRcHistMax, (int)GetPrivateProfileIntA("RdpClientHistory", "Count", 0, ini_));
+        for (int i = 1; i <= n; i++) {
+            char k[24], ip[64] = "", pw[400] = "";
+            wsprintfA(k, "Ip%d", i);
+            GetPrivateProfileStringA("RdpClientHistory", k, "", ip, sizeof(ip), ini_);
+            if (!ip[0]) continue;
+            bool dup = false;
+            for (const RcHist& h : rcHist) if (!lstrcmpiA(h.ip.c_str(), ip)) dup = true;
+            if (dup) continue;
+            wsprintfA(k, "Port%d", i);
+            int port = (int)GetPrivateProfileIntA("RdpClientHistory", k, 7071, ini_);
+            if (port < 1 || port > 65535) port = 7071;
+            wsprintfA(k, "Pass%d", i);
+            GetPrivateProfileStringA("RdpClientHistory", k, "", pw, sizeof(pw), ini_);
+            Utf8::Normalize(pw, sizeof(pw));
+            rcHist.push_back(RcHist{ip, port, pw});
+        }
+    }
+    // 연결에 성공한 서버를 목록 맨 앞에 넣음 (같은 IP 는 갱신)
+    void AddRcHist(const char* ip, int port, const char* pass) {
+        for (size_t i = 0; i < rcHist.size();) {
+            if (!lstrcmpiA(rcHist[i].ip.c_str(), ip)) rcHist.erase(rcHist.begin() + i); else i++;
+        }
+        rcHist.insert(rcHist.begin(), RcHist{ip, port, pass});
+        if ((int)rcHist.size() > kRcHistMax) rcHist.resize(kRcHistMax);
+        SaveRcHist();
+    }
+    bool DelRcHist(const char* ip) {
+        for (size_t i = 0; i < rcHist.size(); i++)
+            if (!lstrcmpiA(rcHist[i].ip.c_str(), ip)) { rcHist.erase(rcHist.begin() + i); SaveRcHist(); return true; }
+        return false;
     }
 
     // 폰 탐색기 저장: [PhoneFtp] Host / Port / User (비밀번호는 저장하지 않음)
@@ -987,7 +1038,7 @@ private:
             "Port=4747\r\n"
             "\r\n"
             "[RdpServer]\r\n"
-            "; 다른 PC(서버): 이 PC 를 원격으로 제어하게 합니다. 메뉴 F8) IP cam / 폰 연결 > 다른 PC(서버) 에서 바꾸고 시작/중지합니다.\r\n"
+            "; 원격 접속(서버): 이 PC 를 원격으로 제어하게 합니다. 메뉴 F8) IP cam / 폰 연결 > 원격 접속(서버) 에서 바꾸고 시작/중지합니다.\r\n"
             "; port = 접속 port,  password = 클라이언트가 입력할 비밀번호 (평문으로 저장되므로 이 ini 를 공유/업로드하지 마세요)\r\n"
             "; allowed_ip = 이 IP 에서 오는 접속만 허용 (any = 제한 없음),  accept = once(클라이언트 IP 마다 처음 한 번만 허용 여부를 묻기) / auto(묻지 않음) / always(접속할 때마다 묻기)\r\n"
             "; autostart = 1 이면 프로그램을 시작할 때 서버를 자동으로 시작 (비밀번호가 있어야 함)\r\n"
@@ -1000,7 +1051,7 @@ private:
             "osk=0\r\n"
             "\r\n"
             "[RdpClient]\r\n"
-            "; 다른 PC(클라이언트): 다른 PC 를 원격으로 제어합니다. 메뉴 F8) IP cam / 폰 연결 > 다른 PC(클라이언트) 에서 바꾸고 [연결] 을 누릅니다.\r\n"
+            "; 원격 접속(클라이언트): 다른 PC 를 원격으로 제어합니다. 메뉴 F8) IP cam / 폰 연결 > 원격 접속(클라이언트) 에서 바꾸고 [연결] 을 누릅니다.\r\n"
             "ip=\r\n"
             "port=7071\r\n"
             "password=\r\n"
@@ -1302,6 +1353,7 @@ private:
         S("RdpClient", "password", rcPass, sizeof(rcPass));
         if (!hadSrv) SaveRdpServer();                                             // 없는 키는 기본값을 ini 에 써 넣음
         if (!hadCli) SaveRdpClient();
+        LoadRcHist();
     }
 
     // 초 단위 값: 0 이면 기본값, lo 보다 작으면 lo (WiFiScan.cpp 와 같은 규칙: 주기 0 -> 15, 최소 5 / 외출 0 -> 60)
@@ -9044,7 +9096,7 @@ private:
         HWND hw = nullptr;
         HWND btn[15] = {};          // 버튼 10개 + 시간 간격 콤보박스 + 전환 효과 콤보박스
         HWND lbl2 = nullptr;        // '전환 효과 :' 글자
-        int fxSel = 0;              // 선택한 전환 효과 (0=좌우 스크롤 ... 10=무작위). SlideShow 로 넘어갈 때만 적용
+        int fxSel = 0;              // 선택한 전환 효과 (0=좌우 스크롤 ... 10=무작위, 11=효과 없음). 0~10 은 SlideShow 로 넘어갈 때만 적용, 11 은 모든 전환에 적용(바로 바꿈)
         int fxCur = 0;              // 지금 진행 중인 전환에 쓰는 효과
         int ms = 220;               // 지금 진행 중인 전환 시간(ms)
         HWND lbl = nullptr;         // '시간 간격(초) :' 글자
@@ -9437,6 +9489,13 @@ private:
     static void startTransition(View* v, HBITMAP bmp, int w, int h, int dir)
     {
         finishAnim(v);
+        if (v->fxSel == 11) {   // 효과 없음: 애니메이션 없이 바로 바꿈 (직접 넘기기 / 받은 이미지 / SlideShow 모두)
+            if (v->cur) DeleteObject(v->cur);
+            v->cur = bmp; v->cw = w; v->ch = h;
+            const RECT r0 = imageRect(v->hw);
+            InvalidateRect(v->hw, &r0, FALSE);
+            return;
+        }
         v->nxt = bmp; v->nw = w; v->nh = h;
         v->dir = dir;
         v->fxCur = v->show ? v->fxSel : 0;   // 전환 효과는 SlideShow 중에만 적용 (직접 넘길 때는 좌우 스크롤)
@@ -9852,9 +9911,9 @@ private:
                                   0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_FX, inst, nullptr);
         v->btn[ID_FX - 1] = fx;
         SendMessageW(fx, WM_SETFONT, (WPARAM)font, TRUE);
-        static const wchar_t* const fxName[11] = {L"좌우 스크롤 (기본)", L"상하 스크롤", L"페이드", L"와이프", L"덮기", L"가운데서 열기",
-                                                  L"박스 확대", L"가로 블라인드", L"세로 블라인드", L"모자이크", L"무작위"};
-        for (int i = 0; i < 11; ++i) SendMessageW(fx, CB_ADDSTRING, 0, (LPARAM)fxName[i]);
+        static const wchar_t* const fxName[12] = {L"좌우 스크롤 (기본)", L"상하 스크롤", L"페이드", L"와이프", L"덮기", L"가운데서 열기",
+                                                  L"박스 확대", L"가로 블라인드", L"세로 블라인드", L"모자이크", L"무작위", L"효과 없음"};
+        for (int i = 0; i < 12; ++i) SendMessageW(fx, CB_ADDSTRING, 0, (LPARAM)fxName[i]);
         SendMessageW(fx, CB_SETCURSEL, 0, 0);   // 기본: 좌우 스크롤
     }
 
@@ -10018,7 +10077,7 @@ private:
         case WM_COMMAND:
             if (v && LOWORD(wp) == ID_FX && HIWORD(wp) == CBN_SELCHANGE) {   // 전환 효과 선택
                 const LRESULT sel = SendMessageW(v->btn[ID_FX - 1], CB_GETCURSEL, 0, 0);
-                if (sel >= 0 && sel < 11) v->fxSel = (int)sel;
+                if (sel >= 0 && sel < 12) v->fxSel = (int)sel;
                 SetFocus(hw);
                 return 0;
             }
@@ -13802,7 +13861,7 @@ struct RdpDlg {
     }
 };
 
-// 다른 PC(서버): ini [RdpServer] 설정 + 서버 시작/중지 + 내 IP 주소와 현재 상태. 대화상자를 닫아도 서버는 계속 동작한다.
+// 원격 접속(서버): ini [RdpServer] 설정 + 서버 시작/중지 + 내 IP 주소와 현재 상태. 대화상자를 닫아도 서버는 계속 동작한다.
 class RdpServerDialog {
 public:
     static void Show(HINSTANCE hi, HWND owner, Settings& cfg) {
@@ -13811,7 +13870,7 @@ public:
         b.D(0);
         b.W(24); b.W(0); b.W(0); b.W(300); b.W(210);
         b.W(0); b.W(0);
-        b.S("다른 PC(서버) - 이 PC 를 원격으로 제어하게 함");
+        b.S("원격 접속(서버) - 이 PC 를 원격으로 제어하게 함");
         b.W(9); b.S("Segoe UI");
         const DWORD T = WS_CHILD | WS_VISIBLE;
         const DWORD E = T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL;
@@ -13846,7 +13905,7 @@ private:
     enum { IDC_IP = 101, IDC_STATE = 102, IDC_PORT = 103, IDC_PASS = 104, IDC_SHOWPW = 105, IDC_ALLOW = 106,
            IDC_ACC0 = 107 /* 107~109 */, IDC_AUTO = 110, IDC_WARN = 111, IDC_SAVE = 112, IDC_START = 113, IDC_STOP = 114, IDC_OSK = 115,
            TID_REFRESH = 1 };
-    static constexpr const char* TITLE = "다른 PC(서버)";
+    static constexpr const char* TITLE = "원격 접속(서버)";
 
     // 입력 칸 -> cfg (검사 실패하면 경고 후 false)
     static bool Collect(HWND d, Settings& cfg) {
@@ -13959,7 +14018,7 @@ private:
     }
 };
 
-// 다른 PC(클라이언트): ini [RdpClient] 설정 + [연결] 버튼으로 서버에 연결 요청
+// 원격 접속(클라이언트): ini [RdpClient] 설정 + [연결] 버튼으로 서버에 연결 요청
 class RdpClientDialog {
 public:
     static void Show(HINSTANCE hi, HWND owner, Settings& cfg) {
@@ -13969,18 +14028,19 @@ public:
         b.D(0);
         b.W(14); b.W(0); b.W(0); b.W(300); b.W(148);
         b.W(0); b.W(0);
-        b.S("다른 PC(클라이언트) - 다른 PC 를 원격으로 제어");
+        b.S("원격 접속(클라이언트) - 다른 PC 를 원격으로 제어");
         b.W(9); b.S("Segoe UI");
         const DWORD T = WS_CHILD | WS_VISIBLE;
         const DWORD E = T | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL;
         b.Control(T,                                              10,  12,  70, 10, 0xFFFF, "STATIC", "서버 IP address");
-        b.Control(E,                                              84,  10, 110, 13, IDC_IP, "EDIT", "");
+        b.Control(T | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWN | CBS_AUTOHSCROLL, 84, 10, 110, 90, IDC_IP, "COMBOBOX", "");   // 연결에 성공했던 서버 목록 + 직접 입력
+        b.Button(T | WS_TABSTOP | BS_PUSHBUTTON,                 200,  9,  90, 14, IDC_DELHIST, "목록에서 삭제");
         b.Control(T,                                              10,  30,  70, 10, 0xFFFF, "STATIC", "port 번호");
         b.Control(E | ES_NUMBER,                                  84,  28,  50, 13, IDC_PORT, "EDIT", "");
         b.Control(T,                                              10,  48,  70, 10, 0xFFFF, "STATIC", "비밀번호");
         b.Control(E | ES_PASSWORD,                                84,  46, 120, 13, IDC_PASS, "EDIT", "");
         b.Button(T | WS_TABSTOP | BS_AUTOCHECKBOX,               212,  47,  70, 12, IDC_SHOWPW, "보이기");
-        b.Control(T,                                              10,  70, 280, 10, 0xFFFF, "STATIC", "서버 PC 의 [다른 PC(서버)] 에서 서버를 시작한 뒤 [연결] 을 누르세요.");
+        b.Control(T,                                              10,  70, 280, 10, 0xFFFF, "STATIC", "서버 PC 의 [원격 접속(서버)] 에서 서버를 시작한 뒤 [연결] 을 누르세요.");
         b.Control(T | SS_NOPREFIX,                                10,  82, 280, 10, IDC_WARN, "STATIC", "※ 암호화(TLS)가 없습니다. 신뢰하는 내부망에서만 사용하세요.");
         b.Control(WS_CHILD | SS_NOPREFIX,                         10,  98, 280, 10, IDC_PSTAT, "STATIC", "");                 // 연결하는 동안만 보임
         b.Control(WS_CHILD | PBS_SMOOTH,                          10, 109, 280,  9, IDC_PBAR, "msctls_progress32", "");
@@ -13991,8 +14051,8 @@ public:
     }
 
 private:
-    enum { IDC_IP = 101, IDC_PORT = 102, IDC_PASS = 103, IDC_SHOWPW = 104, IDC_WARN = 105, IDC_CONNECT = 106, IDC_SAVE = 107, IDC_PSTAT = 108, IDC_PBAR = 109 };
-    static constexpr const char* TITLE = "다른 PC(클라이언트)";
+    enum { IDC_IP = 101, IDC_PORT = 102, IDC_PASS = 103, IDC_SHOWPW = 104, IDC_WARN = 105, IDC_CONNECT = 106, IDC_SAVE = 107, IDC_PSTAT = 108, IDC_PBAR = 109, IDC_DELHIST = 110 };
+    static constexpr const char* TITLE = "원격 접속(클라이언트)";
 
     static bool Collect(HWND d, Settings& cfg) {
         std::string ip = RdpDlg::Get(d, IDC_IP);
@@ -14019,9 +14079,15 @@ private:
         return true;
     }
 
+    // 접속 기록 목록을 콤보에 채움 (콤보의 글자는 지워짐)
+    static void FillHist(HWND d, const Settings& c) {
+        SendDlgItemMessageW(d, IDC_IP, CB_RESETCONTENT, 0, 0);
+        for (const Settings::RcHist& h : c.rcHist) SendDlgItemMessageA(d, IDC_IP, CB_ADDSTRING, 0, (LPARAM)h.ip.c_str());
+    }
+
     // 연결하는 동안: 입력/연결/저장을 막고 진행 표시를 보임, [닫기] 는 [취소] 로
     static void SetBusy(HWND d, bool busy) {
-        static const int ids[] = {IDC_IP, IDC_PORT, IDC_PASS, IDC_SHOWPW, IDC_CONNECT, IDC_SAVE};
+        static const int ids[] = {IDC_IP, IDC_DELHIST, IDC_PORT, IDC_PASS, IDC_SHOWPW, IDC_CONNECT, IDC_SAVE};
         for (int id : ids) EnableWindow(GetDlgItem(d, id), !busy);
         ShowWindow(GetDlgItem(d, IDC_PSTAT), busy ? SW_SHOW : SW_HIDE);
         ShowWindow(GetDlgItem(d, IDC_PBAR), busy ? SW_SHOW : SW_HIDE);
@@ -14041,7 +14107,12 @@ private:
             RdpDlg::Set(d, IDC_PSTAT, t);
             return TRUE; }
         case rdp::Client::WM_DONE: {
-            if (w == 1) { EndDialog(d, 2); return TRUE; }       // 연결 성공: 원격 제어 창이 열림
+            if (w == 1) {                                       // 연결 성공: 접속 기록에 저장하고 원격 제어 창을 엶
+                Settings* c = (Settings*)GetWindowLongPtrA(d, GWLP_USERDATA);
+                if (c) { c->AddRcHist(c->rcIp, c->rcPort, c->rcPass); Log::Put("원격 클라이언트: 접속 기록에 저장: %s:%d", c->rcIp, c->rcPort); }
+                EndDialog(d, 2);
+                return TRUE;
+            }
             SetBusy(d, false);
             std::string e = rdp::Client::TakeError();
             if (!e.empty()) RdpDlg::Warn(d, TITLE, e.c_str(), 0);
@@ -14052,7 +14123,8 @@ private:
         case WM_INITDIALOG: {
             Settings* c = (Settings*)l;
             SetWindowLongPtrA(d, GWLP_USERDATA, l);
-            SendDlgItemMessageW(d, IDC_IP, EM_LIMITTEXT, 15, 0);
+            SendDlgItemMessageW(d, IDC_IP, CB_LIMITTEXT, 15, 0);
+            FillHist(d, *c);
             SendDlgItemMessageW(d, IDC_PORT, EM_LIMITTEXT, 5, 0);
             SendDlgItemMessageW(d, IDC_PASS, EM_LIMITTEXT, 60, 0);
             RdpDlg::Set(d, IDC_IP, c->rcIp);
@@ -14070,6 +14142,25 @@ private:
         case WM_COMMAND: {
             Settings* c = (Settings*)GetWindowLongPtrA(d, GWLP_USERDATA);
             switch (LOWORD(w)) {
+            case IDC_IP:                                        // 목록에서 서버를 고르면 그 서버의 port / 비밀번호도 채움
+                if (HIWORD(w) == CBN_SELCHANGE) {
+                    const int i = (int)SendDlgItemMessageW(d, IDC_IP, CB_GETCURSEL, 0, 0);
+                    if (i >= 0 && i < (int)c->rcHist.size()) {
+                        SetDlgItemInt(d, IDC_PORT, (UINT)c->rcHist[i].port, FALSE);
+                        RdpDlg::Set(d, IDC_PASS, c->rcHist[i].pass);
+                    }
+                    return TRUE;
+                }
+                break;
+            case IDC_DELHIST: {                                 // 입력 칸의 IP 를 접속 기록에서 지움
+                std::string ip = RdpDlg::Get(d, IDC_IP);
+                while (!ip.empty() && (ip.back() == ' ' || ip.back() == '\t')) ip.pop_back();
+                if (!c->DelRcHist(ip.c_str())) { RdpDlg::Warn(d, TITLE, "접속 기록에 없는 IP 입니다. 지울 서버를 목록에서 고른 뒤 눌러 주세요.", IDC_IP); return TRUE; }
+                Log::Put("원격 클라이언트: 접속 기록에서 삭제: %s", ip.c_str());
+                FillHist(d, *c);
+                RdpDlg::Set(d, IDC_PASS, "");
+                SetFocus(GetDlgItem(d, IDC_IP));
+                return TRUE; }
             case IDC_SHOWPW:
                 RdpDlg::ShowPw(d, IDC_PASS, IsDlgButtonChecked(d, IDC_SHOWPW) == BST_CHECKED);
                 return TRUE;
@@ -14206,10 +14297,10 @@ private:
         CMD_IPREG       = 742,      // IP cam > IP cam 등록
         CMD_IPVIEW      = 743,      // IP cam > 카메라 영상 (WebCam1 / WebCam2 / IP Cam)
         CMD_PHONE       = 744,      // IP cam / 폰 연결 > 폰 탐색기
-        CMD_RDPSRV      = 745,      // IP cam / 폰 연결 > 다른 PC(서버)
+        CMD_RDPSRV      = 745,      // IP cam / 폰 연결 > 원격 접속(서버)
         CMD_GODIGITAL   = 751,      // 최상위 메뉴 F3) 디지탈 시계 를 클릭: 디지탈 시계로 변경
         CMD_GOANALOG    = 752,      // 최상위 메뉴 F4) 아나로그 시계 를 클릭: 아날로그 시계로 변경
-        CMD_RDPCLI      = 746,      // IP cam / 폰 연결 > 다른 PC(클라이언트)
+        CMD_RDPCLI      = 746,      // IP cam / 폰 연결 > 원격 접속(클라이언트)
         CMD_TFMT        = 700,      // 시분초 표시 형식 700~709
         CMD_DFMT        = 720,      // 년월일 표시 형식 720~729
         FMT_COUNT       = 10,
@@ -14815,14 +14906,14 @@ private:
         UpdateScanSetMenu();
         AddMenu(bar, MF_POPUP, (UINT_PTR)menuScan_, "F7) WiFiScan(&W)");
 
-        HMENU ipc = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기 / 다른 PC(서버) / 다른 PC(클라이언트)
+        HMENU ipc = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기 / 원격 접속(서버) / 원격 접속(클라이언트)
         AddMenu(ipc, 0, CMD_IPREG,  "IP cam 등록(&R)...");
         AddMenu(ipc, 0, CMD_IPVIEW, "카메라 영상(&V)");
         AddMenu(ipc, 0, CMD_PHONE,  "폰 탐색기(&E)...");
         AddMenu(ipc, 0, CMD_UPLOADS, "텔레그램/클라이언트 송수신 뷰어(&F)");         // 4번째: 텔레그램으로 받은 파일(upload 폴더)을 이미지 창으로 탐색
         AppendMenuA(ipc, MF_SEPARATOR, 0, NULL);
-        AddMenu(ipc, 0, CMD_RDPSRV, "다른 PC(서버)(&S)...");           // 이 PC 를 원격 제어하게 함 (rdp_server)
-        AddMenu(ipc, 0, CMD_RDPCLI, "다른 PC(클라이언트)(&C)...");     // 다른 PC 를 원격 제어 (rdp_client)
+        AddMenu(ipc, 0, CMD_RDPSRV, "원격 접속(서버)(&S)...");           // 이 PC 를 원격 제어하게 함 (rdp_server)
+        AddMenu(ipc, 0, CMD_RDPCLI, "원격 접속(클라이언트)(&C)...");     // 다른 PC 를 원격 제어 (rdp_client)
         AddMenu(bar, MF_POPUP, (UINT_PTR)ipc, "F8) IP cam / 폰 연결(&I)");
 
         HMENU help = CreatePopupMenu();         // Help
@@ -15772,8 +15863,8 @@ private:
         case CMD_IPVIEW:    n = "IP cam / 폰 연결 > 카메라 영상"; break;
         case CMD_PHONE:     n = "IP cam / 폰 연결 > 폰 탐색기"; break;
         case CMD_UPLOADS:   n = "IP cam / 폰 연결 > 텔레그램/클라이언트 송수신 뷰어"; break;
-        case CMD_RDPSRV:    n = "IP cam / 폰 연결 > 다른 PC(서버)"; break;
-        case CMD_RDPCLI:    n = "IP cam / 폰 연결 > 다른 PC(클라이언트)"; break;
+        case CMD_RDPSRV:    n = "IP cam / 폰 연결 > 원격 접속(서버)"; break;
+        case CMD_RDPCLI:    n = "IP cam / 폰 연결 > 원격 접속(클라이언트)"; break;
         case CMD_SHOWDATE:  n = "년월일 보이기/숨기기 토글"; break;
         case CMD_SHOWLUNAR: n = "음력 보이기/숨기기 토글"; break;
         case CMD_RESET:     n = "설정 초기화"; break;
@@ -17682,7 +17773,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int show) {
         Log::Put("침입 탐지 시간: 프로그램 시작 -> /detectOn");
         tg::PostTrigger("/detectOn");
     }
-    if (cfg.rsAuto) {                           // ini [RdpServer] autostart=1: 다른 PC(서버) 자동 시작
+    if (cfg.rsAuto) {                           // ini [RdpServer] autostart=1: 원격 접속(서버) 자동 시작
         std::string err;
         if (!rdp::Server::Get().Start(RdpServerCfg(cfg), err)) Log::Put("원격 서버 자동 시작 실패: %s", err.c_str());
     }
