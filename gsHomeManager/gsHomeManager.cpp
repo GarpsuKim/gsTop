@@ -13004,7 +13004,7 @@ private:
             Hdr h;
             FileRx fs;
             std::set<int> keysDown;             // 눌려 있는 키
-            bool keyLogged = false;             // 이 연결에서 키 입력을 처음 받았을 때 로그
+            int keyLogN = 0;                    // 진단 로그로 남긴 키 이벤트 수
             while (recvAll(c, &h, sizeof h)) {
                 if (h.type == RM_FILE) {                // 파일 전송 (조각마다 한 메시지)
                     if (h.len == 0 || h.len > kFileMsgMax) break;
@@ -13017,7 +13017,7 @@ private:
                 Ev e;
                 if (h.type == RM_INPUT && h.len == sizeof e) {
                     if (!recvAll(c, &e, sizeof e)) break;
-                    if (e.t == EV_KEY && !keyLogged) { keyLogged = true; Log::Put("원격 서버: 키 입력 수신 시작 (vk=%d)", e.a); }   // 진단
+                    if (e.t == EV_KEY && keyLogN < 60) Log::Put("원격 서버: 키 #%d vk=%d %s ext=%d scan=%d", ++keyLogN, e.a, (e.b & 1) ? "UP  " : "DOWN", (e.b >> 1) & 1, e.m);   // 진단: 연결당 처음 60 개
                     Inject(e, gMons, &keysDown);
                 } else {
                     std::vector<char> skip(h.len);
