@@ -14285,6 +14285,7 @@ private:
         CMD_TIMEFONT    = 102,
         CMD_DATEFONT    = 103,
         CMD_EXIT        = 104,
+        CMD_RESTART     = 117,      // 앱 동작 설정 > 프로그램 재시작 (확인창 후 종료 -> 런처 먼저 실행)
         CMD_RESET       = 105,
         CMD_TOPMOST     = 106,
         CMD_ALLMON      = 107,
@@ -14843,6 +14844,7 @@ private:
         AddMenu(set, 0,        CMD_AUTORUN,   "부팅(또는 로그온) 자동실행 on/off(&G)");
         AddMenu(set, 0,        CMD_COMPANION, "동반 실행 앱 등록(&C)...");
         AppendMenuA(set, MF_SEPARATOR, 0, NULL);
+        AddMenu(set, 0,        CMD_RESTART,   "프로그램 재시작 (&R)");
         AddMenu(set, 0,        CMD_EXIT,      "프로그램 종료 (&Exit)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)set, "F2) 앱 동작 설정(&S)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)dsn, "F3) 디지탈 시계(&D)");
@@ -15855,6 +15857,7 @@ private:
         int ai = 0, aact = 0;
         switch (id) {
         case CMD_EXIT:      n = "앱 동작 설정 > 프로그램 종료"; break;
+        case CMD_RESTART:   n = "앱 동작 설정 > 프로그램 재시작"; break;
         case CMD_SHOWCLOCK: n = "시계 보이기/숨기기 토글"; break;
         case CMD_SCAN:      n = "WiFiScan 대화상자"; break;
         case CMD_SCANSET:   n = "WiFiScan / HomeBack·NotHome 탐지 시간 및 프로그램 설정"; break;
@@ -15923,6 +15926,7 @@ private:
         int ai = 0, aact = 0;
         LogCommand(id);
         if (id == CMD_EXIT)            ConfirmExit();
+        else if (id == CMD_RESTART)    ConfirmRestart();
         else if (id == CMD_GODIGITAL)  { if (cfg_.clockMode == 2) CycleClockMode(lastDigital_); }
         else if (id == CMD_GOANALOG)   { if (cfg_.clockMode != 2) CycleClockMode(2); }
         else if (id == CMD_SHOWCLOCK)  SetClockVisible(!cfg_.visible);
@@ -16275,6 +16279,7 @@ private:
         } else if (ev == WM_RBUTTONUP) {        // 우클릭: 보이기 / 종료 메뉴
             HMENU m = CreatePopupMenu();
             AddMenu(m, 0, CMD_SHOWCLOCK, "시계 보이기(&H)");
+            AddMenu(m, 0, CMD_RESTART, "프로그램 재시작(&R)");
             AddMenu(m, 0, CMD_EXIT, "프로그램 종료 (&Exit)");
             POINT pt;
             GetCursorPos(&pt);
@@ -16298,6 +16303,21 @@ private:
         asking = false;
         Log::Put("종료 확인 결과: %s", r == IDYES ? "Yes -> 종료" : "No 또는 시간 초과 -> 계속 동작");
         if (r == IDYES) RequestExit();
+    }
+
+    // 재시작 확인: 30초 동안 Yes/No. Yes 면 재시작 플래그를 세우고 종료 (WinMain 이 런처 먼저 실행)
+    void ConfirmRestart() {
+        static bool asking = false;
+        if (asking) return;
+        asking = true;
+        ClockWindow* root = owner_ ? owner_ : this;
+        root->modal_ = true;
+        Log::Put("재시작 확인창 표시 (30초 대기)");
+        int r = ConfirmDialog::Show(hi_, 30, "홈 관리센터", "프로그램을 종료한 뒤 다시 실행합니다.\n재시작하겠습니까? (Yes/No)", "무응답 시 재시작하지 않음", false);
+        root->modal_ = false;
+        asking = false;
+        Log::Put("재시작 확인 결과: %s", r == IDYES ? "Yes -> 재시작" : "No 또는 시간 초과 -> 계속 동작");
+        if (r == IDYES) { InterlockedExchange(&tg::g_restartRequested, 1); RequestExit(); }
     }
 
     // 앱 종료: 도시 목록을 먼저 저장한 뒤 본 창을 닫음 (소유 창인 도시 창도 함께 닫힘)
@@ -17608,7 +17628,8 @@ static void RunBootingAlert() {
 }
 */  // 2026-11-15  17:35
 
-// 텔레그램 /restart: 같은 exe 를 같은 인자로 다시 실행한다. 호출하기 전에 SingleInstance 뮤텍스를 풀어 두어야
+// 텔레그램 /restart: 프로그램을 다시 실행한다. 같은 폴더에 gsHomeManagerLauncher.exe 가 있으면 런처를 먼저 실행하고
+// (서버 버전 확인/갱신 뒤 런처가 exe 를 실행), 없으면 같은 exe 를 같은 인자로 직접 실행한다. 호출하기 전에 SingleInstance 뮤텍스를 풀어 두어야
 // 새 프로세스가 "이미 실행 중" 으로 취급되어 (자기 자신 대신) 이 프로세스를 강제 종료하는 일이 없다.
 static void RestartSelf() {
     wchar_t exe[MAX_PATH * 2] = {0};
@@ -17618,19 +17639,30 @@ static void RestartSelf() {
     if (args) {
         if (*args == L'"') { ++args; while (*args && *args != L'"') ++args; if (*args) ++args; }
         else while (*args && *args != L' ') ++args;
-        cmdLine += args;
     }
+    const std::wstring rest = args ? args : L"";
     std::wstring dir = exe;
     dir.resize(dir.find_last_of(L"\\/") + 1);
+    std::wstring target = exe;                                // 실제로 실행할 파일
+    bool viaLauncher = false;
+    const std::wstring launcher = dir + L"gsHomeManagerLauncher.exe";
+    if (rest.find_first_not_of(L" \t") == std::wstring::npos &&   // 런처는 인자를 넘기지 않으므로 원래 인자가 있으면 exe 를 직접 실행
+        GetFileAttributesW(launcher.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        target = launcher;
+        cmdLine = L"\"" + launcher + L"\"";
+        viaLauncher = true;
+    } else {
+        cmdLine += rest;
+    }
     STARTUPINFOW si = {};
     si.cb = sizeof si;
     PROCESS_INFORMATION pi = {};
-    if (CreateProcessW(exe, &cmdLine[0], NULL, NULL, FALSE, 0, NULL, dir.c_str(), &si, &pi)) {
+    if (CreateProcessW(target.c_str(), &cmdLine[0], NULL, NULL, FALSE, 0, NULL, dir.c_str(), &si, &pi)) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        Log::Put("재시작: 새 프로세스를 실행했습니다 (pid=%d)", (int)pi.dwProcessId);
+        Log::Put("재시작: 새 프로세스를 실행했습니다 (%s, pid=%d)", viaLauncher ? "런처 먼저" : "exe 직접", (int)pi.dwProcessId);
     } else {
-        Log::Put("재시작 실패: CreateProcess 오류 %d", (int)GetLastError());
+        Log::Put("재시작 실패: CreateProcess 오류 %d (%s)", (int)GetLastError(), viaLauncher ? "런처" : "exe");
     }
 }
 
