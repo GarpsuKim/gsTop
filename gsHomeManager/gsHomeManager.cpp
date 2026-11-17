@@ -13219,6 +13219,7 @@ private:
     static inline HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
     static inline std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false}, cancelFt_{false};   // cancelFt_: 전송 중 [취소]
     static inline std::set<int> down_;              // 눌려 있는 키 (창 스레드에서만 접근)
+    static inline int keyLogN_ = 0;                 // 진단 로그로 남긴 키 이벤트 수 (연결마다 0 으로, 창 스레드에서만 접근)
     static inline std::mutex smtx_, pmtx_;          // smtx_ = 소켓 송신 직렬화 (마우스 입력 + 파일), pmtx_ = ptext_
     static inline std::wstring ptext_;
     static inline int tb_ = 32;                     // 버튼 줄 높이 (픽셀)
@@ -13707,6 +13708,7 @@ private:
             const int scan = (int)((lp >> 16) & 0xFF), ext = (int)((lp >> 24) & 1);
             const int code = vk | (ext ? 0x100 : 0) | (scan << 16);
             if (up) down_.erase(code); else down_.insert(code);
+            if (keyLogN_ < 60) Log::Put("원격 클라이언트: 키 #%d vk=%d %s ext=%d scan=%d%s", ++keyLogN_, vk, up ? "UP  " : "DOWN", ext, scan, (!up && ((lp >> 30) & 1)) ? " (반복)" : "");   // 진단: 연결당 처음 60 개
             SendEv(EV_KEY, vk, (up ? 1 : 0) | (ext ? 2 : 0), scan);
             return 0; }
         case WM_CHAR: case WM_SYSCHAR: case WM_DEADCHAR: case WM_SYSDEADCHAR:   // 글자는 서버가 키 코드로 만들므로 여기서는 무시 (Alt+글자 경고음 방지)
@@ -13755,6 +13757,7 @@ private:
         btn_.assign(nMon, NULL);
         closing_ = false;
         sending_ = false;
+        keyLogN_ = 0;
         ackEv_ = CreateEventW(NULL, FALSE, FALSE, NULL);
         int dpi = 96;
         if (HDC sd = GetDC(NULL)) { dpi = GetDeviceCaps(sd, LOGPIXELSY); ReleaseDC(NULL, sd); }
