@@ -12794,7 +12794,11 @@ private:
             break; }
         default: return;
         }
-        SendInput(1, &in, sizeof(INPUT));
+        const UINT sent = SendInput(1, &in, sizeof(INPUT));
+        if (e.t == EV_KEY && sent == 0) {       // 진단: 키 주입 실패 (관리자 권한 창 / 잠금 화면 등) - 로그는 몇 번만
+            static int fails = 0;
+            if (fails++ < 5) Log::Put("원격 서버: 키 입력 주입 실패 (SendInput 오류 %lu, vk=%d)", GetLastError(), e.a);
+        }
     }
 
     // 연결이 끊길 때 눌린 채로 남은 키를 모두 뗌 (키가 계속 눌린 상태로 남지 않게)
@@ -13000,6 +13004,7 @@ private:
             Hdr h;
             FileRx fs;
             std::set<int> keysDown;             // 눌려 있는 키
+            bool keyLogged = false;             // 이 연결에서 키 입력을 처음 받았을 때 로그
             while (recvAll(c, &h, sizeof h)) {
                 if (h.type == RM_FILE) {                // 파일 전송 (조각마다 한 메시지)
                     if (h.len == 0 || h.len > kFileMsgMax) break;
@@ -13012,6 +13017,7 @@ private:
                 Ev e;
                 if (h.type == RM_INPUT && h.len == sizeof e) {
                     if (!recvAll(c, &e, sizeof e)) break;
+                    if (e.t == EV_KEY && !keyLogged) { keyLogged = true; Log::Put("원격 서버: 키 입력 수신 시작 (vk=%d)", e.a); }   // 진단
                     Inject(e, gMons, &keysDown);
                 } else {
                     std::vector<char> skip(h.len);
