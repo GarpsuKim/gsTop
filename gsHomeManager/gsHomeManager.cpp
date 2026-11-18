@@ -13821,7 +13821,7 @@ private:
         case WM_FDONE: {
             std::wstring t;
             { std::lock_guard<std::mutex> g(pmtx_); t = ptext_; }
-            for (HWND b : btn_) { SetWindowTextW(b, L"파일 업로드 (클라이언트-->서버)"); EnableWindow(b, TRUE); }
+            for (HWND b : btn_) { SetWindowTextW(b, L"파일 업로드 (클라이언트 → 서버)"); EnableWindow(b, TRUE); }
             sending_ = false;
             if (!closing_) MessageBoxW(w, t.c_str(), L"파일 전송", MB_OK | MB_ICONINFORMATION);
             return 0; }
