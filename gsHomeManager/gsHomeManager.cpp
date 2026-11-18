@@ -3342,6 +3342,7 @@ public:
                     uint32_t ip, mk;
                     if (!StrUtil::parseIp(p->IpAddress.String, ip) || !StrUtil::parseIp(p->IpMask.String, mk) || !ip || !mk) continue;
                     if ((ip >> 24) == 127 || (ip >> 16) == 0xA9FE) continue;           // 127.x 루프백, 169.254.x.x 자동 할당 제외
+                    if ((ip >> 22) == 0x191) continue;                                 // 100.64.0.0/10 (Tailscale 등 VPN) 제외: 집 LAN 이 아니므로 scan 범위로 쓰지 않음
                     const bool priv = (ip >> 24) == 10 || (ip >> 20) == 0xAC1 || (ip >> 16) == 0xC0A8;
                     const int score = (gw ? 4 : 0) + (priv ? 2 : 0) + (nic ? 1 : 0);
                     if (score > best) { best = score; myIp = ip; mask = mk; }
@@ -8448,11 +8449,31 @@ public:
         std::string err;
         if (loadApi(err) && SUCCEEDED(api_.pMFStartup(MF_VERSION, 0))) {
             started_ = true;
+            if (countDevices() == 0) {      // 카메라가 없는 PC: 침입 탐지 스레드가 2초마다 실패를 반복하지 않도록 카메라 기능을 끈다
+                api_.pMFShutdown();
+                started_ = false;
+                Logger::log("카메라 장치가 없어 카메라 기능을 사용하지 않습니다 (침입 탐지도 사용 안 함. 카메라를 연결했다면 프로그램을 다시 시작하세요)");
+                return false;
+            }
             return true;
         }
         Logger::log("카메라 기능 비활성화: %s", err.c_str());
         Logger::log("(화면 캡처 기능은 정상적으로 계속 동작합니다)");
         return false;
+    }
+
+    // 지금 연결된 웹캠 수 (열거 실패는 1 로 봐서 기존처럼 나중에 다시 시도하게 함)
+    UINT32 countDevices()
+    {
+        IMFAttributes* pAttr = nullptr;
+        IMFActivate** pp = nullptr;
+        UINT32 n = 0;
+        HRESULT hr = api_.pMFCreateAttributes(&pAttr, 1);
+        if (SUCCEEDED(hr)) hr = pAttr->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+        if (SUCCEEDED(hr)) hr = api_.pMFEnumDeviceSources(pAttr, &pp, &n);
+        if (pp) { for (UINT32 i = 0; i < n; ++i) if (pp[i]) pp[i]->Release(); CoTaskMemFree(pp); }
+        if (pAttr) pAttr->Release();
+        return SUCCEEDED(hr) ? n : 1;
     }
 
     bool isCamera() const override { return true; }
@@ -10280,6 +10301,31 @@ public:
     // 종료 요청 (바로 반환). run() 이 끝나길 기다리는 것은 호출한 쪽 몫.
     void requestStop() { stop_.request(); }
 
+    // api.telegram.org 이름이 풀릴 때까지 최대 120초 기다린다 (부팅 직후 DNS/네트워크 준비 전 전송 실패 방지).
+    // 시간이 지나도 안 풀리면 그대로 진행한다 (전송은 기존처럼 재시도). 종료 요청이 오면 false.
+    bool waitNetwork()
+    {
+        WSADATA wd;
+        if (WSAStartup(MAKEWORD(2, 2), &wd) != 0) return true;
+        bool ok = false, loggedWait = false;
+        const ULONGLONG t0 = GetTickCount64();
+        for (;;) {
+            addrinfo hints = {}, *res = nullptr;
+            hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM;
+            if (getaddrinfo("api.telegram.org", "443", &hints, &res) == 0) { if (res) freeaddrinfo(res); ok = true; break; }
+            const ULONGLONG el = GetTickCount64() - t0;
+            if (el >= 120000) break;
+            if (!loggedWait) { Logger::log("네트워크 대기 중: api.telegram.org 이름을 아직 찾을 수 없습니다 (최대 120초)"); loggedWait = true; }
+            if (stop_.wait(2000)) { WSACleanup(); return false; }
+        }
+        WSACleanup();
+        if (loggedWait) {
+            if (ok) Logger::log("네트워크 준비됨 (%llu ms 대기)", (unsigned long long)(GetTickCount64() - t0));
+            else Logger::log("네트워크 대기 시간 초과 - 그대로 시작합니다 (전송은 재시도)");
+        }
+        return true;
+    }
+
     int run()
     {
         enableThreadDpiAwareness(); // 고DPI 환경에서도 실제 해상도로 캡처 (이 스레드만)
@@ -10328,6 +10374,8 @@ public:
         for (const auto& kv : cfg_.monitorEnabled)
             Logger::log("  MONITOR%d = %s", kv.first, kv.second ? "TRUE" : "FALSE");
 
+        // 부팅 직후에는 네트워크가 아직 없어 인사말/메뉴/고정 메시지 전송이 실패하므로 api.telegram.org 이름이 풀릴 때까지 기다린다
+        if (!cfg_.token.empty() && !cfg_.chatId.empty() && !waitNetwork()) return 0;
         // 선언 순서의 역순으로 해제된다: 소스(MFShutdown) -> 전송 -> GDI+ -> COM
         ComScope com;
         ImageEncoder encoder;
@@ -13048,7 +13096,6 @@ private:
                 Ev e;
                 if (h.type == RM_INPUT && h.len == sizeof e) {
                     if (!recvAll(c, &e, sizeof e)) break;
-                    if (e.t == EV_KEY && keyLogN < 60) Log::Put("원격 서버: 키 #%d vk=%d %s ext=%d scan=%d", ++keyLogN, e.a, (e.b & 1) ? "UP  " : "DOWN", (e.b >> 1) & 1, e.m);   // 진단: 연결당 처음 60 개
                     Inject(e, gMons, &keysDown);
                 } else {
                     std::vector<char> skip(h.len);
@@ -13753,7 +13800,6 @@ private:
             const int scan = (int)((lp >> 16) & 0xFF), ext = (int)((lp >> 24) & 1);
             const int code = vk | (ext ? 0x100 : 0) | (scan << 16);
             if (up) down_.erase(code); else down_.insert(code);
-            if (keyLogN_ < 60) Log::Put("원격 클라이언트: 키 #%d vk=%d %s ext=%d scan=%d%s", ++keyLogN_, vk, up ? "UP  " : "DOWN", ext, scan, (!up && ((lp >> 30) & 1)) ? " (반복)" : "");   // 진단: 연결당 처음 60 개
             SendEv(EV_KEY, vk, (up ? 1 : 0) | (ext ? 2 : 0), scan);
             return 0; }
         case WM_CHAR: case WM_SYSCHAR: case WM_DEADCHAR: case WM_SYSDEADCHAR:   // 글자는 서버가 키 코드로 만들므로 여기서는 무시 (Alt+글자 경고음 방지)
@@ -17664,8 +17710,14 @@ static void WriteVersionFile() {
     while (n > 0 && path[n - 1] != '\\' && path[n - 1] != '/') n--;
     lstrcpyA(path + n, "version.txt");
     HANDLE h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_ACCESS_DENIED) {   // 읽기 전용/숨김 속성이 붙은 옛 파일: 속성을 풀고 다시, 그래도 안 되면 지우고 새로 만든다
+        SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
+        h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE && DeleteFileA(path))
+            h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    }
     if (h == INVALID_HANDLE_VALUE) {
-        Log::Put("version.txt 생성 실패 (오류 %d)", (int)GetLastError());
+        Log::Put("version.txt 생성 실패 (오류 %d, 파일에 쓰기 권한이 없음: 폴더/파일 속성과 권한 확인)", (int)GetLastError());
         return;
     }
     DWORD w;

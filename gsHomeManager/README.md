@@ -507,6 +507,7 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 - `WiFiScan_watch.log`: WiFiScan 감시 로그. `/HomeBack`, `/NotHome` 판정마다 `[사유]` 줄 포함 (위 WiFiScan > 판정 사유 기록 참고)
 - `ipcam.log`: 카메라 영상 창 로그 (IP Cam / 웹캠)
 - `gsHomeManagerLauncher.log`: 런처 로그 (시작, 서버 버전 확인과 갱신 과정, 본 프로세스 실행/감시/재시작 기록). 위치는 런처 ini 의 `LogFile` 로 바꿀 수 있고 (바꾸면 메뉴의 로그 보기는 기본 위치 `log\gsHomeManagerLauncher.log` 를 엽니다), 256KB 를 넘으면 새로 시작합니다 (`LogMaxKB`)
+  - 부팅 직후 네트워크가 없어 서버 확인에 실패하면 런처 ini 의 `NetWaitSec`(기본 60초) 동안 3초 간격으로 다시 시도한 뒤 갱신 여부를 정합니다 (0 이면 다시 시도 안 함)
 - 각 로그 파일은 메뉴 **F9) Help > 로그 보기** 의 하위 메뉴(`gsHomeManager.log` / `Telegram.Log` / `WiFiScan_watch.log` / `ipcam.log` / `gsHomeManagerLauncher.log`)로 Notepad.exe 에서 열 수 있습니다. 파일이 아직 없으면 안내창이 뜹니다.
 
 ## 참고

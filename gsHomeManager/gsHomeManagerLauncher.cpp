@@ -21,6 +21,7 @@ static std::wstring g_logPath;  // 로그 파일 전체 경로
 static int g_logMaxKB = 256;    // 로그가 이 크기(KB)를 넘으면 새로 시작
 static int g_httpConnectMs = 5000;     // 서버 연결 제한 시간 (ms)
 static int g_httpRecvMs = 30000;       // 서버 응답 수신 제한 시간 (ms)
+static int g_netWaitMs = 60000;        // 부팅 직후 등 네트워크가 아직 없을 때 version.txt 를 다시 시도하는 최대 시간 (ms, 0 = 다시 시도 안 함)
 static std::wstring g_args;     // 본 프로세스에 넘길 명령줄 인자 (ini Args)
 static std::wstring g_workDir;  // 본 프로세스 시작 폴더 (ini WorkDir, 비어 있으면 exe 폴더)
 
@@ -245,8 +246,8 @@ static bool WriteFileAll(const std::wstring& path, const std::string& data)
 // ---------- 갱신 ----------
 static std::wstring VerOrNone(ULONGLONG v) { return v ? VerStr(v) : L"(읽을 수 없음)"; }
 
-// 파일 정보 한 줄: 크기, 수정 시각, 파일 버전
-static std::wstring FileInfo(const std::wstring& path)
+// 파일 정보 한 줄: 크기, 수정 시각, 파일 버전 (exe 가 아닌 파일은 withVer=false)
+static std::wstring FileInfo(const std::wstring& path, bool withVer = true)
 {
     WIN32_FILE_ATTRIBUTE_DATA d;
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d)) return L"파일 없음";
@@ -256,7 +257,7 @@ static std::wstring FileInfo(const std::wstring& path)
     FileTimeToSystemTime(&lft, &st);
     wchar_t b[64];
     _snwprintf(b, 64, L"%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    return std::to_wstring(sz) + L"바이트, 수정 " + b + L", 파일 버전 " + VerOrNone(GetFileVer(path));
+    return std::to_wstring(sz) + L"바이트, 수정 " + b + (withVer ? L", 파일 버전 " + VerOrNone(GetFileVer(path)) : L"");
 }
 
 static std::wstring Ms(ULONGLONG ms) { return std::to_wstring(ms) + L"ms"; }
@@ -275,6 +276,12 @@ static void Update(const std::wstring& local, const std::wstring& verUrl, const 
     ULONGLONG t0 = GetTickCount64();
     bool ok = HttpGet(verUrl, vt);
     DWORD e = GetLastError();
+    if (!ok && g_netWaitMs > 0 && e >= 12000 && e < 12200) {    // WinHTTP 연결 오류 (DNS 12007 등): 부팅 직후 네트워크 준비 전일 수 있음
+        Log(ErrE(L"[갱신] 서버에 연결하지 못함", e) + L" - 네트워크 준비를 기다리며 3초 간격으로 다시 시도 (최대 " + std::to_wstring(g_netWaitMs / 1000) + L"초)");
+        int n = 0;
+        while (!ok && e >= 12000 && e < 12200 && GetTickCount64() - t0 < (ULONGLONG)g_netWaitMs) { Sleep(3000); ++n; ok = HttpGet(verUrl, vt); e = GetLastError(); }
+        Log(ok ? L"[갱신] 다시 시도 " + std::to_wstring(n) + L"회 만에 연결됨 (" + Ms(GetTickCount64() - t0) + L" 대기)" : L"[갱신] 다시 시도 " + std::to_wstring(n) + L"회 모두 실패");
+    }
     ULONGLONG ms = GetTickCount64() - t0;
     if (!ok) {
         Log(ErrE(L"[갱신] 서버 version.txt 받기 실패", e) + L", " + Ms(ms) + L" - 갱신을 건너뛰고 PC 의 exe 를 그대로 실행");
@@ -383,12 +390,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     g_logMaxKB = IniInt(ini, "LogMaxKB", 256);
     g_httpConnectMs = IniInt(ini, "HttpConnectSec", 5) * 1000;
     g_httpRecvMs = IniInt(ini, "HttpReceiveSec", 30) * 1000;
+    g_netWaitMs = IniInt(ini, "NetWaitSec", 60) * 1000;
     g_args = IniGet(ini, "Args");
     t = IniGet(ini, "WorkDir");                if (!t.empty()) g_workDir = Resolve(t);
 
     Log(L"===== 런처 시작 (pid=" + std::to_wstring(GetCurrentProcessId()) + L") =====");
     Log(L"런처 exe: " + std::wstring(self));
-    Log(L"설정 파일: " + g_dir + g_base + L".ini -> " + (ini.empty() ? std::wstring(L"없거나 비어 있음 (기본값 사용)") : FileInfo(g_dir + g_base + L".ini")));
+    Log(L"설정 파일: " + g_dir + g_base + L".ini -> " + (ini.empty() ? std::wstring(L"없거나 비어 있음 (기본값 사용)") : FileInfo(g_dir + g_base + L".ini", false)));
     Log(L"로그 파일: " + g_logPath + L" (최대 " + std::to_wstring(g_logMaxKB) + L"KB)");
 
     std::wstring le = IniGet(ini, "LocalExe");
