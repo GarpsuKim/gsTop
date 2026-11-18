@@ -12496,7 +12496,7 @@ private:
         case WM_CREATE: {
             ed_ = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 10, 10,
                                 w, (HMENU)1, GetModuleHandleW(NULL), NULL);
-            btn_ = CreateWindowW(L"BUTTON", L"파일보내기 (서버 → 클라이언트)", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 6, 5, 280, kBar - 10,
+            btn_ = CreateWindowW(L"BUTTON", L"파일 다운로드 ( 서버 → 클라이언트 )", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 6, 5, 280, kBar - 10,
                                  w, (HMENU)(INT_PTR)IDC_SEND, GetModuleHandleW(NULL), NULL);
             HDC sd = GetDC(NULL);
             int dpi = sd ? GetDeviceCaps(sd, LOGPIXELSY) : 96;
@@ -12533,6 +12533,27 @@ private:
                 return 0;
             }
             break;
+        case WM_DRAWITEM: {                         // [파일보내기] 버튼을 녹색으로 그림
+            LPDRAWITEMSTRUCT d = (LPDRAWITEMSTRUCT)lp;
+            if (!d || d->CtlID != (UINT)IDC_SEND) break;
+            const bool down = (d->itemState & ODS_SELECTED) != 0;
+            HBRUSH br = CreateSolidBrush(down ? RGB(30, 120, 50) : RGB(46, 160, 67));
+            FillRect(d->hDC, &d->rcItem, br);
+            DeleteObject(br);
+            HBRUSH fr = CreateSolidBrush(RGB(25, 95, 40));
+            FrameRect(d->hDC, &d->rcItem, fr);
+            DeleteObject(fr);
+            wchar_t txt[128] = L"";
+            GetWindowTextW(d->hwndItem, txt, 128);
+            RECT r = d->rcItem;
+            if (down) OffsetRect(&r, 1, 1);
+            HGDIOBJ oldF = font_ ? SelectObject(d->hDC, font_) : NULL;
+            SetBkMode(d->hDC, TRANSPARENT);
+            SetTextColor(d->hDC, RGB(255, 255, 255));
+            DrawTextW(d->hDC, txt, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if (oldF) SelectObject(d->hDC, oldF);
+            if (d->itemState & ODS_FOCUS) { RECT f = d->rcItem; InflateRect(&f, -3, -3); DrawFocusRect(d->hDC, &f); }
+            return TRUE; }
         case WM_CLOSE:                              // 닫으면 클라이언트 연결도 끊기므로 먼저 확인 (연결된 클라이언트가 없으면 바로 닫음)
             if (connFn_ && connFn_()) {
                 if (MessageBoxW(w, L"이 창을 닫으면 클라이언트와의 연결이 끊어집니다. 닫으시겠습니까?(Yes/No)", L"원격 서버 연결 로그",
@@ -13772,6 +13793,26 @@ private:
             if (LOWORD(wp) == IDC_LOGS && HIWORD(wp) == BN_CLICKED) { OnLogsButton(); SetFocus(w); return 0; }
             if (LOWORD(wp) == IDC_REBOOT && HIWORD(wp) == BN_CLICKED) { OnRebootButton(w); SetFocus(w); return 0; }
             break;
+        case WM_DRAWITEM: {                         // [파일 업로드] 버튼을 파란색으로 그림
+            LPDRAWITEMSTRUCT d = (LPDRAWITEMSTRUCT)lp;
+            if (!d || d->CtlID != (UINT)IDC_FILE) break;
+            const bool down = (d->itemState & ODS_SELECTED) != 0;
+            HBRUSH br = CreateSolidBrush(down ? RGB(0, 70, 150) : RGB(0, 102, 204));
+            FillRect(d->hDC, &d->rcItem, br);
+            DeleteObject(br);
+            HBRUSH fr = CreateSolidBrush(RGB(0, 50, 120));
+            FrameRect(d->hDC, &d->rcItem, fr);
+            DeleteObject(fr);
+            wchar_t txt[128] = L"";
+            GetWindowTextW(d->hwndItem, txt, 128);
+            RECT r = d->rcItem;
+            if (down) OffsetRect(&r, 1, 1);
+            HGDIOBJ oldF = font_ ? SelectObject(d->hDC, font_) : NULL;
+            SetBkMode(d->hDC, TRANSPARENT);
+            SetTextColor(d->hDC, RGB(255, 255, 255));
+            DrawTextW(d->hDC, txt, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if (oldF) SelectObject(d->hDC, oldF);
+            return TRUE; }
         case WM_FPROG: {
             std::wstring t;
             { std::lock_guard<std::mutex> g(pmtx_); t = ptext_; }
@@ -13780,7 +13821,7 @@ private:
         case WM_FDONE: {
             std::wstring t;
             { std::lock_guard<std::mutex> g(pmtx_); t = ptext_; }
-            for (HWND b : btn_) { SetWindowTextW(b, L"파일 전송"); EnableWindow(b, TRUE); }
+            for (HWND b : btn_) { SetWindowTextW(b, L"파일 업로드 (클라이언트-->서버)"); EnableWindow(b, TRUE); }
             sending_ = false;
             if (!closing_) MessageBoxW(w, t.c_str(), L"파일 전송", MB_OK | MB_ICONINFORMATION);
             return 0; }
@@ -13870,7 +13911,7 @@ private:
             wnd_[i] = CreateWindowW((LPCWSTR)u"gsHomeManagerRdpView", (LPCWSTR)title, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
                                     rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hi, NULL);
             if (wnd_[i]) {                                  // 타이틀 바 바로 밑 버튼 줄: [파일 전송]
-                btn_[i] = CreateWindowW(L"BUTTON", L"파일 전송", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(4, dpi, 96), MulDiv(3, dpi, 96),
+                btn_[i] = CreateWindowW(L"BUTTON", L"파일 업로드 (클라이언트-->서버)", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, MulDiv(4, dpi, 96), MulDiv(3, dpi, 96),
                                         MulDiv(230, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_FILE, hi, NULL);
                 if (btn_[i] && font_) SendMessageW(btn_[i], WM_SETFONT, (WPARAM)font_, TRUE);
                 btnLog_[i] = CreateWindowW(L"BUTTON", L"서버의 로그 파일 가져오기", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(238, dpi, 96), MulDiv(3, dpi, 96),
