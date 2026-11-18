@@ -12451,6 +12451,13 @@ public:
         }
     }
 
+    // 클라이언트 연결이 끝났을 때 서버 쪽에서 호출: 로그 창이 열려 있으면 닫음 (어느 스레드에서든 호출 가능)
+    static void CloseWin() {
+        HWND h;
+        { std::lock_guard<std::mutex> g(mu_); h = hw_; }
+        if (h) PostMessageW(h, WM_LOGEND, 0, 0);
+    }
+
     static void Raise(HWND h) {                 // 포커스를 뺏지 않고 맨 앞으로
         if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
         SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -12468,6 +12475,7 @@ public:
 private:
     static constexpr UINT WM_LOGADD = WM_APP + 30;
     static constexpr UINT WM_LOGSHOW = WM_APP + 31;
+    static constexpr UINT WM_LOGEND = WM_APP + 32;          // 클라이언트 연결이 끝나면 창을 닫음 (확인창 없음)
     static inline bool starting_ = false;
     static inline HWND hw_ = NULL, ed_ = NULL, btn_ = NULL;
     static inline HFONT font_ = NULL;
@@ -12518,6 +12526,9 @@ private:
             return 0; }
         case WM_LOGSHOW:
             Raise(w);
+            return 0;
+        case WM_LOGEND:
+            DestroyWindow(w);
             return 0;
         case WM_SIZE:
             if (ed_) MoveWindow(ed_, 0, kBar, LOWORD(lp), std::max(0, (int)HIWORD(lp) - kBar), TRUE);
@@ -13238,6 +13249,7 @@ private:
         }
         ReleaseDC(NULL, scr);
         Log::Put("원격 서버: 클라이언트 연결 종료: %s (보낸 화면 %lu 장, %lu KB)", ips.c_str(), sentFrames, sentBytes / 1024);
+        LogWin::CloseWin();                     // 클라이언트가 연결을 닫으면 연결 로그 창도 닫음
     }
 
     Cfg                     cfg_;
@@ -13821,7 +13833,7 @@ private:
         case WM_FDONE: {
             std::wstring t;
             { std::lock_guard<std::mutex> g(pmtx_); t = ptext_; }
-            for (HWND b : btn_) { SetWindowTextW(b, L"파일 업로드 (클라이언트 → 서버)"); EnableWindow(b, TRUE); }
+            for (HWND b : btn_) { SetWindowTextW(b, L"파일 업로드 (클라이언트-->서버)"); EnableWindow(b, TRUE); }
             sending_ = false;
             if (!closing_) MessageBoxW(w, t.c_str(), L"파일 전송", MB_OK | MB_ICONINFORMATION);
             return 0; }
