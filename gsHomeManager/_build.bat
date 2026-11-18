@@ -3,6 +3,7 @@ chcp 65001
 setlocal
 cd /d "%~dp0"
 set APP=gsHomeManager
+set Launcher=gsHomeManagerLauncher
 set ERR=build_ERR.txt
 
 rem --- 필수 도구/입력 파일 확인
@@ -12,7 +13,8 @@ for %%f in (%APP%.cpp %APP%.rc %APP%.ico version.h) do if not exist %%f (echo [%
 
 rem --- 실행 중인 시계가 exe 를 잠그고 있으면 링크가 Permission denied 로 실패하므로 먼저 종료
 rem     (screen_telegram.exe 는 gsHomeManager.cpp 에 통합됨. 옛 exe 가 떠 있으면 텔레그램 getUpdates 409 충돌이 나므로 같이 종료)
-taskkill /f /im screen_telegram.exe >nul 2>&1
+
+taskkill /f /im %Launcher%.exe >nul 2>&1
 taskkill /f /im %APP%.exe >nul 2>&1 && timeout /t 1 /nobreak >nul
 if exist %ERR% del %ERR%
 

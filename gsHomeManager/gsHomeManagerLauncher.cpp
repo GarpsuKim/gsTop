@@ -1,15 +1,28 @@
-// gsHomeManagerLauncher.cpp - gsHomeManager 런처
+// gsHomeManagerLauncher.cpp - gsHomeManager 런처 (다른 프로젝트에서도 재사용 가능: 이름/경로/횟수/시간은 모두 ini 에서 읽음)
+// 설정 파일은 이 exe 와 같은 폴더의 <exe 이름>.ini 의 [Launcher] 섹션, 로그는 기본 <exe 이름>.log
+// (exe 이름을 바꿔 복사하면 ini/log 이름도 따라 바뀜. 키 설명은 ini 참고)
 // 1) 서버(GitHub)의 version.txt 를 받아 PC 의 exe 파일 버전과 비교
 // 2) PC 쪽이 낮으면 서버 exe 를 내려받아 교체
 // 3) LocalExe 실행
+// 4) 실행한 본 프로세스를 감시: 종료하면 (정상 종료든 비정상 종료든) 버전 확인 없이 다시 실행 (ini Watch=0 이면 감시 안 함)
+//    다시 실행하기 전에 같은 이름의 프로세스가 이미 떠 있으면(사용자가 직접 띄웠거나 /restart 로 새 런처가 먼저 띄운 경우) 감시를 끝낸다.
 // 서버에 접속하지 못하거나 다운로드/교체에 실패해도 기존 exe 는 그대로 실행한다.
 #include <windows.h>
+#include <tlhelp32.h>
 #include <winhttp.h>
 #include <string>
 #include <vector>
 #include <cstdio>
 
-static std::wstring g_dir;      // gsHomeManagerLauncher.exe 가 있는 폴더 (끝에 \ 포함)
+static std::wstring g_dir;      // 이 런처 exe 가 있는 폴더 (끝에 \ 포함)
+static std::wstring g_base;     // 이 런처 exe 의 이름 (확장자 제외). ini / log 기본 이름
+static std::wstring g_title;    // 메시지 상자 제목 (ini AppName)
+static std::wstring g_logPath;  // 로그 파일 전체 경로
+static int g_logMaxKB = 256;    // 로그가 이 크기(KB)를 넘으면 새로 시작
+static int g_httpConnectMs = 5000;     // 서버 연결 제한 시간 (ms)
+static int g_httpRecvMs = 30000;       // 서버 응답 수신 제한 시간 (ms)
+static std::wstring g_args;     // 본 프로세스에 넘길 명령줄 인자 (ini Args)
+static std::wstring g_workDir;  // 본 프로세스 시작 폴더 (ini WorkDir, 비어 있으면 exe 폴더)
 
 // ---------- UTF-8 / 문자열 ----------
 static std::wstring U2W(const std::string& s)
@@ -35,13 +48,13 @@ static std::string W2U(const std::wstring& w)
 
 static bool Exists(const std::wstring& p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
-// ---------- 로그 (gsHomeManagerLauncher.log, 256KB 넘으면 새로 시작) ----------
+// ---------- 로그 (기본 <exe 이름>.log, LogMaxKB 넘으면 새로 시작) ----------
 static void Log(const std::wstring& msg)
 {
-    HANDLE h = CreateFileW((g_dir + L"gsHomeManagerLauncher.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+    HANDLE h = CreateFileW(g_logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) return;
-    if (GetFileSize(h, nullptr) > 262144) { SetFilePointer(h, 0, nullptr, FILE_BEGIN); SetEndOfFile(h); }
+    if (g_logMaxKB > 0 && GetFileSize(h, nullptr) > (DWORD)g_logMaxKB * 1024) { SetFilePointer(h, 0, nullptr, FILE_BEGIN); SetEndOfFile(h); }
     SetFilePointer(h, 0, nullptr, FILE_END);
     SYSTEMTIME t; GetLocalTime(&t);
     wchar_t ts[40];
@@ -91,7 +104,18 @@ static std::wstring IniGet(const std::string& text, const char* key)
     return L"";
 }
 
-// 상대 경로면 gsHomeManagerLauncher.exe 폴더 기준으로 만든다 (X:\... 와 \\서버\... 는 그대로)
+// 정수 키 (없거나 숫자가 아니면 def, 음수는 0)
+static int IniInt(const std::string& text, const char* key, int def)
+{
+    std::wstring v = IniGet(text, key);
+    if (v.empty()) return def;
+    wchar_t* e = nullptr;
+    long n = wcstol(v.c_str(), &e, 10);
+    if (e == v.c_str()) return def;
+    return n < 0 ? 0 : (int)n;
+}
+
+// 상대 경로면 이 런처 exe 폴더 기준으로 만든다 (X:\... 와 \\서버\... 는 그대로)
 static std::wstring Resolve(const std::wstring& p)
 {
     if (p.empty()) return p;
@@ -141,10 +165,10 @@ static bool HttpGet(const std::wstring& url, std::string& out)
     if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) return false;
 
     bool ok = false;
-    HINTERNET s = WinHttpOpen(L"gsHomeManager-launcher", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    HINTERNET s = WinHttpOpen((g_base + L"-launcher").c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                               WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) return false;
-    WinHttpSetTimeouts(s, 5000, 5000, 10000, 30000);            // 이름 확인, 연결, 송신, 수신 (ms)
+    WinHttpSetTimeouts(s, 5000, g_httpConnectMs, 10000, g_httpRecvMs);            // 이름 확인, 연결, 송신, 수신 (ms)
     HINTERNET c = WinHttpConnect(s, host, uc.nPort, 0);
     HINTERNET r = c ? WinHttpOpenRequest(c, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                          uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) : nullptr;
@@ -220,16 +244,54 @@ static void Update(const std::wstring& local, const std::wstring& verUrl, const 
     Log(L"갱신 완료: " + VerStr(lv) + L" -> " + VerStr(tv));
 }
 
+// ---------- 본 프로세스 실행 / 실행 중인지 확인 ----------
+static bool Launch(const std::wstring& local, HANDLE& hProc)
+{
+    std::wstring cmd = L"\"" + local + L"\"" + (g_args.empty() ? L"" : L" " + g_args);
+    std::wstring dir = g_workDir.empty() ? local.substr(0, local.find_last_of(L'\\')) : g_workDir;
+    STARTUPINFOW si = {}; si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(local.c_str(), &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, dir.c_str(), &si, &pi)) return false;
+    CloseHandle(pi.hThread);
+    hProc = pi.hProcess;
+    return true;
+}
+
+static bool IsRunning(const std::wstring& name)                // 이 이름의 프로세스(exe 파일명)가 떠 있는지
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W e = {}; e.dwSize = sizeof(e);
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &e); ok; ok = Process32NextW(snap, &e))
+        if (_wcsicmp(e.szExeFile, name.c_str()) == 0) { found = true; break; }
+    CloseHandle(snap);
+    return found;
+}
+
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
     wchar_t self[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, self, MAX_PATH);
     g_dir = self;
     g_dir.resize(g_dir.find_last_of(L'\\') + 1);
+    g_base = self + g_dir.size();
+    { size_t d = g_base.find_last_of(L'.'); if (d != std::wstring::npos) g_base.resize(d); }
+    g_title = g_base;
+    g_logPath = g_dir + g_base + L".log";
 
-    std::string ini = ReadAll(g_dir + L"gsHomeManagerLauncher.ini");
+    std::string ini = ReadAll(g_dir + g_base + L".ini");
+    std::wstring t = IniGet(ini, "AppName");   if (!t.empty()) g_title = t;
+    t = IniGet(ini, "LogFile");                if (!t.empty()) g_logPath = Resolve(t);
+    g_logMaxKB = IniInt(ini, "LogMaxKB", 256);
+    g_httpConnectMs = IniInt(ini, "HttpConnectSec", 5) * 1000;
+    g_httpRecvMs = IniInt(ini, "HttpReceiveSec", 30) * 1000;
+    g_args = IniGet(ini, "Args");
+    t = IniGet(ini, "WorkDir");                if (!t.empty()) g_workDir = Resolve(t);
+
     std::wstring le = IniGet(ini, "LocalExe");
-    std::wstring local = Resolve(le.empty() ? L"gsHomeManager.exe" : le);
+    if (le.empty()) { Log(L"ini [Launcher] LocalExe 가 비어 있음"); MessageBoxW(nullptr, (L"LocalExe 를 " + g_base + L".ini 에 지정하세요.").c_str(), g_title.c_str(), MB_OK | MB_ICONERROR); return 2; }
+    std::wstring local = Resolve(le);
     std::wstring verUrl = IniGet(ini, "ServerVersionUrl");
     std::wstring exeUrl = IniGet(ini, "ServerExeUrl");
 
@@ -238,20 +300,48 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     if (!Exists(local)) {
         Log(L"실행할 exe 가 없음: " + local);
-        MessageBoxW(nullptr, (L"실행할 파일이 없습니다.\n" + local).c_str(), L"gsHomeManagerLauncher", MB_OK | MB_ICONERROR);
+        MessageBoxW(nullptr, (L"실행할 파일이 없습니다.\n" + local).c_str(), g_title.c_str(), MB_OK | MB_ICONERROR);
         return 2;
     }
 
-    std::wstring cmd = L"\"" + local + L"\"";
-    std::wstring dir = local.substr(0, local.find_last_of(L'\\'));
-    STARTUPINFOW si = {}; si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = {};
-    if (!CreateProcessW(local.c_str(), &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, dir.c_str(), &si, &pi)) {
+    const bool watch = IniInt(ini, "Watch", 1) != 0;                            // 감시 사용
+    const bool onNormal = IniInt(ini, "RestartOnNormalExit", 1) != 0;           // 종료 코드 0 (정상 종료) 일 때도 다시 실행
+    const DWORD delayAbnormalMs = (DWORD)IniInt(ini, "RestartDelaySec", 5) * 1000;       // 비정상 종료 후 다시 실행까지 대기
+    const DWORD delayNormalMs = (DWORD)IniInt(ini, "NormalExitDelaySec", 15) * 1000;     // 정상 종료 후 다시 실행까지 대기
+    const size_t maxRestarts = (size_t)IniInt(ini, "MaxRestarts", 5);           // 0 = 제한 없음
+    const ULONGLONG windowMs = (ULONGLONG)IniInt(ini, "RestartWindowSec", 600) * 1000;   // 0 = 기간 제한 없이 누적
+    const bool skipIfRunning = IniInt(ini, "SkipIfRunning", 1) != 0;            // 다시 실행 전에 같은 프로세스가 이미 있으면 감시 종료
+    std::wstring procName = IniGet(ini, "ProcessName");                         // 비어 있으면 LocalExe 의 파일명
+    if (procName.empty()) procName = local.substr(local.find_last_of(L'\\') + 1);
+
+    HANDLE hp = nullptr;
+    if (!Launch(local, hp)) {
         Log(Err(L"실행 실패"));
-        MessageBoxW(nullptr, (L"실행하지 못했습니다.\n" + local).c_str(), L"gsHomeManagerLauncher", MB_OK | MB_ICONERROR);
+        MessageBoxW(nullptr, (L"실행하지 못했습니다.\n" + local).c_str(), g_title.c_str(), MB_OK | MB_ICONERROR);
         return 3;
     }
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    return 0;
+    if (!watch) { CloseHandle(hp); return 0; }
+
+    // ---------- 본 프로세스 감시 ----------
+    std::vector<ULONGLONG> tries;                               // 다시 실행한 시각들 (MaxRestarts / RestartWindowSec 로 무한 반복 방지)
+    for (;;) {
+        WaitForSingleObject(hp, INFINITE);
+        DWORD code = 0;
+        GetExitCodeProcess(hp, &code);
+        CloseHandle(hp); hp = nullptr;
+        Log(code == 0 ? L"본 프로세스 정상 종료 (종료 코드 0)" : L"본 프로세스 비정상 종료 (종료 코드 " + std::to_wstring(code) + L")");
+
+        if (code == 0 && !onNormal) { Log(L"RestartOnNormalExit=0 - 감시 종료"); return 0; }
+
+        ULONGLONG now = GetTickCount64();
+        if (windowMs > 0) for (size_t i = tries.size(); i-- > 0;) if (now - tries[i] > windowMs) tries.erase(tries.begin() + i);
+        if (maxRestarts > 0 && tries.size() >= maxRestarts) { Log(L"설정한 기간 안에 반복해서 종료됨 (MaxRestarts) - 감시 포기"); return 4; }
+        tries.push_back(now);
+
+        Sleep(code == 0 ? delayNormalMs : delayAbnormalMs);     // 정상 종료는 새 런처가 먼저 띄울 시간을 더 준다
+        if (skipIfRunning && IsRunning(procName)) { Log(L"이미 다른 본 프로세스가 실행 중 - 감시 종료"); return 0; }     // 사용자가 직접 띄웠거나 다른 런처가 먼저 살린 경우
+        if (!Exists(local)) { Log(L"실행할 exe 가 없음: " + local); return 2; }
+        if (!Launch(local, hp)) { Log(Err(L"다시 시작 실패")); return 3; }
+        Log(L"다시 시작 (버전 확인 생략): " + procName);
+    }
 }
