@@ -1,5 +1,5 @@
 // gsHomeManagerLauncher.cpp - gsHomeManager 런처 (다른 프로젝트에서도 재사용 가능: 이름/경로/횟수/시간은 모두 ini 에서 읽음)
-// 설정 파일은 이 exe 와 같은 폴더의 <exe 이름>.ini 의 [Launcher] 섹션, 로그는 기본 <exe 이름>.log
+// 설정 파일은 이 exe 와 같은 폴더의 <exe 이름>.ini 의 [Launcher] 섹션, 로그는 기본 이 폴더의 log\<exe 이름>.log (log 폴더가 없으면 만듦)
 // (exe 이름을 바꿔 복사하면 ini/log 이름도 따라 바뀜. 키 설명은 ini 참고)
 // 1) 서버(GitHub)의 version.txt 를 받아 PC 의 exe 파일 버전과 비교
 // 2) PC 쪽이 낮으면 서버 exe 를 내려받아 교체
@@ -48,9 +48,20 @@ static std::string W2U(const std::wstring& w)
 
 static bool Exists(const std::wstring& p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
-// ---------- 로그 (기본 <exe 이름>.log, LogMaxKB 넘으면 새로 시작) ----------
+// ---------- 로그 (기본 log\<exe 이름>.log, LogMaxKB 넘으면 새로 시작) ----------
+// 로그 파일이 들어갈 폴더가 없으면 빠진 폴더를 모두 만든다
+static void EnsureLogDir()
+{
+    size_t last = g_logPath.find_last_of(L'\\');
+    if (last == std::wstring::npos) return;
+    for (size_t i = g_logPath.find(L'\\', 3); i != std::wstring::npos && i <= last; i = g_logPath.find(L'\\', i + 1))
+        CreateDirectoryW(g_logPath.substr(0, i).c_str(), nullptr);      // 이미 있으면 실패하지만 무시
+}
+
 static void Log(const std::wstring& msg)
 {
+    static std::wstring dirFor;                                 // 폴더를 확인한 로그 경로 (경로가 바뀌면 다시 확인)
+    if (dirFor != g_logPath) { EnsureLogDir(); dirFor = g_logPath; }
     HANDLE h = CreateFileW(g_logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -64,7 +75,27 @@ static void Log(const std::wstring& msg)
     CloseHandle(h);
 }
 
-static std::wstring Err(const wchar_t* what) { return std::wstring(what) + L" (오류 " + std::to_wstring(GetLastError()) + L")"; }
+// 오류 번호 설명 (WinHTTP 주요 오류 + HTTP 상태 코드)
+static std::wstring ErrDesc(DWORD e)
+{
+    if (e >= 100 && e < 600) return L", HTTP 상태 " + std::to_wstring(e);
+    switch (e) {
+    case 2:     return L", 파일을 찾을 수 없음";
+    case 3:     return L", 경로를 찾을 수 없음";
+    case 5:     return L", 접근 거부";
+    case 32:    return L", 다른 프로그램이 사용 중";
+    case 12002: return L", 서버 응답 시간 초과";
+    case 12007: return L", 서버 이름을 찾을 수 없음 (DNS / 인터넷 연결 확인)";
+    case 12029: return L", 서버에 연결하지 못함";
+    case 12030: return L", 연결이 끊어짐";
+    case 12037: case 12038: case 12044: case 12045: return L", 서버 인증서 오류";
+    case 12152: return L", 서버 응답이 올바르지 않음";
+    case 12175: return L", 보안 연결(SSL) 오류";
+    }
+    return L"";
+}
+static std::wstring ErrE(const std::wstring& what, DWORD e) { return what + L" (오류 " + std::to_wstring(e) + ErrDesc(e) + L")"; }
+static std::wstring Err(const std::wstring& what) { return ErrE(what, GetLastError()); }
 
 // ---------- ini ([Launcher] 섹션만 읽음, UTF-8 BOM 있어도/없어도 OK) ----------
 static std::string ReadAll(const std::wstring& path)
@@ -154,9 +185,12 @@ static std::wstring VerStr(ULONGLONG v)
 }
 
 // ---------- HTTPS GET (WinHTTP: 캐시 없음, 리다이렉트 자동, 시간 제한 있음) ----------
+static DWORD g_httpStatus = 0;     // 마지막 HttpGet 의 HTTP 상태 코드 (응답을 못 받았으면 0)
+
 static bool HttpGet(const std::wstring& url, std::string& out)
 {
     out.clear();
+    g_httpStatus = 0;
     wchar_t host[256], path[2048];
     URL_COMPONENTSW uc = {};
     uc.dwStructSize = sizeof(uc);
@@ -177,6 +211,7 @@ static bool HttpGet(const std::wstring& url, std::string& out)
         DWORD code = 0, sz = sizeof(code);
         WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                             &code, &sz, WINHTTP_NO_HEADER_INDEX);
+        g_httpStatus = code;
         if (code == 200) {
             ok = true;
             static char buf[32768];
@@ -208,40 +243,100 @@ static bool WriteFileAll(const std::wstring& path, const std::string& data)
 }
 
 // ---------- 갱신 ----------
+static std::wstring VerOrNone(ULONGLONG v) { return v ? VerStr(v) : L"(읽을 수 없음)"; }
+
+// 파일 정보 한 줄: 크기, 수정 시각, 파일 버전
+static std::wstring FileInfo(const std::wstring& path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA d;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d)) return L"파일 없음";
+    ULONGLONG sz = ((ULONGLONG)d.nFileSizeHigh << 32) | d.nFileSizeLow;
+    FILETIME lft; SYSTEMTIME st = {};
+    FileTimeToLocalFileTime(&d.ftLastWriteTime, &lft);
+    FileTimeToSystemTime(&lft, &st);
+    wchar_t b[64];
+    _snwprintf(b, 64, L"%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    return std::to_wstring(sz) + L"바이트, 수정 " + b + L", 파일 버전 " + VerOrNone(GetFileVer(path));
+}
+
+static std::wstring Ms(ULONGLONG ms) { return std::to_wstring(ms) + L"ms"; }
+
 static void Update(const std::wstring& local, const std::wstring& verUrl, const std::wstring& exeUrl)
 {
-    std::string vt;
-    if (!HttpGet(verUrl, vt)) { Log(Err(L"서버 version.txt 확인 실패 - 갱신 건너뜀")); return; }
-    ULONGLONG sv = ParseVer(vt);
-    if (!sv) { Log(L"서버 version.txt 형식 오류 - 갱신 건너뜀"); return; }
-
+    Log(L"[갱신] ---- 갱신 확인 시작 ----");
+    Log(L"[갱신] PC exe: " + local + L" -> " + FileInfo(local));
+    const bool had0 = Exists(local);
     ULONGLONG lv = GetFileVer(local);                           // exe 가 없으면 0 -> 내려받음
-    if (lv >= sv) return;
+    Log(L"[갱신] PC 버전: " + VerOrNone(lv) + (had0 ? L"" : L" (exe 가 없으므로 서버에서 내려받음)"));
 
+    // 1) 서버 version.txt
+    Log(L"[갱신] 서버 version.txt 요청: " + verUrl + L" (연결 제한 " + std::to_wstring(g_httpConnectMs / 1000) + L"초, 수신 제한 " + std::to_wstring(g_httpRecvMs / 1000) + L"초)");
+    std::string vt;
+    ULONGLONG t0 = GetTickCount64();
+    bool ok = HttpGet(verUrl, vt);
+    DWORD e = GetLastError();
+    ULONGLONG ms = GetTickCount64() - t0;
+    if (!ok) {
+        Log(ErrE(L"[갱신] 서버 version.txt 받기 실패", e) + L", " + Ms(ms) + L" - 갱신을 건너뛰고 PC 의 exe 를 그대로 실행");
+        return;
+    }
+    std::string shown = Trim(vt);
+    for (char& ch : shown) if (ch == '\r' || ch == '\n') ch = ' ';
+    if (shown.size() > 60) shown = shown.substr(0, 60) + "...";
+    Log(L"[갱신] 서버 version.txt 응답: HTTP " + std::to_wstring(g_httpStatus) + L", " + std::to_wstring(vt.size()) + L"바이트, " + Ms(ms) + L", 내용 \"" + U2W(shown) + L"\"");
+
+    ULONGLONG sv = ParseVer(vt);
+    if (!sv) { Log(L"[갱신] 서버 version.txt 형식 오류 (a.b.c.d 형식이어야 함) - 갱신을 건너뛰고 PC 의 exe 를 그대로 실행"); return; }
+    Log(L"[갱신] 버전 비교: 서버 " + VerStr(sv) + (lv >= sv ? L" <= PC " : L" > PC ") + VerOrNone(lv));
+    if (lv >= sv) { Log(L"[갱신] PC 가 최신이므로 갱신하지 않음"); return; }
+
+    // 2) 서버 exe 내려받기
+    Log(L"[갱신] 서버 exe 요청: " + exeUrl);
     std::string data;
-    if (!HttpGet(exeUrl, data)) { Log(Err(L"서버 exe 다운로드 실패")); return; }
+    t0 = GetTickCount64();
+    ok = HttpGet(exeUrl, data);
+    e = GetLastError();
+    ms = GetTickCount64() - t0;
+    if (!ok) {
+        Log(ErrE(L"[갱신] 서버 exe 다운로드 실패", e) + L", " + std::to_wstring(data.size()) + L"바이트까지 받음, " + Ms(ms) + L" - 갱신을 건너뛰고 PC 의 exe 를 그대로 실행");
+        return;
+    }
+    Log(L"[갱신] 서버 exe 다운로드 완료: HTTP " + std::to_wstring(g_httpStatus) + L", " + std::to_wstring(data.size()) + L"바이트, " + Ms(ms) +
+        (ms > 0 ? L", 약 " + std::to_wstring((ULONGLONG)data.size() / (ms ? ms : 1)) + L" KB/s" : L""));
 
+    // 3) .new 로 저장하고 검증
     std::wstring tmp = local + L".new", old = local + L".old";
-    if (!WriteFileAll(tmp, data)) { DeleteFileW(tmp.c_str()); Log(Err(L".new 파일 저장 실패")); return; }
+    if (!WriteFileAll(tmp, data)) { e = GetLastError(); DeleteFileW(tmp.c_str()); Log(ErrE(L"[갱신] .new 파일 저장 실패: " + tmp, e) + L" - 갱신 취소"); return; }
+    Log(L"[갱신] 임시 파일 저장: " + tmp + L" -> " + FileInfo(tmp));
     ULONGLONG tv = GetFileVer(tmp);                             // 받은 파일 자체의 버전으로 검증 (깨진 파일/HTML 오류 페이지/CDN 지연 방지)
     if (tv <= lv) {
         DeleteFileW(tmp.c_str());
-        Log(L"받은 exe 의 버전을 읽을 수 없거나 PC 보다 높지 않음 (" + VerStr(tv) + L") - 갱신 취소");
+        Log(L"[갱신] 받은 exe 의 버전을 읽을 수 없거나 PC 보다 높지 않음 (받은 파일 " + VerOrNone(tv) + L", PC " + VerOrNone(lv) + L", 서버 version.txt " + VerStr(sv) + L") - 임시 파일을 지우고 갱신 취소");
         return;
     }
+    Log(L"[갱신] 받은 파일 검증 통과: 파일 버전 " + VerStr(tv) + (tv != sv ? L" (서버 version.txt " + VerStr(sv) + L" 와 다름)" : L""));
 
-    // 실행 중인 exe 는 덮어쓸 수 없지만 이름 변경은 가능하다
+    // 4) 교체: 실행 중인 exe 는 덮어쓸 수 없지만 이름 변경은 가능하다
     bool had = Exists(local);
-    if (had && !MoveFileExW(local.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-        DeleteFileW(tmp.c_str()); Log(Err(L"기존 exe 이름 변경 실패 - 갱신 취소")); return;
+    if (had) {
+        if (!MoveFileExW(local.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            e = GetLastError(); DeleteFileW(tmp.c_str());
+            Log(ErrE(L"[갱신] 기존 exe 이름 변경 실패", e) + L" - 갱신 취소");
+            return;
+        }
+        Log(L"[갱신] 기존 exe -> " + old + L" 이름 변경 완료");
     }
     if (!MoveFileExW(tmp.c_str(), local.c_str(), 0)) {
-        Log(Err(L"새 exe 교체 실패 - 원래대로 복구"));
-        if (had) MoveFileExW(old.c_str(), local.c_str(), MOVEFILE_REPLACE_EXISTING);
+        e = GetLastError();
+        Log(ErrE(L"[갱신] 새 exe 교체 실패", e) + L" - 원래대로 복구");
+        if (had) {
+            if (MoveFileExW(old.c_str(), local.c_str(), MOVEFILE_REPLACE_EXISTING)) Log(L"[갱신] 원래 exe 복구 완료");
+            else Log(Err(L"[갱신] 원래 exe 복구도 실패 - 수동 확인 필요: " + old));
+        }
         DeleteFileW(tmp.c_str());
         return;
     }
-    Log(L"갱신 완료: " + VerStr(lv) + L" -> " + VerStr(tv));
+    Log(L"[갱신] 갱신 완료: " + VerStr(lv) + L" -> " + VerStr(tv) + L" (" + FileInfo(local) + L")");
 }
 
 // ---------- 본 프로세스 실행 / 실행 중인지 확인 ----------
@@ -251,9 +346,11 @@ static bool Launch(const std::wstring& local, HANDLE& hProc)
     std::wstring dir = g_workDir.empty() ? local.substr(0, local.find_last_of(L'\\')) : g_workDir;
     STARTUPINFOW si = {}; si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
+    Log(L"실행: " + cmd + L" (작업 폴더: " + dir + L")");
     if (!CreateProcessW(local.c_str(), &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, dir.c_str(), &si, &pi)) return false;
     CloseHandle(pi.hThread);
     hProc = pi.hProcess;
+    Log(L"실행됨 (pid=" + std::to_wstring(pi.dwProcessId) + L")");
     return true;
 }
 
@@ -278,7 +375,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     g_base = self + g_dir.size();
     { size_t d = g_base.find_last_of(L'.'); if (d != std::wstring::npos) g_base.resize(d); }
     g_title = g_base;
-    g_logPath = g_dir + g_base + L".log";
+    g_logPath = g_dir + L"log\\" + g_base + L".log";            // 기본: 런처 exe 폴더\log\<exe 이름>.log
 
     std::string ini = ReadAll(g_dir + g_base + L".ini");
     std::wstring t = IniGet(ini, "AppName");   if (!t.empty()) g_title = t;
@@ -289,14 +386,27 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     g_args = IniGet(ini, "Args");
     t = IniGet(ini, "WorkDir");                if (!t.empty()) g_workDir = Resolve(t);
 
+    Log(L"===== 런처 시작 (pid=" + std::to_wstring(GetCurrentProcessId()) + L") =====");
+    Log(L"런처 exe: " + std::wstring(self));
+    Log(L"설정 파일: " + g_dir + g_base + L".ini -> " + (ini.empty() ? std::wstring(L"없거나 비어 있음 (기본값 사용)") : FileInfo(g_dir + g_base + L".ini")));
+    Log(L"로그 파일: " + g_logPath + L" (최대 " + std::to_wstring(g_logMaxKB) + L"KB)");
+
     std::wstring le = IniGet(ini, "LocalExe");
     if (le.empty()) { Log(L"ini [Launcher] LocalExe 가 비어 있음"); MessageBoxW(nullptr, (L"LocalExe 를 " + g_base + L".ini 에 지정하세요.").c_str(), g_title.c_str(), MB_OK | MB_ICONERROR); return 2; }
     std::wstring local = Resolve(le);
     std::wstring verUrl = IniGet(ini, "ServerVersionUrl");
     std::wstring exeUrl = IniGet(ini, "ServerExeUrl");
 
-    DeleteFileW((local + L".old").c_str());                     // 지난 갱신 때 남은 파일 (아직 실행 중이면 실패, 무시)
+    Log(L"LocalExe: " + local);
+    {   // 지난 갱신 때 남은 파일 (아직 실행 중이면 실패, 무시)
+        std::wstring oldp = local + L".old";
+        if (Exists(oldp)) {
+            if (DeleteFileW(oldp.c_str())) Log(L"지난 갱신 때 남은 .old 파일 삭제: " + oldp);
+            else Log(Err(L"지난 갱신 때 남은 .old 파일 삭제 실패 (본 프로세스가 아직 실행 중이면 정상): " + oldp));
+        }
+    }
     if (!verUrl.empty() && !exeUrl.empty()) Update(local, verUrl, exeUrl);
+    else Log(L"[갱신] ServerVersionUrl / ServerExeUrl 이 비어 있어 갱신 확인을 하지 않음");
 
     if (!Exists(local)) {
         Log(L"실행할 exe 가 없음: " + local);
@@ -315,6 +425,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     if (procName.empty()) procName = local.substr(local.find_last_of(L'\\') + 1);
 
     HANDLE hp = nullptr;
+    Log(L"감시 설정: Watch=" + std::to_wstring(watch) + L" 대상=" + procName + L" 정상종료시재실행=" + std::to_wstring(onNormal) +
+        L" 대기(비정상/정상)=" + std::to_wstring(delayAbnormalMs / 1000) + L"/" + std::to_wstring(delayNormalMs / 1000) + L"초" +
+        L" 최대재시작=" + std::to_wstring(maxRestarts) + L"회/" + std::to_wstring((unsigned long long)(windowMs / 1000)) + L"초 실행중이면감시종료=" + std::to_wstring(skipIfRunning));
     if (!Launch(local, hp)) {
         Log(Err(L"실행 실패"));
         MessageBoxW(nullptr, (L"실행하지 못했습니다.\n" + local).c_str(), g_title.c_str(), MB_OK | MB_ICONERROR);

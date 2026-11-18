@@ -45,7 +45,7 @@ gsHomeManager.ini ............ 설정 (없으면 자동 생성. [Telegram] 섹�
 README.md .................... 이 안내문
 ```
 
-실행 중에 exe 폴더에 생기는 파일: `WiFiScan_result.txt`, `home.state`, `oui.txt`, `detect.state`, `pinned.id`, `image\`, `up_down\`, `IPCam\`, 그리고 모든 로그 파일은 `log\` 폴더 아래에 생깁니다: `log\gsHomeManager.log`(시계/WiFiScan/IP cam), `log\Telegram.Log`(Telegram 모듈), `log\WiFiScan_watch.log`, `log\ipcam.log`
+실행 중에 exe 폴더에 생기는 파일: `WiFiScan_result.txt`, `home.state`, `oui.txt`, `detect.state`, `pinned.id`, `image\`, `up_down\`, `IPCam\`, 그리고 모든 로그 파일은 `log\` 폴더 아래에 생깁니다: `log\gsHomeManager.log`(시계/WiFiScan/IP cam), `log\Telegram.Log`(Telegram 모듈), `log\WiFiScan_watch.log`, `log\ipcam.log`, 런처 로그 `log\gsHomeManagerLauncher.log`
 
 ## 빌드
 
@@ -92,7 +92,7 @@ g++ -Os -s -static -mwindows -Wl,--gc-sections -o gsHomeManager.exe gsHomeManage
 | F6 | 작동시간 및 알람 설정 | 알람1 ~ 알람10, 시스템 재시작, 다른 앱 호출, 침입 탐지 시간, 시보 설정 (아래 참고) |
 | F7 | WiFiScan | WifiScan모니터링(설정/진행 상황 대화상자), HomeBack / NotHome 탐지 시간 및 프로그램 설정 (아래 참고) |
 | F8 | IP cam / 폰 연결 | IP cam 등록(IP address / port 를 ini 에 저장), 카메라 영상(영상 창 열기 → WebCam1 / WebCam2 / IP Cam 선택 후 [실행]), 폰 탐색기, 텔레그램/클라이언트 송수신 뷰어(텔레그램으로 받은 파일을 이미지 창으로 탐색), 원격 접속(서버), 원격 접속(클라이언트) |
-| F9 | Help | About(프로그램 이름/버전/개발자), ReadMe.MD(기본 브라우저로 열기), 홈페이지(주소 표시), 최신 버전 다운로드(GitHub zip 다운로드 링크 열기), 음력 API 키값 등록, 로그 보기(로그 파일 4종을 Notepad 로 열기) |
+| F9 | Help | About(프로그램 이름/버전/개발자), ReadMe.MD(기본 브라우저로 열기), 홈페이지(주소 표시), 최신 버전 다운로드(GitHub zip 다운로드 링크 열기), 음력 API 키값 등록, 로그 보기(로그 파일 5종을 Notepad 로 열기) |
 
 - F3) 디지탈 시계 / F4) 아나로그 시계 메뉴는 항상 활성이며, 현재 시계 모양에 해당하는 쪽 이름 앞에 체크(✓)가 표시됩니다 ([타이틀 & 디지탈] / [디지탈] 모양이면 F3, [아나로그] 모양이면 F4). 전체 메뉴(F1 / 한 번 클릭)에서 이 둘 중 하나를 **마우스로 한 번 클릭**하면 메뉴가 닫히고 그 시계로 바뀝니다 (F3 는 마지막에 쓰던 디지탈 모양으로, 이미 그 시계이면 그대로). 마우스를 올리면 하위 메뉴가 열리는 것과 단축키 F3 / F4 로 하위 메뉴를 여는 것은 그대로입니다.
 - 재시작은 확인창(30초, Yes/No) 후 앱을 종료하고 다시 실행합니다 (같은 폴더에 런처가 있으면 런처를 먼저 실행). 트레이 우클릭 메뉴에도 있습니다.
@@ -500,7 +500,8 @@ exe 와 같은 폴더에 있으며, 없으면 설명 주석이 포함된 기본 
 - `Telegram.Log` (`Telegram.Log.old`): Telegram 모듈의 로그 (위 Telegram 참고)
 - `WiFiScan_watch.log`: WiFiScan 감시 로그. `/HomeBack`, `/NotHome` 판정마다 `[사유]` 줄 포함 (위 WiFiScan > 판정 사유 기록 참고)
 - `ipcam.log`: 카메라 영상 창 로그 (IP Cam / 웹캠)
-- 각 로그 파일은 메뉴 **F9) Help > 로그 보기** 의 하위 메뉴(`gsHomeManager.log` / `Telegram.Log` / `WiFiScan_watch.log` / `ipcam.log`)로 Notepad.exe 에서 열 수 있습니다. 파일이 아직 없으면 안내창이 뜹니다.
+- `gsHomeManagerLauncher.log`: 런처 로그 (시작, 서버 버전 확인과 갱신 과정, 본 프로세스 실행/감시/재시작 기록). 위치는 런처 ini 의 `LogFile` 로 바꿀 수 있고 (바꾸면 메뉴의 로그 보기는 기본 위치 `log\gsHomeManagerLauncher.log` 를 엽니다), 256KB 를 넘으면 새로 시작합니다 (`LogMaxKB`)
+- 각 로그 파일은 메뉴 **F9) Help > 로그 보기** 의 하위 메뉴(`gsHomeManager.log` / `Telegram.Log` / `WiFiScan_watch.log` / `ipcam.log` / `gsHomeManagerLauncher.log`)로 Notepad.exe 에서 열 수 있습니다. 파일이 아직 없으면 안내창이 뜹니다.
 
 ## 참고
 

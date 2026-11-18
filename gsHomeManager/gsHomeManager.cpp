@@ -14356,7 +14356,7 @@ private:
         CMD_ALLDESK     = 108,
         CMD_COMPANION   = 116,      // 앱 동작 설정 > 동반 실행 앱 등록 (대화상자: 최대 5개 -> ini companion_app1~5)
         CMD_AUTORUN     = 115,      // 앱 동작 설정 > 자동 실행 on/off (Windows 시작 시 자동 실행: 레지스트리 Run)
-        CMD_HELP        = 730,      // 730 About, 731 ReadMe.MD, 732 홈페이지, 733 최신 버전 다운로드, 734 음력 API 키값 등록, 735~738 로그 보기(Notepad)
+        CMD_HELP        = 730,      // 730 About, 731 ReadMe.MD, 732 홈페이지, 733 최신 버전 다운로드, 734 음력 API 키값 등록, 735~739 로그 보기(Notepad)
         CMD_SCAN        = 740,      // WiFiScan 대화상자
         CMD_MYPHONE     = 741,      // 앱 동작 설정 > 내 폰 등록 (WiFiScan 대화상자 + 안내 문구)
         CMD_IPREG       = 742,      // IP cam > IP cam 등록
@@ -14993,6 +14993,7 @@ private:
         AddMenu(logm, 0, CMD_HELP + 6, "Telegram.Log (Telegram 모듈)(&2)");
         AddMenu(logm, 0, CMD_HELP + 7, "WiFiScan_watch.log (WiFiScan 감시)(&3)");
         AddMenu(logm, 0, CMD_HELP + 8, "ipcam.log (카메라 영상)(&4)");
+        AddMenu(logm, 0, CMD_HELP + 9, "gsHomeManagerLauncher.log (런처)(&5)");
         AddMenu(help, MF_POPUP, (UINT_PTR)logm, "로그 보기(&L)");
         AddMenu(bar, MF_POPUP, (UINT_PTR)help, "F9) Help(&H)");
         for (int i = 0; i < TOP_MENU_COUNT; i++) menuTop_[i] = GetSubMenu(bar, i);     // F2 ~ F9 단축키용
@@ -16004,7 +16005,7 @@ private:
         else if (id == CMD_RDPSRV)     RdpServerCommand();
         else if (id == CMD_RDPCLI)     RdpClientCommand();
         else if (id >= CMD_HELP && id <= CMD_HELP + 4) HelpCommand(id - CMD_HELP);
-        else if (id >= CMD_HELP + 5 && id <= CMD_HELP + 8) OpenLogFile(id - CMD_HELP - 5);
+        else if (id >= CMD_HELP + 5 && id <= CMD_HELP + 9) OpenLogFile(id - CMD_HELP - 5);
         else if (id == CMD_SHOWLUNAR) {
             if (!cfg_.LunarReady()) return;
             cfg_.showLunar = !cfg_.showLunar;
@@ -17171,7 +17172,7 @@ private:
 
     // Help > 로그 보기: .\log 의 로그 파일을 Notepad.exe 로 연다 (파일이 없으면 안내)
     void OpenLogFile(int idx) {
-        static const wchar_t* const N[4] = {L"", L"Telegram.Log", L"WiFiScan_watch.log", L"ipcam.log"};
+        static const wchar_t* const N[5] = {L"", L"Telegram.Log", L"WiFiScan_watch.log", L"ipcam.log", L"gsHomeManagerLauncher.log"};
         wchar_t path[MAX_PATH * 3];
         if (idx == 0) {                                     // gsHomeManager.log: Log 클래스가 쓰는 경로 그대로
             if (!MultiByteToWideChar(CP_ACP, 0, Log::Path(), -1, path, MAX_PATH * 3)) return;
