@@ -12223,7 +12223,9 @@ namespace rdp {
 struct Hdr { uint8_t type; uint32_t len; };
 #pragma pack(pop)
 struct Ev { int32_t t, a, b, m; };                       // m = 모니터 번호 (마우스 이동)
-enum { RM_AUTH = 1, RM_FRAME = 2, RM_INPUT = 3, RM_INFO = 4, RM_FILE = 5 };
+enum { RM_AUTH = 1, RM_FRAME = 2, RM_INPUT = 3, RM_INFO = 4, RM_FILE = 5, RM_CMD = 6 };
+// RM_CMD 내용 = 명령 1바이트 (클라이언트 -> 서버). 옛 서버는 모르는 종류라 무시함
+enum { CMD_GETLOGS = 1, CMD_REBOOT = 2 };   // GETLOGS: 서버의 log\*.* 를 클라이언트로 전송, REBOOT: shutdown /f /r /t 0
 // RM_FILE 내용 = 종류 1바이트 + 자료. 클라이언트 -> 서버: BEGIN(파일 크기 8바이트 + UTF-8 파일명) / DATA(파일 조각) / END / ABORT. 서버 -> 클라이언트: ACK(성공 여부 1바이트)
 enum { FT_BEGIN = 0, FT_DATA = 1, FT_END = 2, FT_ABORT = 3, FT_ACK = 4 };
 static constexpr uint32_t kFileChunk = 64 * 1024, kFileMsgMax = kFileChunk + 1024;
@@ -12909,6 +12911,28 @@ private:
         }
     }
 
+    // 클라이언트가 보낸 명령 처리 (수신 스레드에서 호출. 파일 전송은 SendFilesToClient 가 별도 스레드로 함)
+    void OnCmd(uint8_t cmd) {
+        if (cmd == CMD_GETLOGS) {
+            const std::wstring dir = tg::StrUtil::toWide(tg::SysUtil::exeDir()) + L"\\log";
+            std::vector<std::wstring> files;
+            WIN32_FIND_DATAW fd;
+            HANDLE fh = FindFirstFileW((dir + L"\\*.*").c_str(), &fd);
+            if (fh != INVALID_HANDLE_VALUE) {
+                do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) files.push_back(dir + L"\\" + fd.cFileName); } while (FindNextFileW(fh, &fd));
+                FindClose(fh);
+            }
+            std::sort(files.begin(), files.end());
+            Log::Put("원격 서버: 클라이언트가 로그 파일을 요청 (log 폴더의 파일 %d 개)", (int)files.size());
+            if (files.empty()) Log::Put("원격 서버: 보낼 로그 파일이 없음");
+            else if (!SendFilesToClient(files)) Log::Put("원격 서버: 로그 파일 전송을 시작하지 못함 (이미 전송 중이거나 연결이 끊김)");
+        } else if (cmd == CMD_REBOOT) {
+            Log::Put("원격 서버: 클라이언트가 서버 reboot 를 요청 - shutdown /f /r /t 0 실행");
+            HINSTANCE x = ShellExecuteW(NULL, (LPCWSTR)u"open", (LPCWSTR)u"shutdown.exe", (LPCWSTR)u"/f /r /t 0", NULL, SW_HIDE);
+            if ((INT_PTR)x <= 32) Log::Put("원격 서버: shutdown 실행 실패 (결과코드 %d)", (int)(INT_PTR)x);
+        }
+    }
+
     // 대기 스레드: 한 번에 클라이언트 한 명
     void Run() {
         tg::enableThreadDpiAwareness();         // 실제 해상도로 캡처 / 좌표 계산 (이 스레드만 DPI 인식. 시계 창에는 영향 없음)
@@ -13011,6 +13035,13 @@ private:
                     std::vector<char> fb(h.len);
                     if (!recvAll(c, fb.data(), (int)h.len)) break;
                     OnFile(c, fb, fs);
+                    continue;
+                }
+                if (h.type == RM_CMD) {                 // 클라이언트의 명령 (로그 파일 가져오기 / 서버 reboot)
+                    if (h.len < 1 || h.len > 16) break;
+                    std::vector<char> cb(h.len);
+                    if (!recvAll(c, cb.data(), (int)h.len)) break;
+                    OnCmd((uint8_t)cb[0]);
                     continue;
                 }
                 if (h.len > 1024) break;
@@ -13211,9 +13242,10 @@ private:
     static inline std::mutex mtx_;
 
     // ---- 파일 전송 (클라이언트 -> 서버): 창 맨 위 [파일 전송] 버튼 ----
-    static constexpr int IDC_FILE = 9001;
+    static constexpr int IDC_FILE = 9001, IDC_LOGS = 9002, IDC_REBOOT = 9003;
     static constexpr UINT WM_FPROG = WM_APP + 20;   // 진행 글자(ptext_)를 버튼에 표시
     static constexpr UINT WM_FDONE = WM_APP + 21;   // 전송 끝: 결과(ptext_)를 알림창으로 표시
+    static inline std::vector<HWND> btnLog_, btnRb_;   // 창마다 [서버의 로그 파일 가져오기] / [서버 reboot] 버튼
     static inline std::vector<HWND> btn_;           // 창마다 버튼 1개
     static inline std::thread ft_;                  // 파일 전송 스레드 (창 스레드가 멈추지 않게)
     static inline HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
@@ -13375,6 +13407,17 @@ private:
         std::vector<std::wstring> files;
         if (!PickFiles(w, files)) return;
         StartSend(files);
+    }
+
+    // 서버에 명령 전달: 로그 파일 가져오기 (서버가 log\*.* 를 보내 주면 up_down\날짜 에 저장되고 송수신 뷰어가 열림) / 서버 PC 재부팅
+    static void OnLogsButton() {
+        const uint8_t c = CMD_GETLOGS;
+        if (SendLocked(RM_CMD, &c, 1)) Log::Put("원격 클라이언트: 서버에 로그 파일 전송을 요청");
+    }
+    static void OnRebootButton(HWND w) {
+        if (MessageBoxW(w, L"서버 PC 를 지금 바로 재부팅합니다.\n계속하시겠습니까?", L"서버 reboot", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
+        const uint8_t c = CMD_REBOOT;
+        if (SendLocked(RM_CMD, &c, 1)) Log::Put("원격 클라이언트: 서버 reboot 를 요청");
     }
 
     // 이 창에서는 클라이언트 PC 의 IME 를 끔: 한글 조합은 서버의 IME 가 하도록 키 입력을 그대로 보내기 위해
@@ -13679,6 +13722,8 @@ private:
             return 0; }
         case WM_COMMAND:
             if (LOWORD(wp) == IDC_FILE && HIWORD(wp) == BN_CLICKED) { OnFileButton(w); SetFocus(w); return 0; }   // 키 입력이 계속 이 창으로 오게
+            if (LOWORD(wp) == IDC_LOGS && HIWORD(wp) == BN_CLICKED) { OnLogsButton(); SetFocus(w); return 0; }
+            if (LOWORD(wp) == IDC_REBOOT && HIWORD(wp) == BN_CLICKED) { OnRebootButton(w); SetFocus(w); return 0; }
             break;
         case WM_FPROG: {
             std::wstring t;
@@ -13755,6 +13800,8 @@ private:
         wnd_.assign(nMon, NULL);
         bmp_.assign(nMon, NULL);
         btn_.assign(nMon, NULL);
+        btnLog_.assign(nMon, NULL);
+        btnRb_.assign(nMon, NULL);
         closing_ = false;
         sending_ = false;
         keyLogN_ = 0;
@@ -13780,6 +13827,12 @@ private:
                 btn_[i] = CreateWindowW(L"BUTTON", L"파일 전송", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(4, dpi, 96), MulDiv(3, dpi, 96),
                                         MulDiv(230, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_FILE, hi, NULL);
                 if (btn_[i] && font_) SendMessageW(btn_[i], WM_SETFONT, (WPARAM)font_, TRUE);
+                btnLog_[i] = CreateWindowW(L"BUTTON", L"서버의 로그 파일 가져오기", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(238, dpi, 96), MulDiv(3, dpi, 96),
+                                           MulDiv(200, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_LOGS, hi, NULL);
+                btnRb_[i] = CreateWindowW(L"BUTTON", L"서버 reboot", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, MulDiv(442, dpi, 96), MulDiv(3, dpi, 96),
+                                          MulDiv(110, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_REBOOT, hi, NULL);
+                if (btnLog_[i] && font_) SendMessageW(btnLog_[i], WM_SETFONT, (WPARAM)font_, TRUE);
+                if (btnRb_[i] && font_) SendMessageW(btnRb_[i], WM_SETFONT, (WPARAM)font_, TRUE);
                 DragAcceptFiles(wnd_[i], TRUE);             // 파일 / 폴더를 끌어다 놓아 전송
                 DisableIme(wnd_[i]);                        // 키 입력을 그대로 서버로 (한글 조합은 서버 IME)
             }
@@ -13804,6 +13857,8 @@ private:
         wnd_.clear();
         bmp_.clear();
         btn_.clear();
+        btnLog_.clear();
+        btnRb_.clear();
     }
 };
 
