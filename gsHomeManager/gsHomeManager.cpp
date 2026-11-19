@@ -12370,12 +12370,34 @@ static bool CreateUnique(const std::wstring& dir, const std::wstring& name, std:
 }
 
 // UTF-8 메시지 상자 (어느 스레드에서나 호출 가능)
+static BOOL CALLBACK BoxMonProc(HMONITOR, HDC, LPRECT r, LPARAM lp) {
+    ((std::vector<RECT>*)lp)->push_back(*r);
+    return TRUE;
+}
+
+// 메시지 창: 항상 모니터 1 (가장 왼쪽 모니터, 원격 화면의 '모니터 1' 과 같은 순서) 가운데에 띄움.
+// 크기 없는 투명한 소유 창을 모니터 1 가운데에 두고 그 위에 메시지 창을 띄워서 위치를 정함
 static int Box(const char* text, const char* title, UINT flags) {
     char16_t t[600], c[100];
     t[0] = c[0] = 0;
     Utf8::ToUtf16(text, -1, t, 600);
     Utf8::ToUtf16(title, -1, c, 100);
-    return MessageBoxW(NULL, (LPCWSTR)t, (LPCWSTR)c, flags | MB_SETFOREGROUND | MB_TOPMOST);
+    std::vector<RECT> mons;
+    EnumDisplayMonitors(NULL, NULL, BoxMonProc, (LPARAM)&mons);
+    std::sort(mons.begin(), mons.end(), [](const RECT& a, const RECT& b) { return a.left != b.left ? a.left < b.left : a.top < b.top; });
+    HWND owner = NULL;
+    if (!mons.empty()) {
+        const RECT& m = mons[0];
+        owner = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE, L"STATIC", L"", WS_POPUP,
+                                (m.left + m.right) / 2, (m.top + m.bottom) / 2, 1, 1, NULL, NULL, GetModuleHandleW(NULL), NULL);
+        if (owner) {
+            SetLayeredWindowAttributes(owner, 0, 0, LWA_ALPHA);     // 완전 투명
+            ShowWindow(owner, SW_SHOWNA);
+        }
+    }
+    const int r = MessageBoxW(owner, (LPCWSTR)t, (LPCWSTR)c, flags | MB_SETFOREGROUND | MB_TOPMOST);
+    if (owner) DestroyWindow(owner);
+    return r;
 }
 
 // 이 PC 의 IPv4 주소들 ("a.b.c.d,  e.f.g.h")
@@ -12395,6 +12417,32 @@ static std::string LocalIps() {
             out += ip;
         }
     return out;
+}
+
+// 접속을 시도한 상대의 MAC 주소 (같은 네트워크 대역일 때만 ARP 로 알 수 있음. Tailscale 등 다른 대역은 불가)
+static std::string PeerMac(const std::string& ip) {
+    const IPAddr dst = inet_addr(ip.c_str());
+    if (dst == INADDR_NONE) return "알 수 없음";
+    ULONG sz = 0;
+    GetAdaptersInfo(NULL, &sz);
+    if (!sz) return "알 수 없음";
+    std::vector<char> buf(sz);
+    IP_ADAPTER_INFO* ai = (IP_ADAPTER_INFO*)buf.data();
+    if (GetAdaptersInfo(ai, &sz) != NO_ERROR) return "알 수 없음";
+    bool same = false;
+    for (; ai; ai = ai->Next)
+        for (IP_ADDR_STRING* a = &ai->IpAddressList; a; a = a->Next) {
+            const IPAddr li = inet_addr(a->IpAddress.String), lm = inet_addr(a->IpMask.String);
+            if (li == 0 || li == INADDR_NONE || lm == 0 || lm == INADDR_NONE) continue;
+            if ((li & lm) == (dst & lm)) same = true;
+        }
+    if (!same) return "다른 네트워크 대역 (확인 불가)";
+    ULONG mac[2] = {0, 0}, len = 6;
+    if (SendARP(dst, 0, mac, &len) != NO_ERROR || len < 6) return "조회 실패";
+    const BYTE* b = (const BYTE*)mac;
+    char t[24];
+    wsprintfA(t, "%02X:%02X:%02X:%02X:%02X:%02X", b[0], b[1], b[2], b[3], b[4], b[5]);
+    return t;
 }
 
 // 파일 선택 대화상자 (여러 개 선택 가능). 취소하면 false
@@ -12821,35 +12869,6 @@ private:
 
     // 클라이언트의 마우스 입력을 이 PC 에 넣음 (a, b = 모니터 m 안의 0..65535 좌표 -> 가상 데스크톱 좌표)
     static void Inject(const Ev& e, const std::vector<RECT>& mons, std::set<int>* keys = nullptr) {
-        static ULONGLONG lastMove = 0, lastDown = 0;      // 실제 마우스처럼 이동 -> 누름 -> 뗌 사이에 짧은 간격을 둠 (폰의 탭은 세 이벤트가 거의 동시에 와서 시계 창 등이 놓칠 수 있음)
-        if (e.t == EV_BTN) {
-            const DWORD f = (DWORD)e.a;
-            const bool isDown = f == MOUSEEVENTF_LEFTDOWN || f == MOUSEEVENTF_RIGHTDOWN || f == MOUSEEVENTF_MIDDLEDOWN;
-            const bool isUp = f == MOUSEEVENTF_LEFTUP || f == MOUSEEVENTF_RIGHTUP || f == MOUSEEVENTF_MIDDLEUP;
-            const ULONGLONG now = GetTickCount64();
-            if (isDown && now - lastMove < 30) Sleep((DWORD)(30 - (now - lastMove)));
-            else if (isUp && now - lastDown < 60) Sleep((DWORD)(60 - (now - lastDown)));
-            if (isDown) lastDown = GetTickCount64();
-            if (isDown) {                                 // 진단: 누르는 순간 커서 아래 창이 이 프로그램의 창이면 어떤 창인지 기록 (처음 40번만)
-                static int diagN = 0;
-                POINT pt = {};
-                GetCursorPos(&pt);
-                HWND hw = WindowFromPoint(pt);
-                DWORD pid = 0;
-                if (hw) GetWindowThreadProcessId(hw, &pid);
-                if (hw && pid == GetCurrentProcessId() && diagN++ < 40) {
-                    wchar_t cls[80] = L"", ttl[80] = L"";
-                    GetClassNameW(hw, cls, 80);
-                    GetWindowTextW(hw, ttl, 80);
-                    RECT wr = {};
-                    GetWindowRect(hw, &wr);
-                    Log::Put("원격 서버: 클릭 주입 진단: 커서 (%ld,%ld) 아래 창 class=%s 제목=%s 영역 (%ld,%ld)-(%ld,%ld) 버튼=0x%x",
-                             pt.x, pt.y, tg::StrUtil::toUtf8(cls).c_str(), tg::StrUtil::toUtf8(ttl).c_str(), wr.left, wr.top, wr.right, wr.bottom, (unsigned)f);
-                }
-            }
-        } else if (e.t == EV_MOVE) {
-            lastMove = GetTickCount64();
-        }
         INPUT in = {};
         switch (e.t) {
         case EV_MOVE: {
@@ -12867,6 +12886,12 @@ private:
             break; }
         case EV_BTN: {
             DWORD f = (DWORD)e.a;
+            if (GetSystemMetrics(SM_SWAPBUTTON)) {      // Windows 마우스 [주 단추] 가 오른쪽이면 SendInput 의 왼쪽/오른쪽 단추도 서로 바뀌어 전달되므로 미리 맞바꿈
+                if (f == MOUSEEVENTF_LEFTDOWN) f = MOUSEEVENTF_RIGHTDOWN;
+                else if (f == MOUSEEVENTF_LEFTUP) f = MOUSEEVENTF_RIGHTUP;
+                else if (f == MOUSEEVENTF_RIGHTDOWN) f = MOUSEEVENTF_LEFTDOWN;
+                else if (f == MOUSEEVENTF_RIGHTUP) f = MOUSEEVENTF_LEFTUP;
+            }
             if (f != MOUSEEVENTF_LEFTDOWN && f != MOUSEEVENTF_LEFTUP && f != MOUSEEVENTF_RIGHTDOWN &&
                 f != MOUSEEVENTF_RIGHTUP && f != MOUSEEVENTF_MIDDLEDOWN && f != MOUSEEVENTF_MIDDLEUP) return;
             in.type = INPUT_MOUSE;
@@ -13035,6 +13060,7 @@ private:
         Gdiplus::GdiplusStartupInput gi;
         ULONG_PTR tok = 0;
         Gdiplus::GdiplusStartup(&tok, &gi, NULL);
+        std::map<std::string, int> tries;       // IP 별 접속 시도 횟수 (이번 실행 중)
         for (;;) {
             SOCKET ls = ls_;
             if (stop_ || ls == INVALID_SOCKET) break;
@@ -13044,8 +13070,17 @@ private:
             if (stop_) { if (c != INVALID_SOCKET) closesocket(c); break; }
             if (c == INVALID_SOCKET) { Sleep(50); continue; }
             std::string ips = inet_ntoa(ca.sin_addr);
+            {   // 인증 전에도 모든 접속 시도를 기록 (수락 / 거부와 상관없이 누가 언제 어디로 접속했는지 추적)
+                sockaddr_in la = {};
+                int ll = sizeof la;
+                getsockname(c, (sockaddr*)&la, &ll);
+                const std::string lips = inet_ntoa(la.sin_addr);
+                const int tryNo = ++tries[ips];
+                Log::Put("원격 서버: 연결 시도 수신: 상대 %s:%d (이번 실행 중 %d번째 시도), 서버 쪽 %s:%d, 상대 MAC %s",
+                         ips.c_str(), (int)ntohs(ca.sin_port), tryNo, lips.c_str(), (int)ntohs(la.sin_port), PeerMac(ips).c_str());
+            }
             if (const Cfg cur = Snap(); !cur.allowIp.empty() && cur.allowIp != ips) {
-                Log::Put("원격 서버: 허용 IP 가 아니어서 거부: %s", ips.c_str());
+                Log::Put("원격 서버: 허용 IP 가 아니어서 거부: %s (허용 IP 설정: %s)", ips.c_str(), cur.allowIp.c_str());
                 closesocket(c);
                 continue;
             }
@@ -13066,10 +13101,24 @@ private:
     void Serve(SOCKET c, const std::string& ips) {
         DWORD to = 5000;                        // 인증 메시지는 5초 안에 와야 함 (연결만 하고 가만히 있는 상대가 서버를 붙잡지 못하게)
         setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
+        const DWORD t0 = GetTickCount();
         Hdr h;
-        if (!recvAll(c, &h, sizeof h) || h.type != RM_AUTH || h.len > 256) { Log::Put("원격 서버: 잘못된 인증 메시지 (%s)", ips.c_str()); return; }
+        if (!recvAll(c, &h, sizeof h)) {
+            const int err = WSAGetLastError();
+            Log::Put("원격 서버: 인증 메시지를 받지 못함 (%s): %s (WSA 오류 %d, %lu ms 경과)", ips.c_str(),
+                     err == WSAETIMEDOUT ? "연결만 하고 5초 동안 아무것도 보내지 않음" : "아무것도 보내지 않고 상대가 연결을 끊음 (포트 스캔 등)", err, (unsigned long)(GetTickCount() - t0));
+            return;
+        }
+        if (h.type != RM_AUTH || h.len > 256) {
+            Log::Put("원격 서버: 잘못된 인증 메시지 (%s): 종류=%u 길이=%lu (이 프로그램의 클라이언트가 아닌 다른 프로그램 / 스캐너일 수 있음)", ips.c_str(),
+                     (unsigned)h.type, (unsigned long)h.len);
+            return;
+        }
         std::string got(h.len, '\0');
-        if (h.len && !recvAll(c, &got[0], (int)h.len)) { Log::Put("원격 서버: 인증 메시지가 끝까지 오지 않음 (%s)", ips.c_str()); return; }
+        if (h.len && !recvAll(c, &got[0], (int)h.len)) {
+            Log::Put("원격 서버: 인증 메시지가 끝까지 오지 않음 (%s): 길이 %lu 중 일부만 받고 끊김 (WSA 오류 %d)", ips.c_str(), (unsigned long)h.len, WSAGetLastError());
+            return;
+        }
         to = 0;
         setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof to);
 
@@ -13077,7 +13126,7 @@ private:
         uint8_t ok = (got == cfg.pw);
         SecureZeroMemory(&got[0], got.size());
         if (!ok) {
-            Log::Put("원격 서버: 비밀번호가 틀림 (%s)", ips.c_str());
+            Log::Put("원격 서버: 비밀번호가 틀림 (%s): 입력한 비밀번호 길이 %d, 인증까지 %lu ms", ips.c_str(), (int)got.size(), (unsigned long)(GetTickCount() - t0));
             Sleep(1000);                        // 비밀번호 대입 공격을 늦춤
         } else if (cfg.accept == 1) {
             Log::Put("원격 서버: 비밀번호 확인됨 (%s, 묻지 않고 수락)", ips.c_str());
@@ -13086,7 +13135,8 @@ private:
             Log::Put("원격 서버: 비밀번호 확인됨 (%s), 사용자에게 허용 여부를 묻는 중", ips.c_str());
             std::string msg = "원격 연결 요청: " + ips + "\n\n허용하시겠습니까?";
             ok = (Box(msg.c_str(), kAskTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) && !stop_;
-            Log::Put("원격 서버: 사용자가 %s (%s)", ok ? "허용" : "거부", ips.c_str());
+            Log::Put("원격 서버: 사용자가 %s (%s): 접속 시도 후 %lu ms 만에 응답%s", ok ? "허용" : "거부", ips.c_str(), (unsigned long)(GetTickCount() - t0),
+                     (!ok && stop_) ? " (서버 중지로 닫힘)" : "");
             if (ok) trusted_.insert(ips);
         } else {
             Log::Put("원격 서버: 비밀번호 확인됨 (%s, 이미 허용한 IP)", ips.c_str());
@@ -14628,7 +14678,6 @@ private:
             }
             break;
         case WM_LBUTTONDOWN:                                      // 한 번 클릭: 팝업 메뉴 표시 (더블클릭이 아님이 확인되면)
-            if (!owner_) Log::Put("시계 클릭 진단: LBUTTONDOWN (%d,%d)", (int)(short)LOWORD(l), (int)(short)HIWORD(l));
             pressed_ = true;
             downPt_.x = (short)LOWORD(l);
             downPt_.y = (short)HIWORD(l);
@@ -14648,7 +14697,6 @@ private:
             }
             return 0;
         case WM_LBUTTONUP:
-            if (!owner_) Log::Put("시계 클릭 진단: LBUTTONUP pressed=%d", pressed_ ? 1 : 0);
             if (pressed_) {
                 pressed_ = false;
                 ReleaseCapture();
@@ -14656,7 +14704,6 @@ private:
             }
             return 0;
         case WM_LBUTTONDBLCLK:                                    // 더블클릭: 시계 모드 순환 [타이틀 & 디지털] -> [디지털] -> [아날로그]
-            if (!owner_) Log::Put("시계 클릭 진단: LBUTTONDBLCLK");
             KillTimer(hwnd_, TID_CLICK);
             CycleClockMode();
             return 0;
@@ -14743,7 +14790,6 @@ private:
             return;
         case TID_CLICK:
             KillTimer(hwnd_, TID_CLICK);
-            if (!owner_) Log::Put("시계 클릭 진단: 팝업 메뉴 타이머 -> 메뉴 표시");
             ShowPopupMenu();
             return;
         case TID_SCROLL_TIME:
@@ -17125,9 +17171,7 @@ private:
             hookWnd_ = this;
             hook = SetWindowsHookExW(WH_MSGFILTER, MenuHookProc, NULL, GetCurrentThreadId());
         }
-        const DWORD tpmT0 = GetTickCount();
-        const BOOL tpmOk = TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, NULL);
-        Log::Put("시계 클릭 진단: 팝업 메뉴 종료 (결과 %d, %lu ms, 오류 %lu)", (int)tpmOk, (unsigned long)(GetTickCount() - tpmT0), GetLastError());
+        TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, NULL);
         if (hook) UnhookWindowsHookEx(hook);
         hookWnd_ = NULL;
         PostMessageA(hwnd_, WM_NULL, 0, 0);
