@@ -14611,6 +14611,7 @@ private:
             }
             break;
         case WM_LBUTTONDOWN:                                      // 한 번 클릭: 팝업 메뉴 표시 (더블클릭이 아님이 확인되면)
+            if (!owner_) Log::Put("시계 클릭 진단: LBUTTONDOWN (%d,%d)", (int)(short)LOWORD(l), (int)(short)HIWORD(l));
             pressed_ = true;
             downPt_.x = (short)LOWORD(l);
             downPt_.y = (short)HIWORD(l);
@@ -14630,6 +14631,7 @@ private:
             }
             return 0;
         case WM_LBUTTONUP:
+            if (!owner_) Log::Put("시계 클릭 진단: LBUTTONUP pressed=%d", pressed_ ? 1 : 0);
             if (pressed_) {
                 pressed_ = false;
                 ReleaseCapture();
@@ -14637,6 +14639,7 @@ private:
             }
             return 0;
         case WM_LBUTTONDBLCLK:                                    // 더블클릭: 시계 모드 순환 [타이틀 & 디지털] -> [디지털] -> [아날로그]
+            if (!owner_) Log::Put("시계 클릭 진단: LBUTTONDBLCLK");
             KillTimer(hwnd_, TID_CLICK);
             CycleClockMode();
             return 0;
@@ -14723,6 +14726,7 @@ private:
             return;
         case TID_CLICK:
             KillTimer(hwnd_, TID_CLICK);
+            if (!owner_) Log::Put("시계 클릭 진단: 팝업 메뉴 타이머 -> 메뉴 표시");
             ShowPopupMenu();
             return;
         case TID_SCROLL_TIME:
@@ -17104,7 +17108,9 @@ private:
             hookWnd_ = this;
             hook = SetWindowsHookExW(WH_MSGFILTER, MenuHookProc, NULL, GetCurrentThreadId());
         }
-        TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, NULL);
+        const DWORD tpmT0 = GetTickCount();
+        const BOOL tpmOk = TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, NULL);
+        Log::Put("시계 클릭 진단: 팝업 메뉴 종료 (결과 %d, %lu ms, 오류 %lu)", (int)tpmOk, (unsigned long)(GetTickCount() - tpmT0), GetLastError());
         if (hook) UnhookWindowsHookEx(hook);
         hookWnd_ = NULL;
         PostMessageA(hwnd_, WM_NULL, 0, 0);
