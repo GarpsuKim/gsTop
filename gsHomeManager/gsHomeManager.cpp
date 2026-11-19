@@ -12830,6 +12830,23 @@ private:
             if (isDown && now - lastMove < 30) Sleep((DWORD)(30 - (now - lastMove)));
             else if (isUp && now - lastDown < 60) Sleep((DWORD)(60 - (now - lastDown)));
             if (isDown) lastDown = GetTickCount64();
+            if (isDown) {                                 // 진단: 누르는 순간 커서 아래 창이 이 프로그램의 창이면 어떤 창인지 기록 (처음 40번만)
+                static int diagN = 0;
+                POINT pt = {};
+                GetCursorPos(&pt);
+                HWND hw = WindowFromPoint(pt);
+                DWORD pid = 0;
+                if (hw) GetWindowThreadProcessId(hw, &pid);
+                if (hw && pid == GetCurrentProcessId() && diagN++ < 40) {
+                    wchar_t cls[80] = L"", ttl[80] = L"";
+                    GetClassNameW(hw, cls, 80);
+                    GetWindowTextW(hw, ttl, 80);
+                    RECT wr = {};
+                    GetWindowRect(hw, &wr);
+                    Log::Put("원격 서버: 클릭 주입 진단: 커서 (%ld,%ld) 아래 창 class=%s 제목=%s 영역 (%ld,%ld)-(%ld,%ld) 버튼=0x%x",
+                             pt.x, pt.y, tg::StrUtil::toUtf8(cls).c_str(), tg::StrUtil::toUtf8(ttl).c_str(), wr.left, wr.top, wr.right, wr.bottom, (unsigned)f);
+                }
+            }
         } else if (e.t == EV_MOVE) {
             lastMove = GetTickCount64();
         }
