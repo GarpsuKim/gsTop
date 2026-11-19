@@ -12821,6 +12821,18 @@ private:
 
     // 클라이언트의 마우스 입력을 이 PC 에 넣음 (a, b = 모니터 m 안의 0..65535 좌표 -> 가상 데스크톱 좌표)
     static void Inject(const Ev& e, const std::vector<RECT>& mons, std::set<int>* keys = nullptr) {
+        static ULONGLONG lastMove = 0, lastDown = 0;      // 실제 마우스처럼 이동 -> 누름 -> 뗌 사이에 짧은 간격을 둠 (폰의 탭은 세 이벤트가 거의 동시에 와서 시계 창 등이 놓칠 수 있음)
+        if (e.t == EV_BTN) {
+            const DWORD f = (DWORD)e.a;
+            const bool isDown = f == MOUSEEVENTF_LEFTDOWN || f == MOUSEEVENTF_RIGHTDOWN || f == MOUSEEVENTF_MIDDLEDOWN;
+            const bool isUp = f == MOUSEEVENTF_LEFTUP || f == MOUSEEVENTF_RIGHTUP || f == MOUSEEVENTF_MIDDLEUP;
+            const ULONGLONG now = GetTickCount64();
+            if (isDown && now - lastMove < 30) Sleep((DWORD)(30 - (now - lastMove)));
+            else if (isUp && now - lastDown < 60) Sleep((DWORD)(60 - (now - lastDown)));
+            if (isDown) lastDown = GetTickCount64();
+        } else if (e.t == EV_MOVE) {
+            lastMove = GetTickCount64();
+        }
         INPUT in = {};
         switch (e.t) {
         case EV_MOVE: {
