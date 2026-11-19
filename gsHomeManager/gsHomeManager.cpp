@@ -9052,6 +9052,9 @@ public:
         return true;
     }
 
+    // [파일 다운로드 (서버 → 클라이언트)] 버튼의 동작 (서버가 시작될 때 등록. 이 클래스가 서버보다 먼저 정의되므로 함수 포인터로 연결)
+    static void SetServerSend(void (*f)(HWND)) { dlFn_ = f; }
+
     // 이미지가 아닌 파일: 이미지 대신 파일 이름 / 날짜 / 시각 / 크기를 큰 글자로 보여 준다 (버튼 동작은 이미지와 같음).
     static bool showInfo(const std::string& title, const std::wstring& path)
     {
@@ -9115,7 +9118,7 @@ private:
     struct Thumb { HBITMAP bmp = nullptr; int w = 0, h = 0; };   // 왼쪽 미리보기 목록의 축소 그림 (bmp=nullptr: 그림 없음)
     struct View {
         HWND hw = nullptr;
-        HWND btn[15] = {};          // 버튼 10개 + 시간 간격 콤보박스 + 전환 효과 콤보박스
+        HWND btn[16] = {};          // 버튼 10개 + 시간 간격 콤보박스 + 전환 효과 콤보박스
         HWND lbl2 = nullptr;        // '전환 효과 :' 글자
         int fxSel = 0;              // 선택한 전환 효과 (0=좌우 스크롤 ... 10=무작위, 11=효과 없음). 0~10 은 SlideShow 로 넘어갈 때만 적용, 11 은 모든 전환에 적용(바로 바꿈)
         int fxCur = 0;              // 지금 진행 중인 전환에 쓰는 효과
@@ -9143,7 +9146,7 @@ private:
     };
     enum { WM_ADD = WM_APP + 41, WM_SHOWPATH = WM_APP + 42, BAR_H = 66, ROW_H = 26, LP_W = 150, CELL = 92, UPD = 22, ID_UP = 101, ID_DN = 102, TIMER_ANIM = 1, TIMER_SHOW = 2, ANIM_MS = 220 };
     static int secAt(int i) { static const int k[13] = {1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600}; return k[i]; }   // SlideShow 시간 간격(초) 목록 (기본 3초)
-    enum { ID_OPEN = 1, ID_ROTL, ID_ROTR, ID_PREV, ID_NEXT, ID_DEL, ID_ADD, ID_RUN, ID_SSL, ID_SSR, ID_INT, ID_FX, ID_TG, ID_CLR, ID_FULL };   // 윗줄 버튼 10개(◀◀=SlideShow 좌, ▶▶=SlideShow 우 포함) / 아랫줄 시간 간격 목록 (btn[id-1])
+    enum { ID_OPEN = 1, ID_ROTL, ID_ROTR, ID_PREV, ID_NEXT, ID_DEL, ID_ADD, ID_RUN, ID_SSL, ID_SSR, ID_INT, ID_FX, ID_TG, ID_CLR, ID_FULL, ID_DL };   // 윗줄 버튼 10개(◀◀=SlideShow 좌, ▶▶=SlideShow 우 포함) / 아랫줄 시간 간격 목록 (btn[id-1])
     static constexpr const wchar_t* kClass = L"ScreenTelegramImageView";
     static inline std::mutex mu_;
     static inline HWND hwnd_ = nullptr;       // 떠 있는 창 (없으면 nullptr)
@@ -9865,9 +9868,16 @@ private:
         InvalidateRect(hw, nullptr, TRUE);
     }
 
+    static inline void (*dlFn_)(HWND) = nullptr;
+
     static void onButton(View* v, int id)
     {
         switch (id) {
+        case ID_DL: {
+            ModalGuard mg(v);
+            if (dlFn_) dlFn_(v->hw);
+            else MessageBoxW(v->hw, L"원격 서버가 시작되지 않았습니다.", L"파일 다운로드", MB_OK | MB_ICONINFORMATION);
+            break; }
         case ID_FULL: setFull(v, true); break;
         case ID_CLR:  clearList(v); break;
         case ID_ROTL: rotateCur(v, false); break;
@@ -9905,6 +9915,9 @@ private:
         v->btn[ID_CLR - 1] = CreateWindowExW(0, L"BUTTON", L"목록 비우기", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
                                              0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_CLR, inst, nullptr);   // 윗줄 맨 앞 (목록이 비어 있지 않을 때만 활성)
         SendMessageW(v->btn[ID_CLR - 1], WM_SETFONT, (WPARAM)font, TRUE);
+        v->btn[ID_DL - 1] = CreateWindowExW(0, L"BUTTON", L"파일 다운로드 ( 서버 → 클라이언트 )", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                            0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_DL, inst, nullptr);   // 아랫줄 맨 끝 (항상 활성. 연결된 클라이언트가 없으면 눌렀을 때 안내)
+        SendMessageW(v->btn[ID_DL - 1], WM_SETFONT, (WPARAM)font, TRUE);
         v->btn[ID_FULL - 1] = CreateWindowExW(0, L"BUTTON", L"전체 화면", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
                                               0, 0, 10, 10, hw, (HMENU)(INT_PTR)ID_FULL, inst, nullptr);   // 아랫줄 맨 끝 (목록이 비어 있지 않을 때만 활성)
         SendMessageW(v->btn[ID_FULL - 1], WM_SETFONT, (WPARAM)font, TRUE);
@@ -9955,6 +9968,7 @@ private:
         if (v->lbl2) MoveWindow(v->lbl2, 204, y2, 90, ROW_H, TRUE);
         if (v->btn[ID_FX - 1]) MoveWindow(v->btn[ID_FX - 1], 300, y2, 160, 280, TRUE);
         if (v->btn[ID_FULL - 1]) MoveWindow(v->btn[ID_FULL - 1], 472, y2 - 1, 100, ROW_H, TRUE);
+        if (v->btn[ID_DL - 1]) MoveWindow(v->btn[ID_DL - 1], 578, y2 - 1, 230, ROW_H, TRUE);
         RECT rc;   // 왼쪽 미리보기 목록의 위 / 아래 스크롤 버튼
         GetClientRect(v->hw, &rc);
         if (v->bUp) MoveWindow(v->bUp, 0, BAR_H, LP_W, UPD, TRUE);
@@ -12477,10 +12491,8 @@ private:
     static constexpr UINT WM_LOGSHOW = WM_APP + 31;
     static constexpr UINT WM_LOGEND = WM_APP + 32;          // 클라이언트 연결이 끝나면 창을 닫음 (확인창 없음)
     static inline bool starting_ = false;
-    static inline HWND hw_ = NULL, ed_ = NULL, btn_ = NULL;
+    static inline HWND hw_ = NULL, ed_ = NULL;
     static inline HFONT font_ = NULL;
-    static constexpr int IDC_SEND = 2;
-    static constexpr int kBar = 38;                         // 맨 위 버튼 줄 높이
     static inline bool (*sendFn_)(const std::vector<std::wstring>&) = nullptr;
     static inline bool (*connFn_)() = nullptr;
     static inline void (*dropFn_)() = nullptr;
@@ -12504,15 +12516,12 @@ private:
         case WM_CREATE: {
             ed_ = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 10, 10,
                                 w, (HMENU)1, GetModuleHandleW(NULL), NULL);
-            btn_ = CreateWindowW(L"BUTTON", L"파일 다운로드 ( 서버 → 클라이언트 )", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 6, 5, 280, kBar - 10,
-                                 w, (HMENU)(INT_PTR)IDC_SEND, GetModuleHandleW(NULL), NULL);
             HDC sd = GetDC(NULL);
             int dpi = sd ? GetDeviceCaps(sd, LOGPIXELSY) : 96;
             if (sd) ReleaseDC(NULL, sd);
             font_ = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                 CLEARTYPE_QUALITY, FIXED_PITCH | FF_DONTCARE, L"Malgun Gothic");
             if (font_) SendMessageW(ed_, WM_SETFONT, (WPARAM)font_, TRUE);
-            if (font_ && btn_) SendMessageW(btn_, WM_SETFONT, (WPARAM)font_, TRUE);
             SendMessageW(ed_, EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
             std::string all;
             {
@@ -12531,40 +12540,8 @@ private:
             DestroyWindow(w);
             return 0;
         case WM_SIZE:
-            if (ed_) MoveWindow(ed_, 0, kBar, LOWORD(lp), std::max(0, (int)HIWORD(lp) - kBar), TRUE);
+            if (ed_) MoveWindow(ed_, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
             return 0;
-        case WM_COMMAND:                            // [파일보내기 (서버 → 클라이언트)]: 파일을 골라 연결된 클라이언트로 보냄 (클라이언트는 송수신 뷰어가 자동으로 열림)
-            if (LOWORD(wp) == IDC_SEND && HIWORD(wp) == BN_CLICKED) {
-                if (!connFn_ || !connFn_()) { MessageBoxW(w, L"연결된 클라이언트가 없습니다.", L"파일보내기", MB_OK | MB_ICONINFORMATION); return 0; }
-                std::vector<std::wstring> files;
-                if (!PickFilesDlg(w, L"클라이언트로 보낼 파일 선택 (여러 개 선택 가능)", files)) return 0;
-                if (MessageBoxW(w, L"선택한 파일들을 클라이언트로 보내겠습니까?(Yes/No)", L"파일보내기", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return 0;
-                if (!sendFn_ || !sendFn_(files))
-                    MessageBoxW(w, L"파일을 보낼 수 없습니다.\n(연결이 끊어졌거나 이미 다른 파일을 전송 중입니다)", L"파일보내기", MB_OK | MB_ICONWARNING);
-                return 0;
-            }
-            break;
-        case WM_DRAWITEM: {                         // [파일보내기] 버튼을 녹색으로 그림
-            LPDRAWITEMSTRUCT d = (LPDRAWITEMSTRUCT)lp;
-            if (!d || d->CtlID != (UINT)IDC_SEND) break;
-            const bool down = (d->itemState & ODS_SELECTED) != 0;
-            HBRUSH br = CreateSolidBrush(down ? RGB(30, 120, 50) : RGB(46, 160, 67));
-            FillRect(d->hDC, &d->rcItem, br);
-            DeleteObject(br);
-            HBRUSH fr = CreateSolidBrush(RGB(25, 95, 40));
-            FrameRect(d->hDC, &d->rcItem, fr);
-            DeleteObject(fr);
-            wchar_t txt[128] = L"";
-            GetWindowTextW(d->hwndItem, txt, 128);
-            RECT r = d->rcItem;
-            if (down) OffsetRect(&r, 1, 1);
-            HGDIOBJ oldF = font_ ? SelectObject(d->hDC, font_) : NULL;
-            SetBkMode(d->hDC, TRANSPARENT);
-            SetTextColor(d->hDC, RGB(255, 255, 255));
-            DrawTextW(d->hDC, txt, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            if (oldF) SelectObject(d->hDC, oldF);
-            if (d->itemState & ODS_FOCUS) { RECT f = d->rcItem; InflateRect(&f, -3, -3); DrawFocusRect(d->hDC, &f); }
-            return TRUE; }
         case WM_CLOSE:                              // 닫으면 클라이언트 연결도 끊기므로 먼저 확인 (연결된 클라이언트가 없으면 바로 닫음)
             if (connFn_ && connFn_()) {
                 if (MessageBoxW(w, L"이 창을 닫으면 클라이언트와의 연결이 끊어집니다. 닫으시겠습니까?(Yes/No)", L"원격 서버 연결 로그",
@@ -12587,7 +12564,6 @@ private:
             std::lock_guard<std::mutex> g(mu_);
             hw_ = NULL;
             ed_ = NULL;
-            btn_ = NULL;
             if (font_) { DeleteObject(font_); font_ = NULL; }
             PostQuitMessage(0);                     // 이 창의 스레드를 끝냄 (다시 열면 새 스레드)
             return 0; }
@@ -12619,6 +12595,7 @@ public:
         if (c.port < 1 || c.port > 65535) { err = "port 번호는 1 ~ 65535 사이여야 합니다"; return false; }
         if (c.pw.empty()) { err = "비밀번호가 비어 있습니다"; return false; }
         LogWin::SetHooks(&HookSend, &HookConnected, &HookDrop);
+        tg::ImageWindow::SetServerSend(&HookDownload);   // 송수신 뷰어의 [파일 다운로드 (서버 → 클라이언트)]
         LogWin::Install();                      // 연결 로그를 로그 창에도 보여 주기 위해 (창이 없어도 최근 500줄은 모아 둠)
         WSADATA wd;
         WSAStartup(MAKEWORD(2, 2), &wd);
@@ -12692,7 +12669,7 @@ public:
     int Port() { std::lock_guard<std::mutex> g(mtx_); return cfg_.port; }
     bool Connected() { std::lock_guard<std::mutex> g(mtx_); return state_ == ST_CONN; }
 
-    // 연결된 클라이언트로 파일 보내기 (연결 로그 창의 [파일보내기]). 전송은 별도 스레드에서. 연결이 없거나 이미 전송 중이면 false
+    // 연결된 클라이언트로 파일 보내기 (송수신 뷰어의 [파일 다운로드]). 전송은 별도 스레드에서. 연결이 없거나 이미 전송 중이면 false
     bool SendFilesToClient(const std::vector<std::wstring>& files) {
         if (files.empty() || cur_ == INVALID_SOCKET || !Connected()) return false;
         if (sending_.exchange(true)) return false;
@@ -12710,6 +12687,16 @@ private:
     static bool HookSend(const std::vector<std::wstring>& f) { return Get().SendFilesToClient(f); }
     static bool HookConnected() { return Get().Connected(); }
     static void HookDrop() { Get().DropClient(); }
+
+    // 송수신 뷰어의 [파일 다운로드 (서버 → 클라이언트)]: 파일을 골라 연결된 클라이언트로 보냄 (클라이언트는 송수신 뷰어가 자동으로 열림)
+    static void HookDownload(HWND w) {
+        if (!Get().Connected()) { MessageBoxW(w, L"연결된 클라이언트가 없습니다.", L"파일 다운로드", MB_OK | MB_ICONINFORMATION); return; }
+        std::vector<std::wstring> files;
+        if (!PickFilesDlg(w, L"클라이언트로 보낼 파일 선택 (여러 개 선택 가능)", files)) return;
+        if (MessageBoxW(w, L"선택한 파일들을 클라이언트로 보내겠습니까?(Yes/No)", L"파일 다운로드", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
+        if (!Get().SendFilesToClient(files))
+            MessageBoxW(w, L"파일을 보낼 수 없습니다.\n(연결이 끊어졌거나 이미 다른 파일을 전송 중입니다)", L"파일 다운로드", MB_OK | MB_ICONWARNING);
+    }
 
     void DropClient() {                         // 연결 로그 창을 닫을 때: 클라이언트 연결 종료 (서버는 다음 접속을 계속 기다림)
         SOCKET c = cur_;
@@ -13277,6 +13264,8 @@ public:
     static constexpr UINT WM_PROGRESS = WM_APP + 10;    // 대화상자로: wParam = 남은 ms, lParam = 단계 (0 서버 접속, 1 서버 승인 대기)
     static constexpr UINT WM_DONE     = WM_APP + 11;    // 대화상자로: wParam = 1 이면 연결 성공 (대화상자를 닫음), 0 이면 실패/취소 (오류는 TakeError)
     static constexpr int CONNECT_SEC = 10, APPROVE_SEC = 60;
+    static inline std::atomic<bool> viewing_{false};   // 원격 제어 창이 열려 있는 동안 true (메뉴 체크 표시용)
+    static bool Connected() { return viewing_; }
 
     // 연결 시작: 전용 스레드가 접속 -> 인증(진행 상황을 dlg 에 알림) -> 서버 모니터마다 창을 만들고 닫힐 때까지 동작. 이미 연결 중이면 false
     static bool Start(const Cfg& c, HWND dlg) {
@@ -13330,6 +13319,7 @@ private:
     static inline std::thread ft_;                  // 파일 전송 스레드 (창 스레드가 멈추지 않게)
     static inline HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
     static inline std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false}, cancelFt_{false};   // cancelFt_: 전송 중 [취소]
+    static inline std::atomic<bool> srvDropped_{false}, confirming_{false};   // srvDropped_: 서버/네트워크가 끊어 닫는 중(확인 없음), confirming_: 종료 확인창이 떠 있음
     static inline std::set<int> down_;              // 눌려 있는 키 (창 스레드에서만 접근)
     static inline int keyLogN_ = 0;                 // 진단 로그로 남긴 키 이벤트 수 (연결마다 0 으로, 창 스레드에서만 접근)
     static inline std::mutex smtx_, pmtx_;          // smtx_ = 소켓 송신 직렬화 (마우스 입력 + 파일), pmtx_ = ptext_
@@ -13639,7 +13629,9 @@ private:
         if (cancel_) { closesocket(s); Post(WM_DONE, 0); return; }
         sock_ = s;
         Post(WM_DONE, 1);                       // 대화상자를 닫고 원격 제어 창을 연다
+        viewing_ = true;
         View(info);
+        viewing_ = false;
         shutdown(sock_, SD_BOTH);
         closesocket(sock_);
         sock_ = INVALID_SOCKET;
@@ -13759,6 +13751,7 @@ private:
         }
         srx.Drop();                             // 연결이 끊겨 끝나지 않은 파일은 지움
         Log::Put("원격 클라이언트: 서버 또는 네트워크가 연결을 끊음 (받은 화면 %lu 장)", frames);
+        srvDropped_ = true;                     // 서버가 끊은 것이므로 종료 확인창 없이 닫음
         PostMessageW(wnd_[0], WM_CLOSE, 0, 0);
     }
 
@@ -13876,6 +13869,16 @@ private:
             else StartSend(files);
             SetFocus(w);
             return 0; }
+        case WM_CLOSE:                              // 원격 제어 창을 닫으면 연결이 끊어지므로 먼저 확인 (30초, 무응답이면 연결 유지)
+            if (srvDropped_) break;                 // 서버/네트워크가 끊은 경우는 확인 없이 닫음
+            if (confirming_.exchange(true)) return 0;   // 이미 확인창이 떠 있음
+            {
+                const int r = ConfirmDialog::Show(GetModuleHandleW(NULL), 30, "원격 제어", "서버 연결을 종료합니까?(Yes/No)", "무응답 시 연결 유지", false);
+                confirming_ = false;
+                if (r != IDYES) { Log::Put("원격 클라이언트: 연결 종료 안 함 (No 또는 30초 무응답)"); SetFocus(w); return 0; }
+                Log::Put("원격 클라이언트: 연결 종료 확인 (Yes)");
+            }
+            break;
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -13902,6 +13905,8 @@ private:
         btnLog_.assign(nMon, NULL);
         btnRb_.assign(nMon, NULL);
         closing_ = false;
+        srvDropped_ = false;
+        confirming_ = false;
         sending_ = false;
         keyLogN_ = 0;
         ackEv_ = CreateEventW(NULL, FALSE, FALSE, NULL);
@@ -14629,6 +14634,7 @@ private:
         case WM_INITMENUPOPUP:                                    // 메뉴가 열릴 때 단색 여부 다시 확인
             if (!owner_ && (HMENU)w == menuBack_) UpdateBackMenu();
             if (!owner_ && (HMENU)w == menuATheme_) RefreshDeskColor(true);
+            if (!owner_) UpdateRdpMenu();                             // 원격 접속(서버/클라이언트) 체크 표시
             break;
         case WM_SETTINGCHANGE:                                    // 바탕화면이 바뀌면 (단색일 때) 바탕색 다시 맞춤
             if (!owner_ && cfg_.backFollow && w == SPI_SETDESKWALLPAPER) ApplyDesktopColor();
@@ -14949,6 +14955,13 @@ private:
         AppendMenuW(m, flags | MF_STRING, id, (LPCWSTR)u);
     }
 
+    // F8) 원격 접속(서버): 서버가 작동 중이면 체크 / 원격 접속(클라이언트): 연결되어 원격 제어 창이 떠 있으면 체크
+    void UpdateRdpMenu() {
+        if (!menuIpc_) return;
+        CheckMenuItem(menuIpc_, CMD_RDPSRV, MF_BYCOMMAND | (rdp::Server::Get().Running() ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menuIpc_, CMD_RDPCLI, MF_BYCOMMAND | (rdp::Client::Connected() ? MF_CHECKED : MF_UNCHECKED));
+    }
+
     HMENU BuildMenu() {
         HMENU bar = CreatePopupMenu();          // 최상위 항목들을 담는 팝업 메뉴 (창에 붙이지 않음)
         HMENU set = menuSet_ = CreatePopupMenu();       // 앱 동작 설정
@@ -15071,7 +15084,7 @@ private:
         UpdateScanSetMenu();
         AddMenu(bar, MF_POPUP, (UINT_PTR)menuScan_, "F7) WiFiScan(&W)");
 
-        HMENU ipc = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기 / 원격 접속(서버) / 원격 접속(클라이언트)
+        HMENU ipc = menuIpc_ = CreatePopupMenu();          // IP cam / 폰 연결: IP cam 등록 / 영상 / 폰 탐색기 / 원격 접속(서버) / 원격 접속(클라이언트)
         AddMenu(ipc, 0, CMD_IPREG,  "IP cam 등록(&R)...");
         AddMenu(ipc, 0, CMD_IPVIEW, "카메라 영상(&V)");
         AddMenu(ipc, 0, CMD_PHONE,  "폰 탐색기(&E)...");
@@ -17073,6 +17086,7 @@ private:
         GetWindowRect(hwnd_, &wr);
         if (m != menu_ && !PtInRect(&wr, pt)) { pt.x = wr.left; pt.y = wr.bottom; }   // 마우스가 창 밖이면 창 아래쪽에 표시
         SetForegroundWindow(hwnd_);
+        UpdateRdpMenu();                            // 메뉴를 띄우기 직전에 원격 접속 체크 표시 갱신
         HHOOK hook = NULL;
         if (m == menu_) {                           // 전체 메뉴: F3) / F4) 항목을 마우스로 클릭하면 그 시계로 변경 (하위 메뉴는 그대로 열림)
             hookWnd_ = this;
@@ -17725,6 +17739,7 @@ private:
     HMENU        menuAlarm_    = NULL;
     HMENU        menuScan_     = NULL;
     HMENU        menuBack_     = NULL;
+    HMENU        menuIpc_      = NULL;      // F8) IP cam / 폰 연결 (원격 접속 서버/클라이언트 체크 표시용)
     int          dtStartYmd_   = 0;     // 침입 탐지 개시/종료를 마지막으로 한 날짜
     int          dtEndYmd_     = 0;
     int          pgFiredYmd_   = 0;     // 프로그램 실행을 마지막으로 한 날짜
