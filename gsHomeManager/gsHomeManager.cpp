@@ -13336,88 +13336,66 @@ private:
 };
 
 // ================================================================ 클라이언트 (조작하는 PC)
-class Client {
-public:
+// 원격 접속 1개 (서버 1대에 연결 1개). 연결마다 따로 만들어져 동시에 여러 개가 동작함 (연결마다 스레드 / 창 / 소켓 / 파일 전송 상태가 따로)
+struct Sess {
     struct Cfg { std::string ip; int port = 7071; std::string pw; };
 
     static constexpr UINT WM_PROGRESS = WM_APP + 10;    // 대화상자로: wParam = 남은 ms, lParam = 단계 (0 서버 접속, 1 서버 승인 대기)
     static constexpr UINT WM_DONE     = WM_APP + 11;    // 대화상자로: wParam = 1 이면 연결 성공 (대화상자를 닫음), 0 이면 실패/취소 (오류는 TakeError)
     static constexpr int CONNECT_SEC = 10, APPROVE_SEC = 60;
-    static inline std::atomic<bool> viewing_{false};   // 원격 제어 창이 열려 있는 동안 true (메뉴 체크 표시용)
-    static bool Connected() { return viewing_; }
-
-    // 연결 시작: 전용 스레드가 접속 -> 인증(진행 상황을 dlg 에 알림) -> 서버 모니터마다 창을 만들고 닫힐 때까지 동작. 이미 연결 중이면 false
-    static bool Start(const Cfg& c, HWND dlg) {
-        if (busy_) return false;
-        if (th_.joinable()) th_.join();
-        cancel_ = false;
-        dlg_ = dlg;
-        { std::lock_guard<std::mutex> g(emtx_); err_.clear(); }
-        busy_ = true;
-        th_ = std::thread([c] { Session(c); busy_ = false; });
-        return true;
-    }
-    static bool Busy() { return busy_; }
-    static void Cancel() { cancel_ = true; }                 // 접속/승인 대기 중인 연결 시도를 취소
-    static void Detach() { dlg_ = NULL; }                    // 대화상자가 닫힘: 더 이상 알리지 않음
-    static std::string TakeError() {                         // 실패 사유 (한 번 읽으면 비움)
+    static inline std::atomic<int> viewing_{0};     // 원격 제어 창이 열려 있는 연결 수 (메뉴 체크 표시용)
+    static inline std::mutex emtx_;
+    static inline std::string err_;                 // 마지막 실패 사유
+    static std::string TakeError() {                // 실패 사유 (한 번 읽으면 비움)
         std::lock_guard<std::mutex> g(emtx_);
         std::string e;
         e.swap(err_);
         return e;
     }
+    static void ClearError() { std::lock_guard<std::mutex> g(emtx_); err_.clear(); }
 
-    // 앱 종료: 진행 중인 연결을 닫고 스레드를 기다림
-    static void Shutdown() {
-        if (!th_.joinable()) return;
-        cancel_ = true;
-        DWORD t = tid_;
-        if (busy_ && t) PostThreadMessageW(t, WM_QUIT, 0, 0);
-        th_.join();
-    }
-
-private:
-    static inline std::thread th_;
-    static inline std::atomic<bool> busy_{false};
-    static inline std::atomic<bool> cancel_{false};
-    static inline std::atomic<DWORD> tid_{0};
-    static inline std::atomic<HWND> dlg_{NULL};     // 진행 상황을 알릴 대화상자
-    static inline std::mutex emtx_;
-    static inline std::string err_;                 // 마지막 실패 사유
-    static inline SOCKET sock_ = INVALID_SOCKET;
-    static inline std::vector<HWND> wnd_;           // 서버 모니터마다 창 1개
-    static inline std::vector<HBITMAP> bmp_;        // 모니터마다 마지막 화면
-    static inline std::mutex mtx_;
+    Sess(const Cfg& c, HWND dlg) : c_(c), dlg_(dlg) {}
+    Cfg c_;
+    std::thread th;                                 // 이 연결의 스레드 (접속 -> 인증 -> 창 + 메시지 루프)
+    std::atomic<bool> done_{false};                 // 스레드가 끝남
+    std::atomic<bool> cancel_{false};
+    std::atomic<DWORD> tid_{0};
+    std::atomic<HWND> dlg_;                         // 진행 상황을 알릴 대화상자
+    SOCKET sock_ = INVALID_SOCKET;
+    std::vector<HWND> wnd_;                         // 서버 모니터마다 창 1개
+    std::vector<HBITMAP> bmp_;                      // 모니터마다 마지막 화면
+    std::mutex mtx_;
 
     // ---- 파일 전송 (클라이언트 -> 서버): 창 맨 위 [파일 전송] 버튼 ----
     static constexpr int IDC_FILE = 9001, IDC_LOGS = 9002, IDC_REBOOT = 9003;
     static constexpr UINT WM_FPROG = WM_APP + 20;   // 진행 글자(ptext_)를 버튼에 표시
     static constexpr UINT WM_FDONE = WM_APP + 21;   // 전송 끝: 결과(ptext_)를 알림창으로 표시
-    static inline std::vector<HWND> btnLog_, btnRb_;   // 창마다 [서버의 로그 파일 가져오기] / [서버 reboot] 버튼
-    static inline std::vector<HWND> btn_;           // 창마다 버튼 1개
-    static inline std::thread ft_;                  // 파일 전송 스레드 (창 스레드가 멈추지 않게)
-    static inline HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
-    static inline std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false}, cancelFt_{false};   // cancelFt_: 전송 중 [취소]
-    static inline std::atomic<bool> srvDropped_{false}, confirming_{false};   // srvDropped_: 서버/네트워크가 끊어 닫는 중(확인 없음), confirming_: 종료 확인창이 떠 있음
-    static inline std::set<int> down_;              // 눌려 있는 키 (창 스레드에서만 접근)
-    static inline int keyLogN_ = 0;                 // 진단 로그로 남긴 키 이벤트 수 (연결마다 0 으로, 창 스레드에서만 접근)
-    static inline std::mutex smtx_, pmtx_;          // smtx_ = 소켓 송신 직렬화 (마우스 입력 + 파일), pmtx_ = ptext_
-    static inline std::wstring ptext_;
-    static inline int tb_ = 32;                     // 버튼 줄 높이 (픽셀)
-    static inline HFONT font_ = NULL;
+    static constexpr UINT WM_VRESIZE = WM_APP + 22; // 서버 화면 크기가 바뀜 (폰 회전 등): wParam = 너비, lParam = 높이
+    std::vector<HWND> btnLog_, btnRb_;   // 창마다 [서버의 로그 파일 가져오기] / [서버 reboot] 버튼
+    std::vector<HWND> btn_;           // 창마다 버튼 1개
+    std::thread ft_;                  // 파일 전송 스레드 (창 스레드가 멈추지 않게)
+    HANDLE ackEv_ = NULL;             // 서버의 파일 저장 응답
+    std::atomic<bool> ackOk_{false}, closing_{false}, sending_{false}, cancelFt_{false};   // cancelFt_: 전송 중 [취소]
+    std::atomic<bool> srvDropped_{false}, confirming_{false};   // srvDropped_: 서버/네트워크가 끊어 닫는 중(확인 없음), confirming_: 종료 확인창이 떠 있음
+    std::set<int> down_;              // 눌려 있는 키 (창 스레드에서만 접근)
+    int keyLogN_ = 0;                 // 진단 로그로 남긴 키 이벤트 수 (연결마다 0 으로, 창 스레드에서만 접근)
+    std::mutex smtx_, pmtx_;          // smtx_ = 소켓 송신 직렬화 (마우스 입력 + 파일), pmtx_ = ptext_
+    std::wstring ptext_;
+    int tb_ = 32;                     // 버튼 줄 높이 (픽셀)
+    HFONT font_ = NULL;
 
-    static bool SendLocked(uint8_t type, const void* p, uint32_t len) {
+    bool SendLocked(uint8_t type, const void* p, uint32_t len) {
         std::lock_guard<std::mutex> g(smtx_);
         return !closing_ && sendMsg(sock_, type, p, len);
     }
 
-    static void PostText(UINT m, const std::wstring& t) {
+    void PostText(UINT m, const std::wstring& t) {
         { std::lock_guard<std::mutex> g(pmtx_); ptext_ = t; }
         if (!wnd_.empty() && wnd_[0]) PostMessageW(wnd_[0], m, 0, 0);
     }
 
     // 파일 하나 전송: BEGIN -> DATA 조각들 -> END -> 서버 응답(ACK) 대기. 실패하면 why 에 사유
-    static bool SendOne(const std::wstring& path, size_t no, size_t total, std::wstring& why) {
+    bool SendOne(const std::wstring& path, size_t no, size_t total, std::wstring& why) {
         const size_t sl = path.find_last_of(L"\\/");
         const std::wstring base = sl == std::wstring::npos ? path : path.substr(sl + 1);
         HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
@@ -13470,7 +13448,7 @@ private:
         return true;
     }
 
-    static void SendFiles(std::vector<std::wstring> files) {
+    void SendFiles(std::vector<std::wstring> files) {
         int okN = 0;
         std::wstring fails;
         for (size_t i = 0; i < files.size() && !closing_ && !cancelFt_; i++) {
@@ -13492,7 +13470,7 @@ private:
     }
 
     // 파일 선택 대화상자 (여러 개 선택 가능). 취소하면 false
-    static bool PickFiles(HWND owner, std::vector<std::wstring>& files) {
+    bool PickFiles(HWND owner, std::vector<std::wstring>& files) {
         files.clear();
         std::vector<wchar_t> buf(65536, L'\0');
         OPENFILENAMEW ofn = {};
@@ -13522,7 +13500,7 @@ private:
     }
 
     // 폴더면 안의 파일을 모두 모음 (하위 폴더 포함, 깊이 8 / 2000개까지. 링크는 따라가지 않음). 서버에는 한 폴더(up_down\날짜)에 모두 저장됨
-    static void CollectFiles(const std::wstring& p, std::vector<std::wstring>& out, int depth = 0) {
+    void CollectFiles(const std::wstring& p, std::vector<std::wstring>& out, int depth = 0) {
         const DWORD a = GetFileAttributesW(p.c_str());
         if (a == INVALID_FILE_ATTRIBUTES) return;
         if (!(a & FILE_ATTRIBUTE_DIRECTORY)) { out.push_back(p); return; }
@@ -13538,16 +13516,16 @@ private:
         FindClose(h);
     }
 
-    static void StartSend(const std::vector<std::wstring>& files) {
+    void StartSend(const std::vector<std::wstring>& files) {
         if (files.empty() || sending_) return;
         sending_ = true;
         cancelFt_ = false;
         if (ft_.joinable()) ft_.join();
         Log::Put("원격 클라이언트: 파일 %d 개 전송 시작", (int)files.size());
-        ft_ = std::thread([files] { SendFiles(files); });
+        ft_ = std::thread([this, files] { SendFiles(files); });
     }
 
-    static void OnFileButton(HWND w) {
+    void OnFileButton(HWND w) {
         if (sending_) {                                 // 전송 중에는 이 버튼이 [취소]
             cancelFt_ = true;
             Log::Put("원격 클라이언트: 파일 전송 취소 요청");
@@ -13559,18 +13537,18 @@ private:
     }
 
     // 서버에 명령 전달: 로그 파일 가져오기 (서버가 log\*.* 를 보내 주면 up_down\날짜 에 저장되고 송수신 뷰어가 열림) / 서버 PC 재부팅
-    static void OnLogsButton() {
+    void OnLogsButton() {
         const uint8_t c = CMD_GETLOGS;
         if (SendLocked(RM_CMD, &c, 1)) Log::Put("원격 클라이언트: 서버에 로그 파일 전송을 요청");
     }
-    static void OnRebootButton(HWND w) {
+    void OnRebootButton(HWND w) {
         if (MessageBoxW(w, L"서버 PC 를 지금 바로 재부팅합니다.\n계속하시겠습니까?", L"서버 reboot", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) return;
         const uint8_t c = CMD_REBOOT;
         if (SendLocked(RM_CMD, &c, 1)) Log::Put("원격 클라이언트: 서버 reboot 를 요청");
     }
 
     // 이 창에서는 클라이언트 PC 의 IME 를 끔: 한글 조합은 서버의 IME 가 하도록 키 입력을 그대로 보내기 위해
-    static void DisableIme(HWND w) {
+    void DisableIme(HWND w) {
         typedef HANDLE (WINAPI *ImmAssocFn)(HWND, HANDLE);   // HIMC 는 핸들 (imm.h 없이 선언)
         HMODULE m = GetModuleHandleW(L"imm32.dll");
         if (!m) m = LoadLibraryW(L"imm32.dll");
@@ -13579,7 +13557,7 @@ private:
         if (f) f(w, NULL);
     }
 
-    static const char* ErrText(int e) {
+    const char* ErrText(int e) {
         switch (e) {
         case WSAETIMEDOUT:     return "응답 없음 (시간 초과)";
         case WSAECONNREFUSED:  return "서버가 실행 중이 아니거나 port 가 틀림";
@@ -13589,13 +13567,13 @@ private:
         }
     }
 
-    static void Post(UINT m, WPARAM w, LPARAM l = 0) {
+    void Post(UINT m, WPARAM w, LPARAM l = 0) {
         HWND d = dlg_;
         if (d) PostMessageW(d, m, w, l);
     }
 
     // 실패: 로그에 남기고 사유를 대화상자에 알림 (오류 창은 대화상자가 띄움)
-    static void Fail(const char* msg) {
+    void Fail(const char* msg) {
         Log::Put("원격 클라이언트: %s", msg);
         { std::lock_guard<std::mutex> g(emtx_); err_ = msg; }
         Post(WM_DONE, 0);
@@ -13603,7 +13581,7 @@ private:
 
     // 소켓이 쓰기(연결 완료) / 읽기(서버 응답) 가능해질 때까지 기다리며 대화상자의 진행 표시를 갱신.
     // 실패하면 err = WSA 오류 (사용자가 취소하면 WSAECANCELLED)
-    static bool Wait(SOCKET s, bool write, int sec, int phase, int& err) {
+    bool Wait(SOCKET s, bool write, int sec, int phase, int& err) {
         DWORD t0 = GetTickCount();
         for (;;) {
             int left = sec * 1000 - (int)(GetTickCount() - t0);
@@ -13629,7 +13607,7 @@ private:
         }
     }
 
-    static void Session(const Cfg& c) {
+    void Session() {
         tid_ = GetCurrentThreadId();
         tg::enableThreadDpiAwareness();
         WSADATA wd;
@@ -13637,13 +13615,13 @@ private:
         Gdiplus::GdiplusStartupInput gi;
         ULONG_PTR tok = 0;
         Gdiplus::GdiplusStartup(&tok, &gi, NULL);
-        Run(c);
+        Run(c_);
         Gdiplus::GdiplusShutdown(tok);
         WSACleanup();
         tid_ = 0;
     }
 
-    static void Run(const Cfg& c) {
+    void Run(const Cfg& c) {
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in a = {};
         a.sin_family = AF_INET;
@@ -13708,20 +13686,20 @@ private:
         if (cancel_) { closesocket(s); Post(WM_DONE, 0); return; }
         sock_ = s;
         Post(WM_DONE, 1);                       // 대화상자를 닫고 원격 제어 창을 연다
-        viewing_ = true;
+        ++viewing_;
         View(info);
-        viewing_ = false;
+        --viewing_;
         shutdown(sock_, SD_BOTH);
         closesocket(sock_);
         sock_ = INVALID_SOCKET;
     }
 
-    static int MonOf(HWND w) {
+    int MonOf(HWND w) {
         for (size_t i = 0; i < wnd_.size(); i++) if (wnd_[i] == w) return (int)i;
         return -1;
     }
 
-    static void SendEv(int t, int a, int b = 0, int m = 0) {
+    void SendEv(int t, int a, int b = 0, int m = 0) {
         Ev e{t, a, b, m};
         std::lock_guard<std::mutex> g(smtx_);
         if (!closing_) sendMsg(sock_, RM_INPUT, &e, sizeof e);
@@ -13736,13 +13714,13 @@ private:
         void Drop() { if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); h = INVALID_HANDLE_VALUE; DeleteFileW(path.c_str()); } bad = true; }
     };
 
-    static std::string BaseU8(const std::wstring& p) {
+    std::string BaseU8(const std::wstring& p) {
         const size_t sl = p.find_last_of(L"\\/");
         return tg::StrUtil::toUtf8((sl == std::wstring::npos ? p : p.substr(sl + 1)).c_str());
     }
 
     // 서버가 보낸 파일 조각 처리: 저장 폴더 = exe 폴더\up_down\날짜. 다 받으면 송수신 뷰어가 자동으로 열려 보여 줌
-    static void OnServerFile(const std::vector<char>& b, SrvRx& f) {
+    void OnServerFile(const std::vector<char>& b, SrvRx& f) {
         const uint8_t sub = (uint8_t)b[0];
         if (sub == FT_BEGIN) {
             f.Drop();
@@ -13789,7 +13767,7 @@ private:
     }
 
     // 서버 -> 클라이언트: 화면 프레임 수신
-    static void NetThread() {
+    void NetThread() {
         Hdr h;
         unsigned long frames = 0;
         SrvRx srx;
@@ -13800,6 +13778,16 @@ private:
             if (h.type == RM_FILE) {            // 서버의 파일 저장 결과
                 if (h.len >= 2 && (uint8_t)buf[0] == FT_ACK) { ackOk_ = buf[1] != 0; SetEvent(ackEv_); }
                 else if (h.len >= 1) OnServerFile(buf, srx);   // 서버가 보내는 파일 (BEGIN / DATA / END / ABORT)
+                continue;
+            }
+            if (h.type == RM_INFO) {            // 서버 화면 크기가 바뀜 (폰이 회전했을 때 등): 창을 새 비율로 맞춤
+                if (h.len >= 12 && !wnd_.empty() && wnd_[0]) {
+                    int32_t n, nw, nh;
+                    memcpy(&n, buf.data(), 4);
+                    memcpy(&nw, buf.data() + 4, 4);
+                    memcpy(&nh, buf.data() + 8, 4);
+                    if (n == 1 && nw > 0 && nh > 0) PostMessageW(wnd_[0], WM_VRESIZE, (WPARAM)nw, (LPARAM)nh);
+                }
                 continue;
             }
             if (h.type != RM_FRAME || h.len <= 4) continue;
@@ -13834,7 +13822,13 @@ private:
         PostMessageW(wnd_[0], WM_CLOSE, 0, 0);
     }
 
-    static LRESULT CALLBACK ViewProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
+    static LRESULT CALLBACK ViewProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {   // 창마다 해당 연결(Sess)을 찾아 넘김
+        if (m == WM_NCCREATE) SetWindowLongPtrW(w, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+        Sess* s = (Sess*)GetWindowLongPtrW(w, GWLP_USERDATA);
+        return s ? s->Proc(w, m, wp, lp) : DefWindowProcW(w, m, wp, lp);
+    }
+
+    LRESULT Proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         switch (m) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
@@ -13933,6 +13927,21 @@ private:
             for (int code : down_) SendEv(EV_KEY, code & 0xFF, 1 | ((code & 0x100) ? 2 : 0), (code >> 16) & 0xFF);
             down_.clear();
             break;
+        case WM_VRESIZE: {                      // 서버 화면 크기(비율)가 바뀜: 창 크기를 새 비율로 (최대화 / 최소화 상태면 그대로)
+            const int mw = (int)wp, mh = (int)lp;
+            if (mw < 1 || mh < 1 || IsZoomed(w) || IsIconic(w)) return 0;
+            const int cw = std::min(mw, 1280), ch = (int)((int64_t)mh * cw / mw);
+            RECT rc = {0, 0, cw, ch + tb_};
+            AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+            SetWindowPos(w, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            char t[160];
+            wsprintfA(t, "원격 제어 [%s:%d] - 모니터 %d (%dx%d)", c_.ip.c_str(), c_.port, MonOf(w) + 1, mw, mh);
+            char16_t title[160];
+            title[0] = 0;
+            Utf8::ToUtf16(t, -1, title, 160);
+            SetWindowTextW(w, (LPCWSTR)title);
+            InvalidateRect(w, NULL, FALSE);
+            return 0; }
         case WM_DROPFILES: {                    // 파일 / 폴더를 창에 끌어다 놓으면 서버로 전송
             HDROP hd = (HDROP)wp;
             std::vector<std::wstring> files;
@@ -13966,7 +13975,7 @@ private:
     }
 
     // 서버 모니터마다 창을 만들고 닫힐 때까지 메시지 루프 (info = 모니터 개수, (너비, 높이) ...)
-    static void View(const std::vector<int32_t>& info) {
+    void View(const std::vector<int32_t>& info) {
         int nMon = info[0];
         Log::Put("원격 클라이언트: 서버 모니터 %d 개", nMon);
         for (int i = 0; i < nMon; i++) Log::Put("원격 클라이언트:   모니터 %d: %dx%d", i + 1, (int)info[1 + 2 * i], (int)info[2 + 2 * i]);
@@ -13999,13 +14008,13 @@ private:
             int cw = std::min(mw, 1280), ch = (int)((int64_t)mh * cw / mw);
             RECT rc = {0, 0, cw, ch + tb_};                 // 위쪽에 버튼 줄
             AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-            char t[80];
-            wsprintfA(t, "원격 제어 - 모니터 %d (%dx%d)", i + 1, mw, mh);
-            char16_t title[80];
+            char t[160];
+            wsprintfA(t, "원격 제어 [%s:%d] - 모니터 %d (%dx%d)", c_.ip.c_str(), c_.port, i + 1, mw, mh);
+            char16_t title[160];
             title[0] = 0;
-            Utf8::ToUtf16(t, -1, title, 80);
+            Utf8::ToUtf16(t, -1, title, 160);
             wnd_[i] = CreateWindowW((LPCWSTR)u"gsHomeManagerRdpView", (LPCWSTR)title, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
-                                    rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hi, NULL);
+                                    rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hi, this);
             if (wnd_[i]) {                                  // 타이틀 바 바로 밑 버튼 줄: [파일 전송]
                 btn_[i] = CreateWindowW(L"BUTTON", L"파일 업로드 (클라이언트-->서버)", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, MulDiv(4, dpi, 96), MulDiv(3, dpi, 96),
                                         MulDiv(230, dpi, 96), tb_ - MulDiv(6, dpi, 96), wnd_[i], (HMENU)(INT_PTR)IDC_FILE, hi, NULL);
@@ -14022,7 +14031,7 @@ private:
         }
         for (HWND w : wnd_) if (w) ShowWindow(w, SW_SHOW);
         if (!wnd_.empty() && wnd_[0]) SetFocus(wnd_[0]);   // 바로 키 입력이 전달되게
-        std::thread net(NetThread);
+        std::thread net([this] { NetThread(); });
         MSG msg;
         while (GetMessageW(&msg, NULL, 0, 0) > 0) {
             TranslateMessage(&msg);
@@ -14043,6 +14052,67 @@ private:
         btnLog_.clear();
         btnRb_.clear();
     }
+};
+
+// 원격 접속 관리: 연결을 여러 개 동시에 둘 수 있음. F8 > 원격 접속(클라이언트) 를 다시 열어 다른 서버(또는 같은 서버)에 연결하면 원격 제어 창이 하나 더 열림.
+// 연결 대화상자는 한 번에 하나이므로 접속 중(대화상자가 열려 있고 진행 중)인 연결은 cur_ 하나뿐이고, 연결에 성공하면 대화상자가 닫히면서 독립된 연결이 됨.
+class Client {
+public:
+    using Cfg = Sess::Cfg;
+    static constexpr UINT WM_PROGRESS = Sess::WM_PROGRESS, WM_DONE = Sess::WM_DONE;
+    static constexpr int CONNECT_SEC = Sess::CONNECT_SEC, APPROVE_SEC = Sess::APPROVE_SEC;
+    static bool Connected() { return Sess::viewing_ > 0; }     // 원격 제어 창이 하나라도 열려 있음
+
+    // 연결 시작: 연결마다 전용 스레드가 접속 -> 인증(진행 상황을 dlg 에 알림) -> 서버 모니터마다 창을 만들고 닫힐 때까지 동작. 이미 접속 시도 중이면 false
+    static bool Start(const Cfg& c, HWND dlg) {
+        std::lock_guard<std::mutex> g(mgr_);
+        if (cur_ && cur_->done_) cur_ = nullptr;                // 실패한 이전 시도
+        Prune();
+        if (cur_) return false;
+        Sess::ClearError();
+        Sess* s = new Sess(c, dlg);
+        all_.push_back(s);
+        cur_ = s;
+        s->th = std::thread([s] { s->Session(); s->done_ = true; });
+        return true;
+    }
+    static bool Busy() { std::lock_guard<std::mutex> g(mgr_); return cur_ && !cur_->done_; }
+    static void Cancel() { std::lock_guard<std::mutex> g(mgr_); if (cur_) cur_->cancel_ = true; }          // 접속/승인 대기 중인 연결 시도를 취소
+    static void Detach() {                                      // 대화상자가 닫힘: 더 이상 알리지 않음 (연결된 상태면 이 연결은 독립적으로 계속 동작)
+        std::lock_guard<std::mutex> g(mgr_);
+        if (cur_) { cur_->dlg_ = NULL; cur_ = nullptr; }
+    }
+    static std::string TakeError() { return Sess::TakeError(); }
+
+    // 앱 종료: 모든 연결을 닫고 스레드를 기다림
+    static void Shutdown() {
+        std::vector<Sess*> v;
+        { std::lock_guard<std::mutex> g(mgr_); v.swap(all_); cur_ = nullptr; }
+        for (Sess* s : v) {
+            s->cancel_ = true;
+            const DWORD t = s->tid_;
+            if (!s->done_ && t) PostThreadMessageW(t, WM_QUIT, 0, 0);
+            if (s->th.joinable()) s->th.join();
+            delete s;
+        }
+    }
+
+private:
+    static void Prune() {                                       // 끝난 연결 정리 (mgr_ 를 잡은 상태에서)
+        for (size_t i = 0; i < all_.size();) {
+            Sess* s = all_[i];
+            if (s->done_ && s != cur_) {
+                if (s->th.joinable()) s->th.join();
+                delete s;
+                all_.erase(all_.begin() + i);
+            } else {
+                i++;
+            }
+        }
+    }
+    static inline std::mutex mgr_;
+    static inline std::vector<Sess*> all_;
+    static inline Sess* cur_ = nullptr;                         // 접속 중인 연결 (대화상자와 연결됨)
 };
 
 }  // namespace rdp
@@ -14424,7 +14494,7 @@ private:
                 cc.ip = c->rcIp;
                 cc.port = c->rcPort;
                 cc.pw = c->rcPass;
-                if (!rdp::Client::Start(cc, d)) { RdpDlg::Warn(d, TITLE, "이미 원격 연결 중입니다. 열려 있는 원격 제어 창을 닫거나 잠시 뒤에 다시 시도하세요.", 0); return TRUE; }
+                if (!rdp::Client::Start(cc, d)) { RdpDlg::Warn(d, TITLE, "지금 서버에 접속하는 중입니다. 잠시 뒤에 다시 시도하세요.", 0); return TRUE; }
                 SetBusy(d, true);
                 RdpDlg::Set(d, IDC_PSTAT, "서버에 연결하는 중...");
                 return TRUE; }
