@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal
-rem GitHub push: copy last commit to C:\tools\gsTop\WifiScanAndroid and push
+rem GitHub push: commit (git add -A, git commit) then copy to C:\tools\gsTop\WifiScanAndroid and push
 rem Files in .gitignore (bot token, photo icon, build output) are never uploaded.
 
 cd /d "%~dp0" || goto fail
@@ -10,9 +10,22 @@ if not exist "%~dp0app\build.gradle" goto fail
 set "GH=C:\tools\gsTop"
 set "SUB=WifiScanAndroid"
 
-git diff --quiet HEAD
-if errorlevel 1 goto notcommitted
+rem ---- 1) commit message (blank = stop) ----
+set "MSG="
+set /p "MSG=바꾼 내용 (빈칸이면 종료): "
+if not defined MSG goto stop
+if "%MSG: =%"=="" goto stop
 
+git add -A
+git diff --cached --quiet
+if errorlevel 1 (
+    git commit -m "%MSG%"
+    if errorlevel 1 goto fail
+) else (
+    echo [INFO] 새로 바뀐 파일이 없어 기록은 건너뛰고, 마지막 기록을 올립니다.
+)
+
+rem ---- 2) copy last commit into gsTop and push ----
 if not exist "%GH%\.git" git clone https://github.com/GarpsuKim/gsTop "%GH%"
 if not exist "%GH%\.git" goto fail
 git -C "%GH%" pull
@@ -24,7 +37,6 @@ if not exist "%GH%\%SUB%" mkdir "%GH%\%SUB%"
 git archive HEAD | tar -x -C "%GH%\%SUB%"
 if errorlevel 1 goto fail
 
-for /f "delims=" %%m in ('git log -1 --pretty^=format:%%s') do set "MSG=%%m"
 git -C "%GH%" add -A "%SUB%"
 git -C "%GH%" commit -m "%SUB%: %MSG%"
 git -C "%GH%" push
@@ -35,11 +47,8 @@ echo [OK] GitHub: https://github.com/GarpsuKim/gsTop/tree/main/%SUB%
 pause
 exit /b 0
 
-:notcommitted
-echo.
-echo [STOP] 기록하지 않은 변경이 있습니다. 먼저 실행하세요:
-echo        git add -A
-echo        git commit -m "바꾼 내용"
+:stop
+echo [STOP] 입력이 없어 종료합니다.
 pause
 exit /b 1
 
