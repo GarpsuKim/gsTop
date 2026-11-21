@@ -97,6 +97,7 @@ public class SosActivity extends Activity {
         root.addView(cancel, lp);
 
         setContentView(root);
+        ScreenId.tag(this, "1060"); // 화면 번호
         handler.postDelayed(tick, 1000);
     }
 

@@ -15,3 +15,6 @@ telegram_config.bat
 # 실제 인물 사진 아이콘 - 공개 저장소에 올리지 않음 (이 PC에만 보관)
 icon.jpg
 app/src/main/res/mipmap-*/ic_launcher.png
+
+# 이슈 기록 (개인 참고용) - GitHub 에 올리지 않음
+issues/

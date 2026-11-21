@@ -220,6 +220,7 @@ public class TelegramSetupActivity extends Activity {
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
         setContentView(sv);
+        ScreenId.tag(this, "1070"); // 화면 번호
 
         renderPeople();
         setBot(null);

@@ -239,6 +239,7 @@ public class MainActivity extends Activity {
                 addButton(actions, "등록", v -> saveRouters());
                 addButton(actions, "등록 확인", v -> showRegistered());
                 addButton(actions, "보호자 등록", v -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
+                addButton(actions, "사용자 등록", v -> startActivity(new Intent(this, UserActivity.class))); // 화면 1075
             }
             if (i == 1) { // (2) 현재 위치
                 addButton(actions, "지도", v -> openMap());
@@ -293,6 +294,7 @@ public class MainActivity extends Activity {
             }
             panels[i].addView(scroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            panels[i].addView(ScreenId.label(this, String.valueOf(1010 + i * 10))); // 화면 번호 1010~1050 (맨 아래 검은 줄)
             root.addView(panels[i], new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         }
@@ -310,17 +312,53 @@ public class MainActivity extends Activity {
         if (HomeService.anyOn(this) && hasPermission()) {
             HomeService.refresh(this); // 혹시 종료되어 있으면 다시 시작
         }
+        // 앱을 새로 켤 때마다 한 번: 현재 위치를 '보낼 곳'으로 통보 (화면 회전·초기화로 다시 그릴 때는 제외)
+        if (savedInstanceState == null) {
+            startMsgPending = true;
+            sendStartMessageOnce();
+        }
+    }
+
+    // 앱 종료 위치 통보: [종료] 버튼·뒤로 가기로 앱 화면을 닫을 때 한 번 ("[집에 왔어요] 앱이 종료됩니다")
+    // ※ 최근 앱 목록에서 밀어서 지우거나 시스템이 강제로 끝내면 Android 가 알려 주지 않아 보낼 수 없음
+    @Override
+    protected void onDestroy() {
+        if (isFinishing() && hasPermission()) {
+            try {
+                HomeService.stopMessage(this);
+            } catch (Exception ignored) {
+            }
+        }
+        super.onDestroy();
+    }
+
+    // 앱 시작 위치 통보: 위치 권한이 있으면 바로, 없으면 권한을 허용한 직후에 한 번
+    private boolean startMsgPending;
+
+    private void sendStartMessageOnce() {
+        if (!startMsgPending || !hasPermission()) {
+            return;
+        }
+        startMsgPending = false;
+        try {
+            HomeService.startMessage(this);
+        } catch (Exception ignored) {
+        }
+    }
+
+    // 시각 선택 같은 팝업: 띄우고 나서 화면 번호 붙이기 (Dialog.show() 는 값을 돌려주지 않아서 따로 둠)
+    private static void showTagged(android.app.Dialog d, String id) {
+        d.show();
+        ScreenId.tag(d, id);
     }
 
     // ---------- [초기화]: 모든 설정 삭제 -> 처음 상태 ----------
 
-    // 이 앱이 쓰는 설정 저장소 전부
-    private static final String[] ALL_PREFS = {"home", "lan", TelegramSender.PREF, TelegramSender.PREF_APP,
-            HomeService.PREF_KAKAO, HomeService.PREF_EMAIL, HomeService.PREF_KMAIL,
-            HomeService.PREF_SMS, HomeService.PREF_SELF, HomeService.PREF_EVENT, SosActivity.PREF_SOS};
+    // 이 앱이 쓰는 설정 저장소 전부 (사용자 등록 포함, 백업·복원과 같은 목록)
+    private static final String[] ALL_PREFS = UserActivity.ALL_PREFS;
 
     private void confirmReset() {
-        new AlertDialog.Builder(this)
+        ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("초기화")
                 .setMessage("모든 설정을 지우고 처음 설치한 상태로 되돌립니다.\n\n"
                         + "지워지는 것:\n"
@@ -331,7 +369,7 @@ public class MainActivity extends Activity {
                         + "되돌릴 수 없습니다. 계속할까요?")
                 .setPositiveButton("초기화", (d, w) -> resetAll())
                 .setNegativeButton("취소", null)
-                .show();
+                .show(), "1110");
     }
 
     private void resetAll() {
@@ -373,14 +411,14 @@ public class MainActivity extends Activity {
 
     // 시작 안내 팝업 (홈 공유기를 등록할 때까지 실행할 때마다 표시)
     private void showIntro() {
-        new AlertDialog.Builder(this)
+        ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("집에왔어요 · 홈 공유기 등록")
                 .setMessage("홈 공유기를 등록하세요.\n\n귀가 할 때 마다 자동으로 검색하여, "
                         + "\"HomeBack\" 또는 \"NotHome\" 상태를 확인합니다.\n\n"
                         + "어린이, 노약자, 치매어르신 들의 안심 귀가 확인에 유용합니다.")
                 .setPositiveButton("확인", null)
                 .setOnDismissListener(d -> ensurePermission())
-                .show();
+                .show(), "1080");
     }
 
     private void selectTab(int sel) {
@@ -454,6 +492,7 @@ public class MainActivity extends Activity {
             if (hasPermission()) {
                 texts[curTab].setText("[검색시작]을 눌러 주세요.");
                 checkHome();
+                sendStartMessageOnce(); // 앱 시작 위치 통보 (권한이 없어 미뤄 둔 경우)
                 if (HomeService.anyOn(this)) {
                     HomeService.refresh(this);
                 }
@@ -810,11 +849,11 @@ public class MainActivity extends Activity {
         tv.setTextIsSelectable(true);
         ScrollView sv = new ScrollView(this);
         sv.addView(tv);
-        new AlertDialog.Builder(this)
+        ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("등록 확인")
                 .setView(sv)
                 .setPositiveButton("확인", null)
-                .show();
+                .show(), "1090");
     }
 
     // ---------- 홈 PC 블루투스 (페어링된 PC가 가까이 있으면 '집') ----------
@@ -1639,12 +1678,12 @@ public class MainActivity extends Activity {
             Button addTime = new Button(MainActivity.this);
             addTime.setText("시각 추가");
             addTime.setTextSize(13);
-            addTime.setOnClickListener(v -> new TimePickerDialog(MainActivity.this, (tp, h, m) -> {
+            addTime.setOnClickListener(v -> showTagged(new TimePickerDialog(MainActivity.this, (tp, h, m) -> {
                 String cur = times.getText().toString().trim();
                 String add = String.format(Locale.US, "%02d:%02d", h, m);
                 String n = normalizeTimes(cur.isEmpty() ? add : cur + ", " + add);
                 times.setText(n == null ? cur + ", " + add : n);
-            }, 8, 0, true).show());
+            }, 8, 0, true), "1240"));
             timesRow.addView(times, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             timesRow.addView(addTime);
             f.addView(timesRow);
@@ -1842,6 +1881,7 @@ public class MainActivity extends Activity {
             });
         });
         d.show();
+        ScreenId.tag(d, sms ? "1230" : "1140");
     }
 
     // 전화번호 목록 확인 (숫자 3자리 이상씩)
@@ -1967,11 +2007,11 @@ public class MainActivity extends Activity {
 
     // 아직 만들지 않은 기능 안내
     private void showComingSoon(String name) {
-        new AlertDialog.Builder(this)
+        ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle(name)
                 .setMessage("지금 추가 개발 중입니다.")
                 .setPositiveButton("확인", null)
-                .show();
+                .show(), "가족 전체 조회".equals(name) ? "1260" : "1270");
     }
 
     private void updateRemoteInfo() {
@@ -2164,6 +2204,7 @@ public class MainActivity extends Activity {
             d.dismiss();
         }));
         d.show();
+        ScreenId.tag(d, "1100");
     }
 
     // 홈 화면에 SOS 아이콘 추가 (Android 8 이상, 런처가 지원하는 경우)
@@ -2256,12 +2297,12 @@ public class MainActivity extends Activity {
         lateTime.setTextColor(0xFFC62828);
         lateTime.setOnClickListener(v -> {
             int[] hm = HomeService.parseTime(ev.getString("lateTime", "22:00"));
-            new TimePickerDialog(this, (tp, h, m) -> {
+            showTagged(new TimePickerDialog(this, (tp, h, m) -> {
                 String t = String.format(Locale.US, "%02d:%02d", h, m);
                 ev.edit().putString("lateTime", t).apply();
                 lateTime.setText(t);
                 HomeService.refresh(this); // 새 시각으로 다시 예약
-            }, hm == null ? 22 : hm[0], hm == null ? 0 : hm[1], true).show();
+            }, hm == null ? 22 : hm[0], hm == null ? 0 : hm[1], true), "1120");
         });
         lateRow.addView(lateTime);
         TextView lateTail = new TextView(this);
@@ -2446,7 +2487,7 @@ public class MainActivity extends Activity {
         name.setHint("예: 할머니, 민준이, 아빠");
         name.setText(TelegramSender.senderName(this));
         f.addView(name);
-        new AlertDialog.Builder(this)
+        ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("보내는 사람 별명")
                 .setView(f)
                 .setPositiveButton("저장", (d, w) -> {
@@ -2455,7 +2496,7 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "저장했습니다.", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("취소", null)
-                .show();
+                .show(), "1130");
     }
 
     // ---------- 텔레그램 자동 송신 ----------
@@ -2639,6 +2680,7 @@ public class MainActivity extends Activity {
             });
         });
         d.show();
+        ScreenId.tag(d, "1180");
     }
 
     // 클립보드에서 봇 토큰(숫자:영문 35자 내외)만 찾아 채우기
@@ -2674,8 +2716,8 @@ public class MainActivity extends Activity {
             final String bot = TelegramSender.botUsername(tk, err);
             runOnUiThread(() -> {
                 if (bot == null) {
-                    new AlertDialog.Builder(this).setTitle("봇 링크 공유 실패")
-                            .setMessage(err[0]).setPositiveButton("확인", null).show();
+                    ScreenId.tag(new AlertDialog.Builder(this).setTitle("봇 링크 공유 실패")
+                            .setMessage(err[0]).setPositiveButton("확인", null).show(), "1190");
                     return;
                 }
                 String text = "📍 위치 알림 받기\n\n"
@@ -2705,19 +2747,19 @@ public class MainActivity extends Activity {
             final List<String[]> found = TelegramSender.findChats(tk, err);
             runOnUiThread(() -> {
                 if (err[0] != null) {
-                    new AlertDialog.Builder(this).setTitle("받는 사람 찾기 실패")
-                            .setMessage(err[0]).setPositiveButton("확인", null).show();
+                    ScreenId.tag(new AlertDialog.Builder(this).setTitle("받는 사람 찾기 실패")
+                            .setMessage(err[0]).setPositiveButton("확인", null).show(), "1200");
                     return;
                 }
                 if (found.isEmpty()) {
-                    new AlertDialog.Builder(this).setTitle("받는 사람 찾기")
+                    ScreenId.tag(new AlertDialog.Builder(this).setTitle("받는 사람 찾기")
                             .setMessage("찾은 사람이 없습니다.\n\n"
                                     + "1. 받는 사람이 텔레그램에서 봇을 찾아 [시작](/start)을 누르게 하세요.\n"
                                     + "   (단톡방: 봇을 초대한 뒤 단톡방에서 /start 입력)\n"
                                     + "2. 그다음 다시 [받는 사람 찾기]를 누르세요.\n\n"
                                     + "※ 최근 24시간 안에 봇에게 보낸 메시지만 보입니다. "
                                     + "PC 프로그램이 같은 봇으로 메시지를 받고 있으면 안 보일 수 있습니다.")
-                            .setPositiveButton("확인", null).show();
+                            .setPositiveButton("확인", null).show(), "1210");
                     return;
                 }
                 // 이미 등록된 ID 는 체크된 상태로 표시
@@ -2733,7 +2775,7 @@ public class MainActivity extends Activity {
                     labels[i] = found.get(i)[1] + "\nID: " + found.get(i)[0];
                     checked[i] = cur.contains(found.get(i)[0]);
                 }
-                new AlertDialog.Builder(this)
+                ScreenId.tag(new AlertDialog.Builder(this)
                         .setTitle("받는 사람 선택")
                         .setMultiChoiceItems(labels, checked, (dlg, which, isChecked) -> checked[which] = isChecked)
                         .setPositiveButton("추가", (dlg, w) -> {
@@ -2754,7 +2796,7 @@ public class MainActivity extends Activity {
                             chatsEdit.setText(android.text.TextUtils.join(", ", ids));
                         })
                         .setNegativeButton("취소", null)
-                        .show();
+                        .show(), "1220");
             });
         }).start();
     }
@@ -2901,6 +2943,7 @@ public class MainActivity extends Activity {
             });
         });
         d.show();
+        ScreenId.tag(d, "1170");
     }
 
     // 지금 화면의 위치(없으면 마지막으로 알려진 위치)로 카톡 공유 화면 열기
@@ -3018,9 +3061,7 @@ public class MainActivity extends Activity {
         smtpBox.addView(showPass);
         TextView help = new TextView(this);
         help.setAutoLinkMask(android.text.util.Linkify.WEB_URLS); // 링크를 눌러 브라우저로 열기 (setText 전에 설정)
-        help.setText("앱 비밀번호 만들기 (구글 2단계 인증이 켜져 있어야 함):\n"
-                + "https://myaccount.google.com/apppasswords\n"
-                + "(네이버: 내정보 → 보안설정 → 2단계 인증 → 애플리케이션 비밀번호, 메일 환경설정에서 SMTP 사용)");
+        help.setText(EmailSender.HELP);
         help.setTextColor(Color.GRAY);
         help.setTextSize(12);
         smtpBox.addView(help);
@@ -3079,12 +3120,12 @@ public class MainActivity extends Activity {
         Button addTime = new Button(this);
         addTime.setText("시각 추가");
         addTime.setTextSize(13);
-        addTime.setOnClickListener(v -> new TimePickerDialog(this, (tp, h, m) -> {
+        addTime.setOnClickListener(v -> showTagged(new TimePickerDialog(this, (tp, h, m) -> {
             String cur = times.getText().toString().trim();
             String add = String.format(Locale.US, "%02d:%02d", h, m);
             String n = normalizeTimes(cur.isEmpty() ? add : cur + ", " + add);
             times.setText(n == null ? cur + ", " + add : n);
-        }, 8, 0, true).show());
+        }, 8, 0, true), "1250"));
         timesRow.addView(times, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         timesRow.addView(addTime);
         f.addView(timesRow);
@@ -3160,6 +3201,11 @@ public class MainActivity extends Activity {
                 }
                 if (!fr.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(fr).matches()) {
                     Toast.makeText(this, "보내는 이메일 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (smtp && !fr.isEmpty() && EmailSender.smtpHost(fr) == null) {
+                    Toast.makeText(this, "보내는 계정은 " + EmailSender.SUPPORTED + " 만 사용할 수 있습니다.",
+                            Toast.LENGTH_LONG).show();
                     return;
                 }
                 if (start && smtp && (fr.isEmpty() || pw.isEmpty())) {
@@ -3255,6 +3301,7 @@ public class MainActivity extends Activity {
             });
         });
         d.show();
+        ScreenId.tag(d, HomeService.PREF_KMAIL.equals(pref) ? "1160" : "1150");
     }
 
     // 카카오메일 웹(mail.kakao.com) 열기 -> 안 되면 카카오톡 앱 열기

@@ -171,8 +171,8 @@
 4. 보내는 시각: **지정 시각(매일, 여러 개)** 또는 **일정 간격**
 5. [지금 테스트]로 확인 후 [저장]
 
-- 보내는 주소에 따라 서버 자동 선택: Gmail(`smtp.gmail.com`), 네이버(`smtp.naver.com`), 다음(`smtp.daum.net`)
-- 네이버·다음은 메일 환경설정에서 SMTP 사용을 켜야 합니다.
+- 보내는 계정은 **구글·네이버·카카오만** 지원: Gmail(`smtp.gmail.com`), 네이버(`smtp.naver.com`), 카카오(`smtp.kakao.com`), 모두 SSL 465
+- 네이버·카카오는 메일 환경설정에서 SMTP 사용을 켜야 합니다.
 - 받는 사람의 **카카오메일(@kakao.com)** 로 보내면 카카오톡에서 바로 받아볼 수 있습니다 (카톡 자동 전송 대안).
   카톡 ID와 메일 주소는 다를 수 있으니 [카톡 메일 열기]로 실제 주소를 확인하세요.
 - 서버 인증서를 확인한 뒤에만 로그인하므로 가짜 서버로 비밀번호가 새지 않습니다.
@@ -276,9 +276,21 @@ app/src/main/
 - 앱 버전: `app/build.gradle` 의 `versionCode`(새 APK마다 +1), `versionName`(`주.부.수`).
   앱 화면 (5) 보호자 모드 탭 맨 아래에 "집에왔어요 버전 1.1.0 (2)" 로 표시
 - 사용 설명서(일반 사용자용): [Guide.md](Guide.md)
+- 발신 이메일 등록 안내: [GuideEmail.md](GuideEmail.md)
 - 변경 기록: [CHANGELOG.md](CHANGELOG.md)
 - 소스 기록: 이 폴더가 Git 저장소. 수정 후 `git add -A` → `git commit -m "내용"`
 - GitHub: `_github_push.bat` 실행 → <https://github.com/GarpsuKim/gsTop/tree/main/WifiScanAndroid>
 - GitHub(공개)에 올리지 않는 것 (`.gitignore`): 텔레그램 봇 토큰(`telegram_config.bat`), 빌드 결과,
   **실제 인물 사진 아이콘**(`icon.jpg`, `res/mipmap-*/ic_launcher.png`).
   GitHub에서 받아 빌드할 때는 아이콘 PNG를 직접 넣어야 합니다 (`res/mipmap-mdpi` 48px ~ `mipmap-xxxhdpi` 192px).
+
+## 사용자 등록 (화면 1075, 1010 [사용자 등록])
+
+| 구역 | 내용 |
+|---|---|
+| 기본 정보 | 이름(별명, 모든 메시지에 표시) / 내 번호 / 기기 이름 |
+| 발신 이메일 | 주소 + 앱 비밀번호, **인증번호 메일**(6자리, 10분)로 검증. 일반 이메일·카톡 이메일의 보내는 계정으로 사용 |
+| 텔레그램 | 봇 토큰 [붙여넣기]·[확인], 받는 사람 수, [설정 도우미] |
+| Tailscale / PC 서버 | 이 폰의 Tailscale IP(100.64.0.0/10) 자동 찾기, PC 서버 IP·포트·접속 키, [연결 테스트] (연동 기능은 추후) |
+| 긴급 의료 정보 | 혈액형·지병·복용 약·메모 (+본인 연락처) → SOS 메시지에 첨부 |
+| 설정 백업·복원 | 모든 설정을 JSON 파일로 내보내기/불러오기 (비밀번호 포함 — 파일 관리 주의) |

@@ -37,8 +37,58 @@ final class TelegramSender {
         return min + "분";
     }
 
-    // 위치 -> 메시지 (주소 조회 포함)
+    /*
+     * 메시지 첫 줄: 지금 상태
+     *   🏠 HomeBack · 공유기 MyHome (AA:BB:CC:DD:EE:01)
+     *   🏠 HomeBack · 블루투스 GARPSU-PC (11:22:33:44:55:66)
+     *   🚶 NotHome
+     *   ❔ 상태 확인 불가 (이유)
+     */
+    static String statusLine(Context c) {
+        android.content.SharedPreferences h = c.getSharedPreferences("home", Context.MODE_PRIVATE);
+        java.util.Set<String> routers = h.getStringSet("routers", new java.util.HashSet<String>());
+        String bssid = null;
+        try {
+            bssid = HomeService.connectedBssid(c);
+        } catch (Exception ignored) {
+        }
+        if (bssid != null) {
+            for (String s : routers) {
+                String[] t = s.split("\\|", 2);
+                if (t[0].equals(bssid)) {
+                    String ssid = t.length > 1 && !t[1].isEmpty() ? t[1] : "<숨김>";
+                    return "🏠 HomeBack · 공유기 " + ssid + " (" + bssid.toUpperCase(Locale.US) + ")";
+                }
+            }
+        }
+        if (BtHome.seenRecently(c)) {
+            String name = h.getString("btSeenName", "");
+            String mac = "";
+            for (String s : BtHome.registered(c)) {
+                String[] t = s.split("\\|", 2);
+                if (t.length > 1 && t[1].equals(name)) {
+                    mac = t[0];
+                }
+            }
+            return "🏠 HomeBack · 블루투스 " + name + (mac.isEmpty() ? "" : " (" + mac + ")");
+        }
+        boolean btReg = !BtHome.registered(c).isEmpty();
+        if (routers.isEmpty() && !btReg) {
+            return "❔ 상태 확인 불가 (홈 공유기 미등록)";
+        }
+        if (!btReg && !HomeService.locationOn(c)) {
+            return "❔ 상태 확인 불가 (위치 서비스 꺼짐)";
+        }
+        return "🚶 NotHome";
+    }
+
+    // 위치 -> 메시지 (주소 조회 포함). 첫 줄 = 지금 상태
     static String message(Context c, Location l) {
+        return message(c, l, true);
+    }
+
+    // withStatus=false: 상태 줄 없이 (상태 줄을 맨 앞에 따로 붙이는 알림용)
+    static String message(Context c, Location l, boolean withStatus) {
         String addr = null, zip = null;
         if (l != null) {
             try {
@@ -53,7 +103,7 @@ final class TelegramSender {
             } catch (Exception ignored) {
             }
         }
-        return format(c, l, addr, zip);
+        return format(c, l, addr, zip, withStatus);
     }
 
     /*
@@ -63,8 +113,13 @@ final class TelegramSender {
      * https://maps.google.com/?q=37.566500,126.978000
      */
     static String shortMessage(Context c, Location l) {
+        return shortMessage(c, l, true);
+    }
+
+    static String shortMessage(Context c, Location l, boolean withStatus) {
         String who = senderName(c);
-        StringBuilder sb = new StringBuilder("📍 ");
+        StringBuilder sb = new StringBuilder(withStatus ? statusLine(c) + "\n" : "");
+        sb.append("📍 ");
         sb.append(who.isEmpty() ? "" : who + " ").append("위치 ")
                 .append(new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date()));
         if (l == null) {
@@ -108,7 +163,11 @@ final class TelegramSender {
      * ...
      */
     static String format(Context c, Location l, String addr, String zip) {
-        StringBuilder sb = new StringBuilder();
+        return format(c, l, addr, zip, true);
+    }
+
+    static String format(Context c, Location l, String addr, String zip, boolean withStatus) {
+        StringBuilder sb = new StringBuilder(withStatus ? statusLine(c) + "\n\n" : "");
         String who = senderName(c);
         sb.append("📍 ").append(who.isEmpty() ? "" : who + "의 ").append("현재 위치 (")
                 .append(new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date())).append(")");

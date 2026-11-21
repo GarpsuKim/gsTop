@@ -72,6 +72,8 @@ public class HomeService extends Service {
     private static final String ACTION_EVENT_TEST = "com.garpsu.wifiscan.EVENT_TEST"; // 테스트 보내기
     private static final String ACTION_LATE = "com.garpsu.wifiscan.LATE_CHECK";       // 미귀가 확인 시각
     private static final String ACTION_SOS = "com.garpsu.wifiscan.SOS";               // 긴급 SOS 위치 전송
+    private static final String ACTION_START_MSG = "com.garpsu.wifiscan.START_MSG";   // 앱 시작 위치 알림
+    private static final String ACTION_STOP_MSG = "com.garpsu.wifiscan.STOP_MSG";     // 앱 종료 위치 알림
     private static final String CH_STATUS = "status";   // 상시 알림 (조용히)
     private static final String CH_ALERT = "alert";     // 귀가 알림 (소리/팝업)
     private static final String CH_KAKAO = "kakao";     // 카톡 보내기 알림 (소리/팝업)
@@ -149,6 +151,26 @@ public class HomeService extends Service {
     }
 
     // 긴급 SOS: 지금 위치를 설정된 자동 채널 전부로 보냄 (다른 기능이 모두 꺼져 있어도 동작)
+    // 앱 시작 알림: 지금 위치를 (3) 알림 설정의 '보낼 곳'으로 보냄 (다른 기능이 모두 꺼져 있어도 동작)
+    static void startMessage(Context c) {
+        Intent i = new Intent(c, HomeService.class).setAction(ACTION_START_MSG);
+        if (Build.VERSION.SDK_INT >= 26) {
+            c.startForegroundService(i);
+        } else {
+            c.startService(i);
+        }
+    }
+
+    // 앱 종료 알림: 앱 화면을 닫기 직전, 지금 위치를 '보낼 곳'으로 보냄
+    static void stopMessage(Context c) {
+        Intent i = new Intent(c, HomeService.class).setAction(ACTION_STOP_MSG);
+        if (Build.VERSION.SDK_INT >= 26) {
+            c.startForegroundService(i);
+        } else {
+            c.startService(i);
+        }
+    }
+
     static void sos(Context c) {
         Intent i = new Intent(c, HomeService.class).setAction(ACTION_SOS);
         if (Build.VERSION.SDK_INT >= 26) {
@@ -381,8 +403,9 @@ public class HomeService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String a = intent == null ? null : intent.getAction();
-        if (cm != null && ACTION_SOS.equals(a)) {
-            sendEvent(KIND_SOS, null, false); // 다른 기능이 모두 꺼져 있어도 SOS 는 보냄 (다 보내면 종료)
+        if (cm != null && (ACTION_SOS.equals(a) || ACTION_START_MSG.equals(a) || ACTION_STOP_MSG.equals(a))) {
+            // 다른 기능이 모두 꺼져 있어도 SOS·앱 시작 알림은 보냄 (다 보내면 종료)
+            sendEvent(ACTION_SOS.equals(a) ? KIND_SOS : ACTION_START_MSG.equals(a) ? KIND_START : KIND_STOP, null, false);
             if (!anyOn(this)) {
                 return START_NOT_STICKY;
             }
@@ -583,8 +606,8 @@ public class HomeService extends Service {
 
     // ---------- 1-2) 귀가·외출 순간 알림: 고른 곳으로 바로 보내기 ----------
 
-    static final int KIND_HOME = 0, KIND_AWAY = 1, KIND_LATE = 2, KIND_SOS = 3;
-    private static final String[] KIND_NAME = {"귀가", "외출", "미귀가", "SOS"};
+    static final int KIND_HOME = 0, KIND_AWAY = 1, KIND_LATE = 2, KIND_SOS = 3, KIND_START = 4, KIND_STOP = 5;
+    private static final String[] KIND_NAME = {"귀가", "외출", "미귀가", "SOS", "앱 시작", "앱 종료"};
 
     // 예전 호출 형태 유지: arrived true 귀가 / false 외출
     private void sendEvent(boolean arrived, String ssid, boolean test) {
@@ -614,11 +637,18 @@ public class HomeService extends Service {
                     : kind == KIND_AWAY ? "🚶 " + w + "외출했습니다 (NotHome)"
                     : kind == KIND_LATE ? "⚠️ " + w + "아직 귀가하지 않았습니다 ("
                     + ev.getString("lateTime", "22:00") + " 기준)"
+                    : kind == KIND_START ? "📱 " + w + "앱을 시작했습니다"
+                    : kind == KIND_STOP ? "📴 " + w + "[집에 왔어요] 앱이 종료됩니다"
+                    // 백그라운드 기능이 하나라도 켜져 있으면 서비스는 계속 동작 -> 오해하지 않게 안내
+                    + (anyOn(this) ? "\n(백그라운드 감지는 계속됩니다)" : "")
                     : "🆘 긴급 SOS — " + w + "도움을 요청했습니다");
-            final String full = head + "  " + time
-                    + (kind == KIND_HOME && ssid != null && !ssid.isEmpty() ? "\n■ 공유기: " + ssid : "")
-                    + "\n\n" + TelegramSender.message(this, loc);
-            final String shortMsg = head + " " + time + "\n" + TelegramSender.shortMessage(this, loc);
+            // 첫 줄 = 지금 상태 (HomeBack · 공유기 이름 (MAC) / NotHome), 그다음 알림 제목
+            String status = TelegramSender.statusLine(this);
+            final String full = status + "\n" + head + "  " + time
+                    + "\n\n" + TelegramSender.message(this, loc, false)
+                    + (kind == KIND_SOS ? UserActivity.medicalText(this) : ""); // SOS: 긴급 의료 정보 첨부
+            final String shortMsg = status + "\n" + head + " " + time + "\n"
+                    + TelegramSender.shortMessage(this, loc, false);
             String subject = (test ? "[테스트] " : "") + "[" + KIND_NAME[kind] + "] "
                     + (who.isEmpty() ? "" : who + " · ") + time;
             final List<String> res = new ArrayList<>();
@@ -783,7 +813,8 @@ public class HomeService extends Service {
         }
         jobBusy.add(busy);
         fetchLocation(loc -> new Thread(() -> {
-            String err = TelegramSender.send(token, cid, "📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc));
+            String err = TelegramSender.send(token, cid, TelegramSender.statusLine(this)
+                    + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false));
             handler.post(() -> {
                 getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).edit()
                         .putLong("remoteTime", System.currentTimeMillis())
