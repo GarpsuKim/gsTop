@@ -69,6 +69,7 @@ public class UserActivity extends Activity {
 
     private SharedPreferences up;
     private EditText name, phone, device, mail, pass, code, token, pcIp, pcPort, pcKey, blood, disease, meds, memo;
+    private static final String mailDomain = "gmail.com"; // 발신 이메일은 구글(Gmail)만 (@ 뒤 고정)
     private TextView mailStatus, tgStatus, tsStatus, pcStatus;
     private CheckBox medSos;
     private String pendingCode;   // 보낸 인증번호
@@ -91,23 +92,32 @@ public class UserActivity extends Activity {
         title.setTextSize(22);
         title.setTypeface(null, Typeface.BOLD);
         root.addView(title);
-        root.addView(note("여기서 한 번 등록하면 별명·이메일·텔레그램 설정에 그대로 쓰입니다. 화면을 닫으면 자동 저장됩니다."));
+        // (화면 1075: 설명문 없이 입력 칸만)
 
         // ---------- 1) 기본 정보 ----------
         section(root, "■ 기본 정보");
-        name = edit(root, "이름(별명) — 메시지에 표시. 예: 할머니", TelegramSender.senderName(this), InputType.TYPE_CLASS_TEXT);
-        phone = edit(root, "내 휴대폰 번호. 예: 010-1234-5678", up.getString("phone", ""), InputType.TYPE_CLASS_PHONE);
-        device = edit(root, "기기 이름 — 여러 폰을 구분. 예: 할머니 폰",
+        name = edit(root, "이름(별명)", TelegramSender.senderName(this), InputType.TYPE_CLASS_TEXT);
+        phone = edit(root, "내 휴대폰 번호", up.getString("phone", ""), InputType.TYPE_CLASS_PHONE);
+        device = edit(root, "기기 이름",
                 up.getString("device", Build.MANUFACTURER + " " + Build.MODEL), InputType.TYPE_CLASS_TEXT);
 
-        // ---------- 2) 발신 이메일 ----------
-        section(root, "■ 발신 이메일 (앱 비밀번호)");
-        root.addView(note("자동 발송 메일을 보낼 내 계정입니다. 인증번호 메일을 받아 입력하면 검증 완료.\n"
-                + EmailSender.HELP));
-        mail = edit(root, "보내는 이메일. 예: mygmail@gmail.com",
-                up.getString("mail", em.getString("from", "")),
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        pass = edit(root, "앱 비밀번호 16자리", up.getString("mailPass", em.getString("pass", "")),
+        // ---------- 2) 발신 이메일: 구글(Gmail)만, @gmail.com 고정 ----------
+        section(root, "■ 발신 이메일 (Gmail)");
+        root.addView(note("이메일 등록을 위한 자세한 설명 : " + EmailSender.GUIDE_URL)); // 누르면 브라우저로 열림
+        String saved = up.getString("mail", em.getString("from", ""));
+        int at = saved.indexOf('@');
+        LinearLayout mr = row(root);
+        mail = new EditText(this); // @ 앞 아이디만 입력
+        mail.setSingleLine(true);
+        mail.setHint("아이디");
+        mail.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        mail.setText(at >= 0 ? saved.substring(0, at) : saved);
+        mr.addView(mail, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final TextView domainText = new TextView(this);
+        domainText.setText("@" + mailDomain);
+        domainText.setTextSize(16);
+        mr.addView(domainText);
+        pass = edit(root, "앱 비밀번호", up.getString("mailPass", em.getString("pass", "")),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         LinearLayout r1 = row(root);
         button(r1, "인증 메일 보내기", v -> sendCode());
@@ -136,17 +146,15 @@ public class UserActivity extends Activity {
 
         // ---------- 4) Tailscale VPN / PC 서버 ----------
         section(root, "■ Tailscale VPN / PC 서버");
-        root.addView(note("PC 서버(gsHomeManager)와 연동할 때 씁니다. (연동 기능은 추후)\n"
-                + "Tailscale 앱이 켜져 있으면 이 폰의 Tailscale IP(100.x.x.x)를 자동으로 찾습니다."));
         tsStatus = note("");
         root.addView(tsStatus);
         LinearLayout r3 = row(root);
         button(r3, "다시 찾기", v -> showTsStatus());
         button(r3, "Tailscale 앱 열기", v -> openTailscale());
         showTsStatus();
-        pcIp = edit(root, "PC 서버 Tailscale IP. 예: 100.64.1.2", up.getString("pcIp", ""), InputType.TYPE_CLASS_TEXT);
-        pcPort = edit(root, "PC 서버 포트. 예: 8765", up.getString("pcPort", ""), InputType.TYPE_CLASS_NUMBER);
-        pcKey = edit(root, "접속 키 (PC 서버에도 같은 값을 넣음)", up.getString("pcKey", ""), InputType.TYPE_CLASS_TEXT);
+        pcIp = edit(root, "PC 서버 IP", up.getString("pcIp", ""), InputType.TYPE_CLASS_TEXT);
+        pcPort = edit(root, "PC 서버 포트", up.getString("pcPort", ""), InputType.TYPE_CLASS_NUMBER);
+        pcKey = edit(root, "접속 키", up.getString("pcKey", ""), InputType.TYPE_CLASS_TEXT);
         LinearLayout r4 = row(root);
         button(r4, "접속 키 만들기", v -> pcKey.setText(randomKey(24)));
         button(r4, "접속 키 복사", v -> copy(pcKey.getText().toString()));
@@ -155,12 +163,11 @@ public class UserActivity extends Activity {
         root.addView(pcStatus);
 
         // ---------- 5) 긴급 의료 정보 ----------
-        section(root, "■ 긴급 의료 정보 (선택)");
-        root.addView(note("SOS 때 보호자에게 함께 보냅니다. 구조대·보호자가 빨리 대처하는 데 도움이 됩니다."));
-        blood = edit(root, "혈액형. 예: A형 Rh+", up.getString("blood", ""), InputType.TYPE_CLASS_TEXT);
-        disease = edit(root, "지병. 예: 고혈압, 당뇨, 치매 초기", up.getString("disease", ""), InputType.TYPE_CLASS_TEXT);
-        meds = edit(root, "복용 약. 예: 혈압약(아침)", up.getString("meds", ""), InputType.TYPE_CLASS_TEXT);
-        memo = edit(root, "메모. 예: 보청기 사용, 알레르기", up.getString("memo", ""), InputType.TYPE_CLASS_TEXT);
+        section(root, "■ 긴급 의료 정보");
+        blood = edit(root, "혈액형", up.getString("blood", ""), InputType.TYPE_CLASS_TEXT);
+        disease = edit(root, "지병", up.getString("disease", ""), InputType.TYPE_CLASS_TEXT);
+        meds = edit(root, "복용 약", up.getString("meds", ""), InputType.TYPE_CLASS_TEXT);
+        memo = edit(root, "메모", up.getString("memo", ""), InputType.TYPE_CLASS_TEXT);
         medSos = new CheckBox(this);
         medSos.setText("SOS 메시지에 의료 정보 첨부");
         medSos.setChecked(up.getBoolean("medSos", true));
@@ -168,10 +175,6 @@ public class UserActivity extends Activity {
 
         // ---------- 6) 설정 백업·복원 ----------
         section(root, "■ 설정 백업·복원");
-        TextView warn = note("모든 설정(홈 공유기, 받는 사람, 봇 토큰, 이메일 앱 비밀번호 포함)을 파일로 저장합니다.\n"
-                + "※ 비밀번호가 들어 있으니 파일을 다른 사람에게 보내지 마세요.");
-        warn.setTextColor(0xFFC62828);
-        root.addView(warn);
         LinearLayout r5 = row(root);
         button(r5, "설정 내보내기", v -> exportSettings());
         button(r5, "설정 불러오기", v -> importSettings());
@@ -214,7 +217,7 @@ public class UserActivity extends Activity {
 
     private void save() {
         TelegramSender.setSenderName(this, name.getText().toString());
-        String m = mail.getText().toString().trim();
+        String m = fullMail();
         String p = pass.getText().toString().replace(" ", "");
         SharedPreferences.Editor ed = up.edit()
                 .putString("phone", phone.getText().toString().trim())
@@ -243,11 +246,21 @@ public class UserActivity extends Activity {
         }
     }
 
+    // 발신 이메일 전체 주소 = 아이디 + "@" + 고른 메일(카카오·네이버·구글). 아이디가 비면 ""
+    private String fullMail() {
+        String id = mail.getText().toString().trim();
+        int at = id.indexOf('@');
+        if (at >= 0) {
+            id = id.substring(0, at); // 실수로 전체 주소를 넣어도 @ 앞만 사용
+        }
+        return id.isEmpty() ? "" : id + "@" + mailDomain;
+    }
+
     // ---------- 발신 이메일 검증 ----------
 
     private void showMailStatus() {
         boolean ok = up.getBoolean("mailVerified", false)
-                && mail.getText().toString().trim().equals(up.getString("mail", ""));
+                && fullMail().equals(up.getString("mail", ""));
         long t = up.getLong("mailVerifiedAt", 0);
         mailStatus.setText(ok ? "✓ 검증됨 (" + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t)) + ")"
                 : "아직 검증하지 않았습니다.");
@@ -255,7 +268,7 @@ public class UserActivity extends Activity {
     }
 
     private void sendCode() {
-        final String m = mail.getText().toString().trim();
+        final String m = fullMail();
         final String p = pass.getText().toString().replace(" ", "");
         if (!Patterns.EMAIL_ADDRESS.matcher(m).matches() || p.isEmpty()) {
             Toast.makeText(this, "보내는 이메일과 앱 비밀번호를 입력하세요.", Toast.LENGTH_SHORT).show();

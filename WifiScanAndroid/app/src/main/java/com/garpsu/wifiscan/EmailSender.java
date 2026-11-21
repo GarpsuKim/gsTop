@@ -21,49 +21,27 @@ import javax.net.ssl.SSLSocketFactory;
 
 /**
  * 앱 비밀번호로 메일 서버(SMTP, SSL 465)에 직접 접속해 메일을 보낸다. (네트워크 사용 -> 작업 스레드에서 호출)
- * 보내는 계정은 구글(Gmail)·네이버·카카오 3가지만 지원 (모두 앱 비밀번호 + SMTP 사용 설정 필요).
+ * 보내는 계정은 구글(Gmail)만 지원 (2단계 인증 + 앱 비밀번호 필요).
  */
 final class EmailSender {
 
-    static final String SUPPORTED = "구글(@gmail.com), 네이버(@naver.com), 카카오(@kakao.com)";
+    static final String SUPPORTED = "구글(@gmail.com)";
 
-    // 앱 비밀번호 만드는 방법 (1075·1150·1160 화면 안내 공용)
     // 자세한 안내문 (GitHub 의 GuideEmail.md)
     static final String GUIDE_URL = "https://github.com/GarpsuKim/gsTop/blob/main/WifiScanAndroid/GuideEmail.md";
 
-    // 링크는 눌러서 바로 열림 (화면에서 Linkify). 네이버·카카오는 메뉴로 바로 가는 공식 주소가 없어 계정 관리 첫 화면
+    // 앱 비밀번호 안내 (1150·1160 화면 공용). 링크는 눌러서 바로 열림 (화면에서 Linkify)
     static final String HELP = "보내는 계정: " + SUPPORTED + " 만 가능\n"
-            + "이메일 등록을 위한 자세한 안내문은 여기를 참고하세요 : " + GUIDE_URL + "\n\n"
-            + "■ 구글 (2단계 인증을 먼저 켜야 함)\n"
-            + "  앱 비밀번호: https://myaccount.google.com/apppasswords\n\n"
-            + "■ 네이버\n"
-            + "  앱 비밀번호: https://nid.naver.com\n"
-            + "   → 내정보 → 보안설정 → 2단계 인증 → 애플리케이션 비밀번호 관리\n"
-            + "  SMTP 켜기: https://mail.naver.com\n"
-            + "   → 환경설정 → POP3/IMAP 설정 → POP3/SMTP 사용\n\n"
-            + "■ 카카오\n"
-            + "  앱 비밀번호: https://accounts.kakao.com\n"
-            + "   → 계정 보안 → 2단계 인증 → 앱 비밀번호\n"
-            + "  SMTP 켜기: https://mail.kakao.com\n"
-            + "   → 환경설정 → IMAP/SMTP 사용";
+            + "이메일 등록을 위한 자세한 설명 : " + GUIDE_URL + "\n"
+            + "앱 비밀번호 (2단계 인증을 먼저 켜야 함): https://myaccount.google.com/apppasswords";
 
     private EmailSender() {
     }
 
-    // 보내는 주소의 도메인으로 SMTP 서버 결정. 지원하지 않는 메일이면 null
+    // 보내는 주소의 도메인으로 SMTP 서버 결정. 구글(Gmail)이 아니면 null
     static String smtpHost(String from) {
         String d = from.substring(from.indexOf('@') + 1).trim().toLowerCase(Locale.US);
-        switch (d) {
-            case "gmail.com":
-            case "googlemail.com":
-                return "smtp.gmail.com";
-            case "naver.com":
-                return "smtp.naver.com";
-            case "kakao.com":
-                return "smtp.kakao.com";
-            default:
-                return null;
-        }
+        return d.equals("gmail.com") || d.equals("googlemail.com") ? "smtp.gmail.com" : null;
     }
 
     // 성공하면 null, 실패하면 오류 내용
