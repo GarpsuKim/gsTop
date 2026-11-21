@@ -275,6 +275,7 @@ app/src/main/
 
 - 앱 버전: `app/build.gradle` 의 `versionCode`(새 APK마다 +1), `versionName`(`주.부.수`).
   앱 화면 (5) 보호자 모드 탭 맨 아래에 "집에왔어요 버전 1.1.0 (2)" 로 표시
+- 사용 설명서(일반 사용자용): [Guide.md](Guide.md)
 - 변경 기록: [CHANGELOG.md](CHANGELOG.md)
 - 소스 기록: 이 폴더가 Git 저장소. 수정 후 `git add -A` → `git commit -m "내용"`
 - GitHub: `_github_push.bat` 실행 → <https://github.com/GarpsuKim/gsTop/tree/main/WifiScanAndroid>
