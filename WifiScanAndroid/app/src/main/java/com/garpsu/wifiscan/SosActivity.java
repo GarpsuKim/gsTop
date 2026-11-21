@@ -65,7 +65,7 @@ public class SosActivity extends Activity {
         root.addView(t);
 
         TextView m = new TextView(this);
-        String first = firstPhone(this);
+        String first = firstLabel(this); // "엄마 010-1234-5678"
         m.setText(first.isEmpty()
                 ? "보호자에게 위치를 보냅니다.\n(보호자 전화번호가 등록되지 않아 전화는 걸지 않습니다)"
                 : "보호자(" + first + ")에게 전화하고\n위치를 보냅니다.");
@@ -112,13 +112,38 @@ public class SosActivity extends Activity {
         return c.getSharedPreferences(PREF_SOS, MODE_PRIVATE).getString("phones", "").trim();
     }
 
-    static String firstPhone(Context c) {
-        for (String p : phones(c).split("[,;]+")) {
-            if (!p.trim().isEmpty()) {
-                return p.trim();
+    /*
+     * 보호자 목록: 저장 형식 "이름 번호, 이름 번호" (이름은 없어도 됨)
+     * 예) "엄마 010-1234-5678, 아빠 010-9876-5432" -> {{"엄마","010-1234-5678"}, {"아빠","010-9876-5432"}}
+     */
+    static java.util.List<String[]> entries(Context c) {
+        java.util.List<String[]> list = new java.util.ArrayList<>();
+        for (String e : phones(c).split("[,;]+")) {
+            e = e.trim();
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\+?[0-9][0-9\\- ]{2,}[0-9]").matcher(e);
+            if (!m.find()) {
+                continue;
             }
+            String num = m.group().trim();
+            String name = (e.substring(0, m.start()) + " " + e.substring(m.end())).trim();
+            list.add(new String[]{name, num});
         }
-        return "";
+        return list;
+    }
+
+    // 표시용: "엄마 010-1234-5678" (이름이 없으면 번호만)
+    static String label(String[] e) {
+        return e[0].isEmpty() ? e[1] : e[0] + " " + e[1];
+    }
+
+    static String firstPhone(Context c) {
+        java.util.List<String[]> l = entries(c);
+        return l.isEmpty() ? "" : l.get(0)[1];
+    }
+
+    static String firstLabel(Context c) {
+        java.util.List<String[]> l = entries(c);
+        return l.isEmpty() ? "" : label(l.get(0));
     }
 
     // SOS 실행: 위치 전송(서비스) + 첫 번째 보호자에게 전화

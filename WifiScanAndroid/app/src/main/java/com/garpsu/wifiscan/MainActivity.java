@@ -83,6 +83,7 @@ public class MainActivity extends Activity {
     private TextView sosInfo;                   // (3) 탭: SOS 설정 요약
     private LinearLayout btBox;                 // (1) 탭: 홈 PC 블루투스
     private EditText contactTarget;             // 고른 번호를 넣을 칸
+    private boolean contactWithName;            // true: "이름 번호"로 넣기 (보호자), false: 번호만 (문자)
     private LinearLayout msgBox; // (4) 위치 보내기 탭: 정해진 시각 위치 보내기 버튼 묶음
     private static final int MODE_NONE = 0, MODE_WIFI = 1, MODE_LOC = 3, MODE_LAN = 4;
 
@@ -237,6 +238,7 @@ public class MainActivity extends Activity {
             if (i == 0) {
                 addButton(actions, "등록", v -> saveRouters());
                 addButton(actions, "등록 확인", v -> showRegistered());
+                addButton(actions, "보호자 등록", v -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
             }
             if (i == 1) { // (2) 현재 위치
                 addButton(actions, "지도", v -> openMap());
@@ -1710,6 +1712,7 @@ public class MainActivity extends Activity {
             pick.setTextSize(13);
             pick.setOnClickListener(v -> {
                 contactTarget = to;
+                contactWithName = false; // 문자 받는 사람 칸에는 번호만
                 try {
                     startActivityForResult(new Intent(Intent.ACTION_PICK,
                             android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), REQ_CONTACT);
@@ -1861,9 +1864,14 @@ public class MainActivity extends Activity {
             return;
         }
         try (android.database.Cursor c = getContentResolver().query(data.getData(),
-                new String[]{android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER}, null, null, null)) {
+                new String[]{android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
+                        android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME}, null, null, null)) {
             if (c != null && c.moveToFirst()) {
                 String num = c.getString(0);
+                String name = c.getString(1);
+                if (contactWithName && name != null && !name.trim().isEmpty()) {
+                    num = name.replaceAll("[,;0-9+]", "").trim() + " " + num; // "엄마 010-1234-5678"
+                }
                 String cur = contactTarget.getText().toString().trim();
                 contactTarget.setText(cur.isEmpty() ? num : cur + ", " + num);
             }
@@ -2029,25 +2037,15 @@ public class MainActivity extends Activity {
             return;
         }
         sosCallBox.removeAllViews();
-        List<String> ps = new ArrayList<>();
-        for (String p : SosActivity.phones(this).split("[,;]+")) {
-            if (!p.trim().isEmpty() && ps.size() < 3) {
-                ps.add(p.trim());
-            }
-        }
+        List<String[]> ps = SosActivity.entries(this); // {이름, 번호}
         if (ps.isEmpty()) {
-            Button b = new Button(this);
-            b.setText("📞 보호자 전화번호 등록");
-            b.setTextSize(13);
-            b.setAllCaps(false);
-            b.setOnClickListener(v -> showSosSettings());
-            sosCallBox.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            return;
+            return; // 등록 버튼은 (1) 홈 공유기 등록 탭의 [보호자 등록]으로 옮김
         }
-        for (int k = 0; k < ps.size(); k++) {
-            final String p = ps.get(k);
+        for (int k = 0; k < ps.size() && k < 3; k++) {
+            final String p = ps.get(k)[1];
+            String name = ps.get(k)[0].isEmpty() ? "보호자" + (k + 1) : ps.get(k)[0];
             Button b = new Button(this);
-            b.setText("📞 보호자" + (k + 1) + "\n" + p);
+            b.setText("📞 " + name + "\n" + p);
             b.setTextSize(12);
             b.setAllCaps(false);
             b.setOnClickListener(v -> callWithPermission(p));
@@ -2100,10 +2098,13 @@ public class MainActivity extends Activity {
         if (sosInfo == null) {
             return;
         }
-        String ps = SosActivity.phones(this);
+        StringBuilder ps = new StringBuilder(); // "엄마 010-…, 아빠 010-…"
+        for (String[] e : SosActivity.entries(this)) {
+            ps.append(ps.length() > 0 ? ", " : "").append(SosActivity.label(e));
+        }
         SharedPreferences ev = getSharedPreferences(HomeService.PREF_EVENT, MODE_PRIVATE);
         long t = ev.getLong("sosTime", 0);
-        sosInfo.setText("보호자: " + (ps.isEmpty() ? "(등록 안 됨)" : ps)
+        sosInfo.setText("보호자: " + (ps.length() == 0 ? "(등록 안 됨)" : ps)
                 + (t == 0 ? "" : "\n마지막 SOS: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
                 + "  " + ev.getString("sosResult", "")));
     }
@@ -2113,21 +2114,23 @@ public class MainActivity extends Activity {
         f.setOrientation(LinearLayout.VERTICAL);
         f.setPadding(60, 20, 60, 10);
         TextView info = new TextView(this);
-        info.setText("SOS 때 첫 번째 번호로 전화를 겁니다.\n(2) 현재 위치 탭에 보호자 바로 걸기 버튼(최대 3명)이 생깁니다.");
+        info.setText("이 기능은 필수 기능은 아닙니다.\n"
+                + "SOS 때 첫 번째 번호로 전화를 겁니다.\n(2) 현재 위치 탭에 보호자 바로 걸기 버튼(최대 3명)이 생깁니다.");
         info.setTextColor(Color.DKGRAY);
         f.addView(info);
-        label(f, "보호자 전화번호 (쉼표로 구분, 첫 번째 = SOS 전화)");
+        label(f, "보호자 이름과 전화번호 (쉼표로 구분, 첫 번째 = SOS 전화)");
         final EditText phones = new EditText(this);
         phones.setSingleLine(true);
-        phones.setInputType(InputType.TYPE_CLASS_PHONE);
-        phones.setHint("예: 010-1234-5678, 010-9876-5432");
+        phones.setInputType(InputType.TYPE_CLASS_TEXT); // 이름(한글)도 입력하므로 일반 글자
+        phones.setHint("예: 엄마 010-1234-5678, 아빠 010-9876-5432");
         phones.setText(SosActivity.phones(this));
         f.addView(phones);
         Button pick = new Button(this);
-        pick.setText("연락처에서 선택");
+        pick.setText("연락처에서 선택 (이름과 번호)");
         pick.setTextSize(13);
         pick.setOnClickListener(v -> {
             contactTarget = phones;
+            contactWithName = true; // 보호자 칸에는 "이름 번호"로 넣음
             try {
                 startActivityForResult(new Intent(Intent.ACTION_PICK,
                         android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), REQ_CONTACT);
