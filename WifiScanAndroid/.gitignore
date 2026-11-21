@@ -1,0 +1,17 @@
+# 빌드 결과물
+build/
+app/build/
+.gradle/
+apk/
+*.apk
+
+# 이 PC 전용 설정
+local.properties
+adb_addr.txt
+
+# 비밀 정보 (텔레그램 봇 토큰) - 절대 올리지 않음
+telegram_config.bat
+
+# 실제 인물 사진 아이콘 - 공개 저장소에 올리지 않음 (이 PC에만 보관)
+icon.jpg
+app/src/main/res/mipmap-*/ic_launcher.png

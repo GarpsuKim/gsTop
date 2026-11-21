@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 앱 바로가기 (res/xml/shortcuts.xml) -->
+    <string name="sos_short">SOS</string>
+    <string name="sos_long">긴급 SOS (보호자 전화 + 위치 전송)</string>
+</resources>

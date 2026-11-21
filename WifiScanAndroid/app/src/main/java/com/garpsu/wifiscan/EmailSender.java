@@ -1,0 +1,171 @@
+package com.garpsu.wifiscan;
+
+import android.util.Base64;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
+/**
+ * 앱 비밀번호로 메일 서버(SMTP, SSL 465)에 직접 접속해 메일을 보낸다. (네트워크 사용 -> 작업 스레드에서 호출)
+ * Gmail: 구글 계정 2단계 인증 + 앱 비밀번호 필요. 네이버/다음도 같은 방식(앱 비밀번호 + SMTP 사용 설정).
+ */
+final class EmailSender {
+
+    private EmailSender() {
+    }
+
+    // 보내는 주소의 도메인으로 SMTP 서버 결정 (그 밖의 도메인은 Google Workspace 로 보고 Gmail 서버 사용)
+    static String smtpHost(String from) {
+        String d = from.substring(from.indexOf('@') + 1).toLowerCase(Locale.US);
+        if (d.equals("naver.com")) {
+            return "smtp.naver.com";
+        }
+        if (d.equals("daum.net") || d.equals("hanmail.net")) {
+            return "smtp.daum.net";
+        }
+        return "smtp.gmail.com";
+    }
+
+    // 성공하면 null, 실패하면 오류 내용
+    static String send(String from, String appPassword, String toCsv, String subject, String body) {
+        from = from.trim();
+        String pass = appPassword.replace(" ", ""); // 구글은 4자리씩 띄어 보여 줌
+        List<String> to = new ArrayList<>();
+        for (String s : toCsv.split("[,;\\s]+")) {
+            if (!s.isEmpty()) {
+                to.add(s);
+            }
+        }
+        if (from.indexOf('@') < 1 || pass.isEmpty() || to.isEmpty()) {
+            return "보내는 주소, 앱 비밀번호, 받는 사람을 확인하세요";
+        }
+
+        String host = smtpHost(from);
+        SSLSocket s = null;
+        try {
+            // 일반 소켓으로 접속(시간 제한) 후 SSL 로 감싸기 (서버 이름을 넘겨 SNI 포함)
+            Socket raw = new Socket();
+            raw.connect(new InetSocketAddress(host, 465), 15000);
+            s = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(raw, host, 465, true);
+            s.setSoTimeout(20000);
+            s.startHandshake();
+            // 인증서가 실제 그 서버의 것인지 확인 (가짜 서버에 앱 비밀번호가 넘어가지 않게)
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, s.getSession())) {
+                return "서버 인증서 확인 실패 (" + host + ") - 공용 Wi-Fi 등 네트워크를 확인하세요";
+            }
+            BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+            OutputStream out = s.getOutputStream();
+
+            expect(in, 220, "서버 연결");
+            cmd(out, "EHLO wifiscan");
+            expect(in, 250, "EHLO");
+            cmd(out, "AUTH LOGIN");
+            expect(in, 334, "로그인");
+            cmd(out, b64(from));
+            expect(in, 334, "로그인");
+            cmd(out, b64(pass));
+            String r = reply(in);
+            if (!r.startsWith("235")) {
+                return "로그인 실패 - 이메일 주소/앱 비밀번호를 확인하세요 (" + firstLine(r) + ")";
+            }
+            cmd(out, "MAIL FROM:<" + from + ">");
+            expect(in, 250, "보내는 주소");
+            for (String t : to) {
+                cmd(out, "RCPT TO:<" + t + ">");
+                r = reply(in);
+                if (!r.startsWith("250") && !r.startsWith("251")) {
+                    return "받는 주소 거부: " + t + " (" + firstLine(r) + ")";
+                }
+            }
+            cmd(out, "DATA");
+            expect(in, 354, "DATA");
+
+            StringBuilder m = new StringBuilder();
+            m.append("From: ").append(from).append("\r\n");
+            m.append("To: ").append(android.text.TextUtils.join(", ", to)).append("\r\n");
+            m.append("Subject: =?UTF-8?B?").append(b64(subject)).append("?=\r\n");
+            m.append("Date: ").append(new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
+                    .format(new Date())).append("\r\n");
+            m.append("MIME-Version: 1.0\r\n");
+            m.append("Content-Type: text/plain; charset=UTF-8\r\n");
+            m.append("Content-Transfer-Encoding: base64\r\n\r\n");
+            // 본문: base64 76자 줄바꿈 (줄이 '.' 으로 시작할 일이 없음)
+            String enc = Base64.encodeToString(body.getBytes(StandardCharsets.UTF_8), Base64.DEFAULT);
+            m.append(enc.replace("\r\n", "\n").replace("\n", "\r\n"));
+            m.append("\r\n.\r\n");
+            out.write(m.toString().getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            expect(in, 250, "전송");
+            cmd(out, "QUIT");
+            return null;
+        } catch (SmtpError e) {
+            return e.getMessage();
+        } catch (SocketTimeoutException e) {
+            return "응답 시간 초과 (" + host + ")";
+        } catch (Exception e) {
+            return "연결 실패 (인터넷 확인) - " + host;
+        } finally {
+            if (s != null) {
+                try {
+                    s.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private static class SmtpError extends Exception {
+        SmtpError(String m) {
+            super(m);
+        }
+    }
+
+    private static String b64(String s) {
+        return Base64.encodeToString(s.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    }
+
+    private static void cmd(OutputStream out, String line) throws java.io.IOException {
+        out.write((line + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+    }
+
+    // 여러 줄 응답("250-..." ... "250 ...")을 끝까지 읽음
+    private static String reply(BufferedReader in) throws java.io.IOException {
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = in.readLine()) != null) {
+            sb.append(line).append('\n');
+            if (line.length() < 4 || line.charAt(3) != '-') {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    private static void expect(BufferedReader in, int code, String step) throws Exception {
+        String r = reply(in);
+        if (!r.startsWith(String.valueOf(code))) {
+            throw new SmtpError(step + " 실패 (" + firstLine(r) + ")");
+        }
+    }
+
+    private static String firstLine(String r) {
+        int i = r.indexOf('\n');
+        String s = (i >= 0 ? r.substring(0, i) : r).trim();
+        return s.isEmpty() ? "응답 없음" : s;
+    }
+}

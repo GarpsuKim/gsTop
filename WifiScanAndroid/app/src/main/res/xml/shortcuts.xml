@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 앱 아이콘을 길게 누르면 나오는 메뉴: 'SOS' (거기서 끌어다 홈 화면에 둘 수도 있음) -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="sos"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sos_short"
+        android:shortcutLongLabel="@string/sos_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.garpsu.wifiscan"
+            android:targetClass="com.garpsu.wifiscan.SosActivity" />
+    </shortcut>
+</shortcuts>
