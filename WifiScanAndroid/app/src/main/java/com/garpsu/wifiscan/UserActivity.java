@@ -65,12 +65,17 @@ public class UserActivity extends Activity {
     // 이 앱이 쓰는 설정 저장소 전부 (백업·복원, 초기화 공용)
     static final String[] ALL_PREFS = {"home", "lan", TelegramSender.PREF, TelegramSender.PREF_APP,
             HomeService.PREF_KAKAO, HomeService.PREF_EMAIL, HomeService.PREF_KMAIL,
-            HomeService.PREF_SMS, HomeService.PREF_SELF, HomeService.PREF_EVENT, SosActivity.PREF_SOS, PREF_USER};
+            HomeService.PREF_SMS, HomeService.PREF_SMSAUTO, HomeService.PREF_SELF, HomeService.PREF_EVENT, HomeService.PREF_SCHED,
+            "ward",
+            SosActivity.PREF_SOS, PREF_USER};
 
     private SharedPreferences up;
     private EditText name, phone, device, mail, pass, code, token, pcIp, pcPort, pcKey, blood, disease, meds, memo;
     private static final String mailDomain = "gmail.com"; // 발신 이메일은 구글(Gmail)만 (@ 뒤 고정)
     private TextView mailStatus, tgStatus, tsStatus, pcStatus;
+    private Button sendBtn; // [인증 메일 보내기]: 인증되면 비활성, 아니면 빨간 글씨 + (필수)
+    private LinearLayout afterSend; // [인증 메일 보내기] 아래 항목들 (인증되면 숨김)
+    private Button changeBtn; // 제목 줄 오른쪽 [변경] (인증 완료 시)
     private CheckBox medSos;
     private String pendingCode;   // 보낸 인증번호
     private long codeTime;        // 보낸 시각 (10분 유효)
@@ -102,8 +107,21 @@ public class UserActivity extends Activity {
                 up.getString("device", Build.MANUFACTURER + " " + Build.MODEL), InputType.TYPE_CLASS_TEXT);
 
         // ---------- 2) 발신 이메일: 구글(Gmail)만, @gmail.com 고정 ----------
-        section(root, "■ 발신 이메일 (Gmail)");
-        root.addView(note("이메일 등록을 위한 자세한 설명 : " + EmailSender.GUIDE_URL)); // 누르면 브라우저로 열림
+        // 제목 줄: "■ 발신 이메일 (Gmail)" + 오른쪽 끝 [변경] (인증 완료된 경우에만 보임)
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(android.view.Gravity.BOTTOM);
+        divider(root); // 영역 구분선
+        root.addView(titleRow);
+        LinearLayout titleBox = new LinearLayout(this);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        titleRow.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        section(titleBox, "■ 발신 이메일 (Gmail)");
+        changeBtn = new Button(this);
+        changeBtn.setText("변경");
+        changeBtn.setTextSize(13);
+        changeBtn.setOnClickListener(v -> confirmReverify());
+        titleRow.addView(changeBtn);
         String saved = up.getString("mail", em.getString("from", ""));
         int at = saved.indexOf('@');
         LinearLayout mr = row(root);
@@ -117,18 +135,78 @@ public class UserActivity extends Activity {
         domainText.setText("@" + mailDomain);
         domainText.setTextSize(16);
         mr.addView(domainText);
+        gap(root, 14); // 줄 간격 (가독성)
         pass = edit(root, "앱 비밀번호", up.getString("mailPass", em.getString("pass", "")),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        LinearLayout r1 = row(root);
-        button(r1, "인증 메일 보내기", v -> sendCode());
+        gap(root, 18);
+        // [인증 메일 보내기] (가로 전체)
+        sendBtn = new Button(this);
+        sendBtn.setText("인증 메일 보내기");
+        sendBtn.setTextSize(14);
+        sendBtn.setAllCaps(false);
+        sendBtn.setOnClickListener(v -> sendCode());
+        root.addView(sendBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // 버튼 아래 항목 묶음: 이미 인증되어 있으면 통째로 숨김
+        afterSend = new LinearLayout(this);
+        afterSend.setOrientation(LinearLayout.VERTICAL);
+        root.addView(afterSend);
+        // 작은 글씨 설명 (보낼 주소는 입력한 아이디에 따라 바뀜)
+        final TextView sendNote = new TextView(this);
+        sendNote.setTextSize(11);
+        sendNote.setTextColor(Color.GRAY);
+        sendNote.setPadding(0, 6, 0, 6);
+        sendNote.setLineSpacing(0, 1.3f); // 설명문 줄 사이 넓게
+        afterSend.addView(sendNote);
+        final Runnable updateNote = () -> {
+            String m = fullMail();
+            sendNote.setText("이 버튼을 누르면 6자리 숫자가 " + (m.isEmpty() ? "xxxxxx@" + mailDomain : m)
+                    + " 메일로 보내집니다. 그 6자리 숫자를 다음 칸에 입력하여야만 이메일 인증이 완료됩니다.");
+        };
+        updateNote.run();
+        mail.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                updateNote.run();
+                showMailStatus(); // 아이디가 바뀌면 인증 상태·버튼도 다시 표시
+            }
+        });
+        gap(afterSend, 14);
+        // [인증번호 6자리] + [확인]
+        LinearLayout r1 = row(afterSend);
         code = new EditText(this);
         code.setHint("인증번호 6자리");
         code.setInputType(InputType.TYPE_CLASS_NUMBER);
         r1.addView(code, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         button(r1, "확인", v -> verifyCode());
+        gap(afterSend, 14);
+        afterSend.addView(note("이메일 등록을 위한 자세한 설명 : " + EmailSender.GUIDE_URL)); // 누르면 브라우저로 열림
+        gap(afterSend, 6);
         mailStatus = note("");
-        root.addView(mailStatus);
+        afterSend.addView(mailStatus);
         showMailStatus();
+
+        // ---------- 여기부터 선택 항목: 굵은 구분선 + 빈 공간 + 안내 ----------
+        divider(root);
+        TextView optional = new TextView(this);
+        optional.setText("이하, 항목들은 필수 항목이 아닙니다");
+        optional.setTextSize(15);
+        optional.setTypeface(null, Typeface.BOLD);
+        optional.setTextColor(0xFFC62828);
+        optional.setGravity(android.view.Gravity.CENTER);
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        olp.topMargin = (int) (24 * getResources().getDisplayMetrics().density); // 구분선 아래 빈 공간
+        olp.bottomMargin = (int) (16 * getResources().getDisplayMetrics().density);
+        root.addView(optional, olp);
 
         // ---------- 3) 텔레그램 ----------
         section(root, "■ 텔레그램");
@@ -145,6 +223,7 @@ public class UserActivity extends Activity {
         showTgStatus(null);
 
         // ---------- 4) Tailscale VPN / PC 서버 ----------
+        divider(root);
         section(root, "■ Tailscale VPN / PC 서버");
         tsStatus = note("");
         root.addView(tsStatus);
@@ -163,6 +242,7 @@ public class UserActivity extends Activity {
         root.addView(pcStatus);
 
         // ---------- 5) 긴급 의료 정보 ----------
+        divider(root);
         section(root, "■ 긴급 의료 정보");
         blood = edit(root, "혈액형", up.getString("blood", ""), InputType.TYPE_CLASS_TEXT);
         disease = edit(root, "지병", up.getString("disease", ""), InputType.TYPE_CLASS_TEXT);
@@ -174,6 +254,7 @@ public class UserActivity extends Activity {
         root.addView(medSos);
 
         // ---------- 6) 설정 백업·복원 ----------
+        divider(root);
         section(root, "■ 설정 백업·복원");
         LinearLayout r5 = row(root);
         button(r5, "설정 내보내기", v -> exportSettings());
@@ -260,11 +341,46 @@ public class UserActivity extends Activity {
 
     private void showMailStatus() {
         boolean ok = up.getBoolean("mailVerified", false)
-                && fullMail().equals(up.getString("mail", ""));
-        long t = up.getLong("mailVerifiedAt", 0);
-        mailStatus.setText(ok ? "✓ 검증됨 (" + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t)) + ")"
-                : "아직 검증하지 않았습니다.");
-        mailStatus.setTextColor(ok ? 0xFF2E7D32 : Color.DKGRAY);
+                && !fullMail().isEmpty() && fullMail().equals(up.getString("mail", ""));
+        if (mailStatus != null) {
+            long t = up.getLong("mailVerifiedAt", 0);
+            mailStatus.setText(ok ? "✓ 검증됨 (" + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t)) + ")"
+                    : "아직 검증하지 않았습니다.");
+            mailStatus.setTextColor(ok ? 0xFF2E7D32 : Color.DKGRAY);
+        }
+        // [인증 메일 보내기]: 이미 인증됨 -> 비활성 / 아직 -> 빨간 글씨 + (필수)
+        if (sendBtn != null) {
+            sendBtn.setEnabled(!ok);
+            sendBtn.setText(ok ? "인증 메일 보내기 (인증 완료)" : "인증 메일 보내기 (필수)");
+            sendBtn.setTextColor(ok ? Color.GRAY : 0xFFC62828);
+        }
+        // 이미 인증되어 있으면 버튼 아래 항목(설명문·인증번호 칸·[확인]·링크·결과)은 모두 숨김
+        if (afterSend != null) {
+            afterSend.setVisibility(ok ? View.GONE : View.VISIBLE);
+        }
+        // 제목 줄 오른쪽 [변경]: 인증 완료된 경우에만
+        if (changeBtn != null) {
+            changeBtn.setVisibility(ok ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    // [변경]: 확인 후 기존 인증을 모두 폐기하고 처음부터 다시 인증 (화면 1077)
+    private void confirmReverify() {
+        ScreenId.tag(new AlertDialog.Builder(this)
+                .setTitle("발신 이메일 변경")
+                .setMessage("변경 또는 재인증합니까?")
+                .setPositiveButton("Yes", (d, w) -> {
+                    up.edit().putBoolean("mailVerified", false).remove("mailVerifiedAt").commit();
+                    HomeService.refresh(this);
+                    pendingCode = null;
+                    code.setText("");
+                    showMailStatus(); // [인증 메일 보내기 (필수)] 와 아래 항목이 다시 나타남
+                    mail.requestFocus();
+                    Toast.makeText(this, "기존 인증을 폐기했습니다. 아이디·앱 비밀번호를 확인하고 다시 인증하세요.",
+                            Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton("No", null)
+                .show(), "1077");
     }
 
     private void sendCode() {
@@ -309,10 +425,12 @@ public class UserActivity extends Activity {
             return;
         }
         pendingCode = null;
+        // 검증되면 [저장하고 닫기]를 누르지 않아도 무조건 바로 저장 (화면 전체 입력값 + 검증 표시)
         save(); // 주소·비밀번호를 먼저 저장 (바뀌었으면 검증 해제됨)
-        up.edit().putBoolean("mailVerified", true).putLong("mailVerifiedAt", System.currentTimeMillis()).apply();
+        up.edit().putBoolean("mailVerified", true).putLong("mailVerifiedAt", System.currentTimeMillis()).commit();
+        HomeService.refresh(this); // 이메일 위치 요청 감시 시작 (보호자 이메일이 있으면)
         showMailStatus();
-        Toast.makeText(this, "이메일 검증 완료", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "이메일 검증 완료 — 저장했습니다", Toast.LENGTH_SHORT).show();
     }
 
     // ---------- 텔레그램 ----------
@@ -613,7 +731,7 @@ public class UserActivity extends Activity {
             }
             // 다음 송신 시각은 새로 계산되도록 비움
             for (String p : new String[]{TelegramSender.PREF, HomeService.PREF_KAKAO, HomeService.PREF_EMAIL,
-                    HomeService.PREF_KMAIL, HomeService.PREF_SMS, HomeService.PREF_SELF}) {
+                    HomeService.PREF_KMAIL, HomeService.PREF_SMS, HomeService.PREF_SMSAUTO, HomeService.PREF_SELF}) {
                 getSharedPreferences(p, MODE_PRIVATE).edit().putLong("next", 0).commit();
             }
             pendingImport = null;
@@ -666,6 +784,25 @@ public class UserActivity extends Activity {
         e.setText(value);
         root.addView(e);
         return e;
+    }
+
+    // 영역 사이 굵은 구분선 (위아래 넉넉한 공간)
+    private void divider(LinearLayout root) {
+        float dn = getResources().getDisplayMetrics().density;
+        View v = new View(this);
+        v.setBackgroundColor(0xFF424242);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * dn));
+        lp.topMargin = (int) (36 * dn);
+        lp.bottomMargin = (int) (8 * dn);
+        root.addView(v, lp);
+    }
+
+    // 세로 빈 공간 (dp)
+    private void gap(LinearLayout root, int dp) {
+        View v = new View(this);
+        root.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                (int) (dp * getResources().getDisplayMetrics().density)));
     }
 
     private LinearLayout row(LinearLayout root) {

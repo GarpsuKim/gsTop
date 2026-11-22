@@ -45,6 +45,7 @@ public class HomeService extends Service {
 
     static final String PREF_BG = "bg";                 // "home" 설정: 백그라운드 귀가 감지 켜짐
     static final String PREF_KAKAO = "kakao";           // 카톡 자동 보내기 설정
+    static final String PREF_SCHED = "sched";           // 1040 공통 보내는 시각 (지정 시각 / 일정 간격)
     static final String KAKAO_PKG = "com.kakao.talk";
     static final String PREF_EMAIL = "email";           // 이메일 자동 송신 설정
     static final String GMAIL_PKG = "com.google.android.gm";
@@ -60,6 +61,9 @@ public class HomeService extends Service {
     // 일반 문자(수동): 정해진 시각마다 알림 -> 누르면 문자 앱(받는 사람·내용 채워짐) -> 직접 [전송]. 문자 권한 불필요
     static final String PREF_SMS = "sms";
     private static final String ACTION_SMS = "com.garpsu.wifiscan.SMS_SEND";
+    // 일반 문자(자동): 솔라피로 폰에서 바로 발송 (apiKey, apiSecret, from, to, 시각 설정)
+    static final String PREF_SMSAUTO = "smsauto";
+    private static final String ACTION_SMSAUTO = "com.garpsu.wifiscan.SMSAUTO_SEND";
     private static final int ID_SMS = 6;
     // 본인 폰 알림: 정해진 시각마다 이 폰에 현재 위치 알림 (아무에게도 보내지 않음)
     static final String PREF_SELF = "self";
@@ -74,6 +78,22 @@ public class HomeService extends Service {
     private static final String ACTION_SOS = "com.garpsu.wifiscan.SOS";               // 긴급 SOS 위치 전송
     private static final String ACTION_START_MSG = "com.garpsu.wifiscan.START_MSG";   // 앱 시작 위치 알림
     private static final String ACTION_STOP_MSG = "com.garpsu.wifiscan.STOP_MSG";     // 앱 종료 위치 알림
+    static final String ACTION_MAIL_YES = "com.garpsu.wifiscan.MAIL_YES"; // 이메일 위치 요청: 회신 (Yes)
+    static final String ACTION_MAIL_NO = "com.garpsu.wifiscan.MAIL_NO";   // 이메일 위치 요청: 회신 안 함 (No)
+    static final String ACTION_MAIL_RESCAN = "com.garpsu.wifiscan.MAIL_RESCAN"; // 앱 시작: 받은편지함 요청 메일 다시 찾기
+
+    // 앱을 켤 때: Gmail 에 다시 접속해 받은편지함에 남아 있는 위치 요청 메일을 찾아 회신·삭제
+    static void mailRescan(Context c) {
+        if (!mailRemoteOn(c)) {
+            return;
+        }
+        Intent i = new Intent(c, HomeService.class).setAction(ACTION_MAIL_RESCAN);
+        if (Build.VERSION.SDK_INT >= 26) {
+            c.startForegroundService(i);
+        } else {
+            c.startService(i);
+        }
+    }
     private static final String CH_STATUS = "status";   // 상시 알림 (조용히)
     private static final String CH_ALERT = "alert";     // 귀가 알림 (소리/팝업)
     private static final String CH_KAKAO = "kakao";     // 카톡 보내기 알림 (소리/팝업)
@@ -130,12 +150,39 @@ public class HomeService extends Service {
     }
 
     static boolean emailOn(Context c, String pref) {
+        if (PREF_KMAIL.equals(pref)) {
+            return false; // 카톡 이메일(1160)은 삭제: 예전에 켜 둔 값이 남아 있어도 동작하지 않음
+        }
         return c.getSharedPreferences(pref, MODE_PRIVATE).getBoolean("on", false);
     }
 
     static boolean anyOn(Context c) {
         return homeOn(c) || tgOn(c) || kakaoOn(c) || emailOn(c, PREF_EMAIL) || emailOn(c, PREF_KMAIL)
-                || emailOn(c, PREF_SMS) || emailOn(c, PREF_SELF) || eventOn(c) || remoteOn(c);
+                || emailOn(c, PREF_SMS) || emailOn(c, PREF_SMSAUTO) || emailOn(c, PREF_SELF) || eventOn(c) || remoteOn(c)
+                || mailRemoteOn(c);
+    }
+
+    // 이메일 위치 요청 감시를 할지: 사용자 등록(1075) Gmail 인증 완료 + 보호자 이메일(1100)이 있으면 항상 감시.
+    // (1050 체크박스 "mailRemote" 는 감시 여부가 아니라 '자동 회신 / 물어보고 회신' 선택)
+    static boolean mailRemoteOn(Context c) {
+        SharedPreferences u = c.getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        return u.getBoolean("mailVerified", false) && !u.getString("mail", "").isEmpty()
+                && !u.getString("mailPass", "").isEmpty() && !guardianEmails(c).isEmpty();
+    }
+
+    // 보호자 이메일 -> 보호자 이름 (1100 카드). 이름이 없으면 이메일 그대로
+    static String guardianName(Context c, String email) {
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(SosActivity.prefs(c).getString("guardians", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.getJSONObject(i);
+                if (email.equalsIgnoreCase(o.optString("email")) && !o.optString("name").isEmpty()) {
+                    return o.optString("name");
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return email;
     }
 
     // 귀가 또는 외출 알림이 켜져 있는지
@@ -183,7 +230,7 @@ public class HomeService extends Service {
     // [초기화]: 서비스 종료, 모든 예약 알람 취소, 이 앱의 알림 모두 지우기
     static void stopAll(Context c) {
         for (String a : new String[]{ACTION_TG, ACTION_KAKAO, ACTION_EMAIL, ACTION_KMAIL,
-                ACTION_SMS, ACTION_SELF, ACTION_CHECK, ACTION_LATE}) {
+                ACTION_SMS, ACTION_SMSAUTO, ACTION_SELF, ACTION_CHECK, ACTION_LATE}) {
             cancelAlarm(c, a);
         }
         c.stopService(new Intent(c, HomeService.class));
@@ -300,9 +347,9 @@ public class HomeService extends Service {
                 : TelegramSender.intervalLabel(sp.getInt("interval", 60)) + "마다";
     }
 
-    // 보내는 방식: true = 앱 비밀번호로 자동 발송, false = Gmail 작성 화면(알림)
+    // 보내는 방식: 항상 앱 비밀번호로 발송 (수동 = Gmail 작성 화면 기능은 삭제)
     static boolean emailSmtp(SharedPreferences sp) {
-        return "smtp".equals(sp.getString("send", "compose"));
+        return true;
     }
 
     // 다음 송신 시각
@@ -348,6 +395,9 @@ public class HomeService extends Service {
         }
         if (!emailOn(c, PREF_SMS)) {
             cancelAlarm(c, ACTION_SMS);
+        }
+        if (!emailOn(c, PREF_SMSAUTO)) {
+            cancelAlarm(c, ACTION_SMSAUTO);
         }
         if (!emailOn(c, PREF_SELF)) {
             cancelAlarm(c, ACTION_SELF);
@@ -403,6 +453,27 @@ public class HomeService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String a = intent == null ? null : intent.getAction();
+        if (ACTION_MAIL_RESCAN.equals(a)) {
+            // 감시 중이면 연결을 끊고 바로 다시 접속 (접속할 때마다 받은편지함 전체를 찾음).
+            // 감시 중이 아니면 아래 updateMailRemote() 가 새로 시작하면서 찾음
+            MailWatcher w = mailWatcher;
+            if (w != null) {
+                mailRescanNow = true;
+                w.stop();
+            }
+        }
+        if (ACTION_MAIL_YES.equals(a) || ACTION_MAIL_NO.equals(a)) {
+            // 이메일 위치 요청 확인 알림(또는 화면 1057)에서 Yes / No
+            String to = intent.getStringExtra("to");
+            getSystemService(NotificationManager.class).cancel(mailAskId(to == null ? "" : to));
+            if (to != null && cm != null && ACTION_MAIL_YES.equals(a)) {
+                replyMailLocation(to);
+            } else if (to != null) {
+                getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).edit()
+                        .putLong("mailRemoteTime", System.currentTimeMillis())
+                        .putString("mailRemoteResult", "회신 안 함 (" + guardianName(this, to) + ")").apply();
+            }
+        }
         if (cm != null && (ACTION_SOS.equals(a) || ACTION_START_MSG.equals(a) || ACTION_STOP_MSG.equals(a))) {
             // 다른 기능이 모두 꺼져 있어도 SOS·앱 시작 알림은 보냄 (다 보내면 종료)
             sendEvent(ACTION_SOS.equals(a) ? KIND_SOS : ACTION_START_MSG.equals(a) ? KIND_START : KIND_STOP, null, false);
@@ -416,6 +487,7 @@ public class HomeService extends Service {
             cancelAlarm(this, ACTION_EMAIL);
             cancelAlarm(this, ACTION_KMAIL);
             cancelAlarm(this, ACTION_SMS);
+            cancelAlarm(this, ACTION_SMSAUTO);
             cancelAlarm(this, ACTION_SELF);
             cancelAlarm(this, ACTION_LATE);
             if (jobBusy.isEmpty()) {
@@ -433,11 +505,12 @@ public class HomeService extends Service {
         scheduleTelegram(ACTION_TG.equals(a));
         scheduleKakao(ACTION_KAKAO.equals(a));
         scheduleEmail(PREF_EMAIL, ACTION_EMAIL.equals(a));
-        scheduleEmail(PREF_KMAIL, ACTION_KMAIL.equals(a));
         scheduleNotifyJob(PREF_SMS, ACTION_SMS, ACTION_SMS.equals(a));
+        scheduleNotifyJob(PREF_SMSAUTO, ACTION_SMSAUTO, ACTION_SMSAUTO.equals(a));
         scheduleNotifyJob(PREF_SELF, ACTION_SELF, ACTION_SELF.equals(a));
         scheduleLate(ACTION_LATE.equals(a));
         updateRemotePoll();
+        updateMailRemote();
         updateStatus();
         return START_STICKY; // 시스템이 종료해도 다시 시작
     }
@@ -448,6 +521,7 @@ public class HomeService extends Service {
         if (pollThread != null) {
             pollThread.interrupt();
         }
+        stopMailRemote(); // 이메일 위치 요청 감시 중지
         handler.removeCallbacksAndMessages(null);
         if (cm != null) {
             try {
@@ -661,7 +735,7 @@ public class HomeService extends Service {
                 if (!tk.isEmpty() && !ch.trim().isEmpty()) {
                     res.add("텔레그램 " + (TelegramSender.send(tk, ch, full) == null ? "✓" : "✗"));
                 }
-                for (String pref : new String[]{PREF_EMAIL, PREF_KMAIL}) {
+                for (String pref : new String[]{PREF_EMAIL}) {
                     SharedPreferences em = getSharedPreferences(pref, MODE_PRIVATE);
                     String to = em.getString("to", "");
                     if (!to.trim().isEmpty() && emailSmtp(em) && !em.getString("pass", "").isEmpty()) {
@@ -682,7 +756,7 @@ public class HomeService extends Service {
                     res.add("텔레그램 " + (TelegramSender.send(tk, ch, full) == null ? "✓" : "✗"));
                 }
             }
-            for (final String pref : new String[]{PREF_EMAIL, PREF_KMAIL}) {
+            for (final String pref : new String[]{PREF_EMAIL}) {
                 if (sos || !ev.getBoolean(PREF_EMAIL.equals(pref) ? "ch_email" : "ch_kmail", false)) {
                     continue;
                 }
@@ -702,6 +776,18 @@ public class HomeService extends Service {
             if (!sos && ev.getBoolean("ch_kakao", false)) {
                 notes.add(() -> notifyKakao(full, loc));
                 res.add("카톡 알림");
+            }
+            // 일반 문자(자동, 솔라피): 고른 경우 + SOS 때는 설정만 되어 있으면 무조건
+            SharedPreferences sa = getSharedPreferences(PREF_SMSAUTO, MODE_PRIVATE);
+            boolean saReady = !sa.getString("apiKey", "").isEmpty() && !sa.getString("to", "").trim().isEmpty();
+            if ((sos && saReady) || (!sos && ev.getBoolean("ch_smsauto", false))) {
+                if (!saReady) {
+                    res.add("문자(자동) 설정 없음");
+                } else {
+                    String se = SmsSender.send(sa.getString("apiKey", ""), sa.getString("apiSecret", ""),
+                            sa.getString("from", ""), sa.getString("to", ""), shortMsg);
+                    res.add("문자(자동) " + (se == null ? "✓" : "✗"));
+                }
             }
             if (!sos && ev.getBoolean("ch_sms", false)) {
                 final String to = getSharedPreferences(PREF_SMS, MODE_PRIVATE).getString("to", "");
@@ -827,6 +913,155 @@ public class HomeService extends Service {
         }).start());
     }
 
+    // ---------- 1-5) 이메일 원격 위치 요청: 보호자가 사용자 Gmail 로 제목 "#where" 메일 -> 이메일로 회신 ----------
+
+    private volatile boolean mailRunning;
+    private Thread mailThread;
+    private volatile MailWatcher mailWatcher;
+    private volatile boolean mailRescanNow; // true 면 연결이 끊겨도 쉬지 않고 바로 다시 접속
+
+    private void updateMailRemote() {
+        if (mailRemoteOn(this)) {
+            if (mailThread == null || !mailThread.isAlive()) {
+                mailRunning = true;
+                mailThread = new Thread(this::mailLoop, "mail-remote");
+                mailThread.start();
+            }
+        } else {
+            stopMailRemote();
+        }
+    }
+
+    private void stopMailRemote() {
+        mailRunning = false;
+        MailWatcher w = mailWatcher;
+        if (w != null) {
+            w.stop(); // 대기 중인 연결을 바로 끊음
+        }
+        if (mailThread != null) {
+            mailThread.interrupt();
+        }
+    }
+
+    // 보호자 등록(1100)에 적힌 이메일 주소들 (소문자)
+    static Set<String> guardianEmails(Context c) {
+        Set<String> r = new HashSet<>();
+        for (String s : SosActivity.prefs(c).getString("emails", "").split("[,;\\s]+")) {
+            if (s.contains("@")) {
+                r.add(s.trim().toLowerCase(Locale.US));
+            }
+        }
+        return r;
+    }
+
+    // 작업 스레드: Gmail 에 접속해 새 메일을 기다림. 끊기면 1분 후 다시 접속
+    private void mailLoop() {
+        final SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        while (mailRunning) {
+            MailWatcher w = new MailWatcher();
+            mailWatcher = w;
+            u.edit().putString("mailRemoteState", "Gmail 접속 중...").apply();
+            String err = w.watch(u.getString("mail", ""), u.getString("mailPass", ""), u, new MailWatcher.Callback() {
+                @Override
+                public boolean running() {
+                    return mailRunning;
+                }
+
+                @Override
+                public boolean onRequest(String from, String subject) {
+                    if (!guardianEmails(HomeService.this).contains(from)) {
+                        // 등록되지 않은 주소: 답장하지 않음 (메일도 읽지 않은 채로 둠)
+                        u.edit().putLong("mailRemoteTime", System.currentTimeMillis())
+                                .putString("mailRemoteResult", "등록 안 된 주소라 무시: " + from).apply();
+                        return false;
+                    }
+                    if (u.getBoolean("mailRemote", false)) {
+                        handler.post(() -> replyMailLocation(from)); // 자동 회신
+                    } else {
+                        handler.post(() -> askMailReply(from)); // 물어보고 회신 (알림 Yes/No)
+                    }
+                    return true;
+                }
+
+                @Override
+                public void state(String s) {
+                    u.edit().putString("mailRemoteState", s).putString("mailRemoteErr", "").apply();
+                }
+            });
+            mailWatcher = null;
+            u.edit().putString("mailRemoteErr", err == null ? "" : err)
+                    .putString("mailRemoteState", mailRunning ? "연결 끊김 - 잠시 후 다시 접속" : "꺼짐").apply();
+            if (mailRescanNow) {
+                mailRescanNow = false; // 앱 시작: 바로 다시 접속해서 받은편지함 다시 찾기
+                continue;
+            }
+            if (mailRunning) {
+                nap(err != null && err.startsWith("로그인") ? 10 * 60 * 1000 : 60 * 1000);
+            }
+        }
+    }
+
+    static int mailAskId(String from) {
+        return 7000 + (from.toLowerCase(Locale.US).hashCode() & 0xFFF);
+    }
+
+    static String mailAskText(Context c, String from) {
+        return "보호자 " + guardianName(c, from) + "님으로부터 위치 질문을 받았습니다. 회신할까요?";
+    }
+
+    // 자동 회신이 꺼져 있을 때: "보호자 ○○님으로부터 위치 질문을 받았습니다. 회신할까요?" 알림 + [Yes] [No]
+    // 알림을 누르면 앱 화면에서 같은 질문 팝업(1057)
+    private void askMailReply(String from) {
+        int id = mailAskId(from);
+        int flags = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT;
+        Intent yes = new Intent(this, HomeService.class).setAction(ACTION_MAIL_YES).putExtra("to", from);
+        Intent no = new Intent(this, HomeService.class).setAction(ACTION_MAIL_NO).putExtra("to", from);
+        PendingIntent pYes = Build.VERSION.SDK_INT >= 26
+                ? PendingIntent.getForegroundService(this, id * 2, yes, flags) : PendingIntent.getService(this, id * 2, yes, flags);
+        PendingIntent pNo = PendingIntent.getService(this, id * 2 + 1, no, flags);
+        Intent open = new Intent(this, MainActivity.class).putExtra("mailAsk", from)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pOpen = PendingIntent.getActivity(this, id, open, flags);
+        String text = mailAskText(this, from);
+        Notification.Builder b = builder(CH_ALERT)
+                .setContentTitle("📨 위치 질문")
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setContentIntent(pOpen)
+                .setAutoCancel(true)
+                .addAction(new Notification.Action.Builder(0, "Yes (회신)", pYes).build())
+                .addAction(new Notification.Action.Builder(0, "No", pNo).build());
+        if (Build.VERSION.SDK_INT < 26) {
+            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+        }
+        getSystemService(NotificationManager.class).notify(id, b.build());
+        getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).edit()
+                .putLong("mailRemoteTime", System.currentTimeMillis())
+                .putString("mailRemoteResult", "회신할지 묻는 중 (" + guardianName(this, from) + ")").apply();
+    }
+
+    // 위치를 재서 요청한 보호자에게 이메일로 회신
+    private void replyMailLocation(final String to) {
+        final String busy = "mailRemote" + to;
+        if (jobBusy.contains(busy)) {
+            return;
+        }
+        jobBusy.add(busy);
+        fetchLocation(loc -> new Thread(() -> {
+            SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+            String err = EmailSender.send(u.getString("mail", ""), u.getString("mailPass", ""), to,
+                    emailSubject(this) + " - 요청하신 위치",
+                    TelegramSender.statusLine(this) + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false));
+            handler.post(() -> {
+                u.edit().putLong("mailRemoteTime", System.currentTimeMillis())
+                        .putString("mailRemoteResult", (err == null ? "회신 ✓" : "회신 실패: " + err) + " (" + to + ")")
+                        .apply();
+                jobBusy.remove(busy);
+                releaseWakeIfIdle();
+            });
+        }).start());
+    }
+
     // ---------- 1-3) 미귀가 알림: 정해진 시각에 집이 아니면 알림 ----------
 
     private void scheduleLate(boolean tick) {
@@ -888,11 +1123,11 @@ public class HomeService extends Service {
 
     // 외출이 확정된 순간: '일정 간격' 전송들은 바로 한 번 보내고 그때부터 간격대로
     private void startSendingOnLeave() {
-        String[] interval = {TelegramSender.PREF, PREF_KAKAO};
+        String[] interval = {TelegramSender.PREF};
         for (String p : interval) {
             getSharedPreferences(p, MODE_PRIVATE).edit().putLong("next", 0).apply();
         }
-        for (String p : new String[]{PREF_EMAIL, PREF_KMAIL, PREF_SMS, PREF_SELF}) {
+        for (String p : new String[]{PREF_EMAIL, PREF_KMAIL, PREF_KAKAO, PREF_SMS, PREF_SMSAUTO, PREF_SELF}) {
             SharedPreferences sp = getSharedPreferences(p, MODE_PRIVATE);
             if ("interval".equals(sp.getString("mode", ""))) {
                 sp.edit().putLong("next", 0).apply(); // 지정 시각 방식은 원래 시각대로
@@ -901,8 +1136,8 @@ public class HomeService extends Service {
         scheduleTelegram(false);
         scheduleKakao(false);
         scheduleEmail(PREF_EMAIL, false);
-        scheduleEmail(PREF_KMAIL, false);
         scheduleNotifyJob(PREF_SMS, ACTION_SMS, false);
+        scheduleNotifyJob(PREF_SMSAUTO, ACTION_SMSAUTO, false);
         scheduleNotifyJob(PREF_SELF, ACTION_SELF, false);
     }
 
@@ -964,7 +1199,7 @@ public class HomeService extends Service {
             setAlarm(ACTION_KAKAO, next);
             return;
         }
-        if (skipAtHome(sp, ACTION_KAKAO, System.currentTimeMillis() + sp.getInt("interval", 10) * 60 * 1000L)) {
+        if (skipAtHome(sp, ACTION_KAKAO, emailNext(sp, System.currentTimeMillis()))) {
             return;
         }
         if (kakaoBusy) {
@@ -975,7 +1210,7 @@ public class HomeService extends Service {
             String msg = TelegramSender.message(this, loc);
             handler.post(() -> {
                 long now = System.currentTimeMillis();
-                long nx = now + sp.getInt("interval", 10) * 60 * 1000L;
+                long nx = emailNext(sp, now);
                 sp.edit().putLong("lastTime", now).putLong("next", nx).apply();
                 kakaoBusy = false;
                 if (kakaoOn(this)) {
@@ -1103,18 +1338,27 @@ public class HomeService extends Service {
             return;
         }
         jobBusy.add(pref);
-        final boolean sms = PREF_SMS.equals(pref);
+        final boolean auto = PREF_SMSAUTO.equals(pref); // 일반 문자(자동): 솔라피로 바로 발송
+        final boolean sms = PREF_SMS.equals(pref) || auto;
         fetchLocation(loc -> new Thread(() -> {
             // 문자: 짧게(기본) 또는 전체 / 본인 폰 알림: 전체
             String msg = sms && sp.getBoolean("short", true)
                     ? TelegramSender.shortMessage(this, loc) : TelegramSender.message(this, loc);
+            final String err = auto ? SmsSender.send(sp.getString("apiKey", ""), sp.getString("apiSecret", ""),
+                    sp.getString("from", ""), sp.getString("to", ""), msg) : null;
             handler.post(() -> {
                 long now = System.currentTimeMillis();
                 long nx = emailNext(sp, now); // 지정 시각 / 일정 간격 (이메일과 같은 설정 방식)
-                sp.edit().putLong("lastTime", now).putLong("next", nx).apply();
+                SharedPreferences.Editor ed = sp.edit().putLong("lastTime", now).putLong("next", nx);
+                if (auto) {
+                    ed.putString("lastResult", err == null ? "성공" : "실패: " + err);
+                }
+                ed.apply();
                 jobBusy.remove(pref);
                 if (emailOn(this, pref)) {
-                    if (sms) {
+                    if (auto) {
+                        // 이미 보냄 (알림 없음)
+                    } else if (sms) {
                         notifySms(sp.getString("to", ""), msg, loc);
                     } else {
                         notifySelf(this, msg, loc);
@@ -1160,14 +1404,24 @@ public class HomeService extends Service {
     private Location best;
     private PowerManager.WakeLock wake;
 
+    private long fixStart; // 이번 측정을 시작한 시각
+
+    // 정확도 기준: 20 m 이내면 바로 사용, 10초가 지나면 50 m 이내도 사용, 30초가 되면 그때까지 가장 정확한 값
+    private static final float GOOD_M = 20, OK_M = 50;
+    private static final long OK_AFTER = 10 * 1000;
+
     private final LocationListener fixListener = new LocationListener() {
         @Override
         public void onLocationChanged(Location l) {
-            if (best == null || l.getAccuracy() < best.getAccuracy()) {
+            if (l == null || System.currentTimeMillis() - l.getTime() > 2 * 60 * 1000) {
+                return; // 2분 넘은 옛 위치(캐시)는 버림
+            }
+            if (best == null || !best.hasAccuracy() || (l.hasAccuracy() && l.getAccuracy() < best.getAccuracy())) {
                 best = l;
             }
-            if (l.getAccuracy() <= 50) { // 충분히 정확하면 바로 사용
-                finishFix();
+            float acc = l.hasAccuracy() ? l.getAccuracy() : Float.MAX_VALUE;
+            if (acc <= GOOD_M || (System.currentTimeMillis() - fixStart >= OK_AFTER && acc <= OK_M)) {
+                finishFix(); // 충분히 정확하면 바로 사용
             }
         }
 
@@ -1198,29 +1452,79 @@ public class HomeService extends Service {
             return; // 이미 측정 중
         }
         best = null;
-        boolean any = false;
+        fixStart = System.currentTimeMillis();
+
+        // 0) 1분 이내에 잰 위치가 '정확도 20 m 이내'이면 그대로 사용 (예전엔 정확도와 상관없이 써서 오차가 컸음)
         try {
             for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                if (!lm.isProviderEnabled(p)) {
-                    continue;
-                }
                 Location last = lm.getLastKnownLocation(p);
-                if (last != null && (best == null || last.getTime() > best.getTime())) {
+                if (last != null && System.currentTimeMillis() - last.getTime() <= 60 * 1000
+                        && last.hasAccuracy() && last.getAccuracy() <= GOOD_M) {
                     best = last;
                 }
-                lm.requestLocationUpdates(p, 1000, 0, fixListener, Looper.getMainLooper());
-                any = true;
             }
         } catch (SecurityException ignored) {
         }
-        // 마지막 위치가 1분 이내면 그대로 사용
-        if (best != null && System.currentTimeMillis() - best.getTime() > 60 * 1000) {
-            best = null;
+        if (best != null) {
+            handler.post(this::finishFix);
+            return;
         }
-        if (!any || best != null) {
+
+        // 1) 구글 통합 위치 (Play 서비스): GPS + Wi-Fi + 기지국 + 센서 -> 실내에서도 정확
+        boolean any = startFused();
+        // 2) Play 서비스가 없는 폰: 안드로이드 기본 GPS·통신망 위치
+        if (!any) {
+            try {
+                for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    if (lm.isProviderEnabled(p)) {
+                        lm.requestLocationUpdates(p, 1000, 0, fixListener, Looper.getMainLooper());
+                        any = true;
+                    }
+                }
+            } catch (SecurityException ignored) {
+            }
+        }
+        if (!any) {
             handler.post(this::finishFix);
         } else {
             handler.postDelayed(fixTimeout, FIX_TIMEOUT);
+        }
+    }
+
+    private com.google.android.gms.location.FusedLocationProviderClient fused;
+    private com.google.android.gms.location.LocationCallback fusedCb;
+
+    // 구글 통합 위치 측정 시작 (1초마다, 가장 정확하게). Play 서비스가 없거나 실패하면 false
+    private boolean startFused() {
+        try {
+            if (com.google.android.gms.common.GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(this)
+                    != com.google.android.gms.common.ConnectionResult.SUCCESS) {
+                return false;
+            }
+            if (fused == null) {
+                fused = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this);
+            }
+            com.google.android.gms.location.LocationRequest req =
+                    new com.google.android.gms.location.LocationRequest.Builder(
+                            com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                            .setMinUpdateIntervalMillis(500)
+                            .setWaitForAccurateLocation(true)
+                            .build();
+            fusedCb = new com.google.android.gms.location.LocationCallback() {
+                @Override
+                public void onLocationResult(com.google.android.gms.location.LocationResult r) {
+                    for (Location l : r.getLocations()) {
+                        fixListener.onLocationChanged(l);
+                    }
+                }
+            };
+            fused.requestLocationUpdates(req, fusedCb, Looper.getMainLooper());
+            return true;
+        } catch (SecurityException e) {
+            return false;
+        } catch (Throwable e) {
+            fusedCb = null;
+            return false;
         }
     }
 
@@ -1230,6 +1534,10 @@ public class HomeService extends Service {
         }
         handler.removeCallbacks(fixTimeout);
         lm.removeUpdates(fixListener);
+        if (fused != null && fusedCb != null) {
+            fused.removeLocationUpdates(fusedCb);
+            fusedCb = null;
+        }
         Location l = best;
         if (l == null) { // 새 측정 실패 -> 마지막으로 알려진 위치라도 사용
             try {
@@ -1263,7 +1571,7 @@ public class HomeService extends Service {
     private static PendingIntent alarmIntent(Context c, String action) {
         Intent i = new Intent(c, HomeService.class).setAction(action);
         int req = ACTION_TG.equals(action) ? 1 : ACTION_KAKAO.equals(action) ? 2
-                : ACTION_KMAIL.equals(action) ? 4 : ACTION_SMS.equals(action) ? 5
+                : ACTION_KMAIL.equals(action) ? 4 : ACTION_SMS.equals(action) ? 5 : ACTION_SMSAUTO.equals(action) ? 9
                 : ACTION_SELF.equals(action) ? 6 : ACTION_CHECK.equals(action) ? 7
                 : ACTION_LATE.equals(action) ? 8 : 3;
         return PendingIntent.getService(c, req, i,
@@ -1360,10 +1668,10 @@ public class HomeService extends Service {
             if (text.length() > 0) {
                 text.append(" · ");
             }
-            text.append("카톡 ").append(TelegramSender.intervalLabel(kk.getInt("interval", 10)))
-                    .append("마다 알림");
+            text.append("카톡 ").append(emailSchedule(kk))
+                    .append(" 알림");
         }
-        for (String pref : new String[]{PREF_EMAIL, PREF_KMAIL}) {
+        for (String pref : new String[]{PREF_EMAIL}) {
             SharedPreferences em = getSharedPreferences(pref, MODE_PRIVATE);
             if (!em.getBoolean("on", false)) {
                 continue;
@@ -1387,7 +1695,7 @@ public class HomeService extends Service {
             }
         }
         // 문자 / 본인 폰 알림
-        String[][] jobs = {{PREF_SMS, "문자"}, {PREF_SELF, "본인 알림"}};
+        String[][] jobs = {{PREF_SMS, "문자"}, {PREF_SMSAUTO, "문자(자동)"}, {PREF_SELF, "본인 알림"}};
         for (String[] j : jobs) {
             SharedPreferences s = getSharedPreferences(j[0], MODE_PRIVATE);
             if (s.getBoolean("on", false)) {

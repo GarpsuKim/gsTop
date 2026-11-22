@@ -202,7 +202,9 @@ final class TelegramSender {
         return "■ 지도에서 보기\n"
                 + "   구글: https://maps.google.com/?q=" + la + "," + lo + "\n\n"
                 + "   카카오: https://map.kakao.com/link/map/" + name + "," + la + "," + lo + "\n\n"
-                + "   네이버: https://map.naver.com/p?c=" + lo + "," + la + ",17,0,0,0,dh";
+                // 네이버: 예전 "p?c=경도,위도" 형식은 지도 중심만 옮기고 표시(핀)가 없었음
+                //  -> lng/lat/title 형식 (네이버 담당자 포럼 안내): 그 자리에 "현재 위치" 핀 표시
+                + "   네이버: https://map.naver.com/?lng=" + lo + "&lat=" + la + "&title=" + name;
     }
 
     // 받는 사람(쉼표 구분) 모두에게 전송. 성공하면 null, 실패하면 오류 내용

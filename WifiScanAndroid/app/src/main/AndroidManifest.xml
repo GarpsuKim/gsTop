@@ -60,6 +60,14 @@
             android:label="SOS"
             android:screenOrientation="portrait" />
 
+        <!-- 화면 1100: 보호자 등록 -->
+        <activity
+            android:name=".GuardianActivity"
+            android:exported="false"
+            android:label="나의 보호자 등록"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- 화면 1075: 사용자 등록 -->
         <activity
             android:name=".UserActivity"

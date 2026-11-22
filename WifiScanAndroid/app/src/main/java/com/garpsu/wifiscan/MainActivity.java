@@ -75,15 +75,15 @@ public class MainActivity extends Activity {
 
     private static final int REQ_PERM = 1, REQ_NOTI = 2;
     private CheckBox bgCheck;
-    private Button tgBtn, kakaoBtn, emailBtn, kmailBtn, senderBtn, selfBtn, smsBtn;
+    private Button tgBtn, kakaoBtn, emailBtn, selfBtn, smsBtn, smsAutoBtn;
     private static final int REQ_CONTACT = 3;   // 연락처에서 전화번호 고르기
     private static final int REQ_BT = 4;        // 블루투스(근처 기기) 권한
     private static final int REQ_CALL = 5;      // 전화 걸기 권한 (SOS·보호자 바로 걸기)
-    private LinearLayout sosCallBox;            // (2) 탭: 보호자 바로 걸기 버튼들
     private TextView sosInfo;                   // (3) 탭: SOS 설정 요약
     private LinearLayout btBox;                 // (1) 탭: 홈 PC 블루투스
     private EditText contactTarget;             // 고른 번호를 넣을 칸
     private boolean contactWithName;            // true: "이름 번호"로 넣기 (보호자), false: 번호만 (문자)
+    private EditText contactNameTarget;         // (6) 피보호자 카드: 번호 칸을 바꾸고, 이름 칸이 비었으면 이름도 채움
     private LinearLayout msgBox; // (4) 위치 보내기 탭: 정해진 시각 위치 보내기 버튼 묶음
     private static final int MODE_NONE = 0, MODE_WIFI = 1, MODE_LOC = 3, MODE_LAN = 4;
 
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
     private LocationManager lm;
     private TextView text, status, statusNote; // text: 가장 최근에 검색을 시작한 탭의 결과 화면
     private LinearLayout wifiRows; // 공유기 체크박스 목록 (탭1)
-    private static final int TABS = 5; // (1) 홈 공유기 등록 (2) 현재 위치 (3) 알림 설정 (4) 위치 보내기 (5) 보호자 모드  ※ 기기 목록 탭은 삭제(Play 스토어 정책)
+    private static final int TABS = 6; // (1) 홈 공유기 등록 (2) 현재 위치 (3) 알림 설정 (4) 위치 보내기 (5) 응답 모드 (6) 보호자 전용 모드  ※ 기기 목록 탭은 삭제(Play 스토어 정책)
     private final TextView[] texts = new TextView[TABS];
     private final Button[] startBtns = new Button[TABS]; // (4) 탭에는 [검색시작]이 없음 (null)
     private final Button[] tabBtns = new Button[TABS];
@@ -135,11 +135,64 @@ public class MainActivity extends Activity {
 
         @Override
         public void onLocationChanged(Location loc) {
-            if (mode == MODE_LOC) {
-                showLocation(loc, false);
+            if (mode != MODE_LOC || loc == null) {
+                return;
             }
+            // 지금 보이는 위치보다 덜 정확한 새 값은, 보이는 값이 15초 넘게 묵었을 때만 바꿈
+            Location cur = lastLoc;
+            if (cur != null && cur.hasAccuracy() && loc.hasAccuracy() && loc.getAccuracy() > cur.getAccuracy()
+                    && loc.getTime() - cur.getTime() < 15 * 1000) {
+                return;
+            }
+            showLocation(loc, false);
         }
     };
+
+    // 구글 통합 위치 (GPS + Wi-Fi + 기지국 + 센서). Play 서비스가 없으면 안 씀
+    private com.google.android.gms.location.FusedLocationProviderClient fused;
+    private com.google.android.gms.location.LocationCallback fusedCb;
+
+    private boolean startFused() {
+        stopFused();
+        try {
+            if (com.google.android.gms.common.GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(this)
+                    != com.google.android.gms.common.ConnectionResult.SUCCESS) {
+                return false;
+            }
+            if (fused == null) {
+                fused = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this);
+            }
+            fusedCb = new com.google.android.gms.location.LocationCallback() {
+                @Override
+                public void onLocationResult(com.google.android.gms.location.LocationResult r) {
+                    for (Location l : r.getLocations()) {
+                        locListener.onLocationChanged(l);
+                    }
+                }
+            };
+            fused.requestLocationUpdates(new com.google.android.gms.location.LocationRequest.Builder(
+                            com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                            .setMinUpdateIntervalMillis(500).build(),
+                    fusedCb, Looper.getMainLooper());
+            return true;
+        } catch (Throwable e) {
+            fusedCb = null;
+            return false;
+        }
+    }
+
+    private void stopFused() {
+        if (fused != null && fusedCb != null) {
+            fused.removeLocationUpdates(fusedCb);
+        }
+        fusedCb = null;
+    }
+
+    // 위치 갱신 모두 멈춤 (기본 GPS·통신망 + 구글 통합 위치)
+    private void stopLocUpdates() {
+        lm.removeUpdates(locListener);
+        stopFused();
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -191,15 +244,16 @@ public class MainActivity extends Activity {
         statusNote.setPadding(0, 0, 0, 20);
 
         // 탭 4개: 홈 공유기 등록 / 기기 목록 / 현재 위치 / 알림 설정
-        final String[] names = {"(1) 홈 공유기 등록", "(2) 현재 위치", "(3) 알림 설정", "(4) 위치 보내기", "(5) 보호자 모드"};
-        final Runnable[] starts = {this::wifiScan, this::location, null, null, null};
+        final String[] names = {"(1) 홈 공유기 등록", "(2) 현재 위치", "(3) 알림 설정", "(4) 위치 보내기", "(5) 응답 모드",
+                "(6) 보호자 전용 모드"};
+        final Runnable[] starts = {this::wifiScan, this::location, null, null, null, null};
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         for (int i = 0; i < TABS; i++) {
             final int idx = i;
             tabBtns[i] = addButton(tabs, names[i], v -> selectTab(idx));
-            tabBtns[i].setTextSize(11); // 탭 5개라 글자를 조금 작게
+            tabBtns[i].setTextSize(10); // 탭 6개라 글자를 작게
         }
 
         LinearLayout root = new LinearLayout(this);
@@ -232,13 +286,12 @@ public class MainActivity extends Activity {
             final int idx = i;
             LinearLayout actions = new LinearLayout(this);
             actions.setOrientation(LinearLayout.HORIZONTAL);
-            if (starts[i] != null) {
+            if (starts[i] != null && i != 0) { // 1010 의 [재검색] 은 영역 3 맨 위로 옮김
                 startBtns[i] = addButton(actions, "검색시작", v -> starts[idx].run());
             }
             if (i == 0) {
-                addButton(actions, "등록", v -> saveRouters());
                 addButton(actions, "등록 확인", v -> showRegistered());
-                addButton(actions, "보호자 등록", v -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
+                addButton(actions, "나의 보호자", v -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
                 addButton(actions, "사용자 등록", v -> startActivity(new Intent(this, UserActivity.class))); // 화면 1075
             }
             if (i == 1) { // (2) 현재 위치
@@ -250,7 +303,7 @@ public class MainActivity extends Activity {
             texts[i] = new TextView(this);
             texts[i].setTextSize(15);
             texts[i].setPadding(40, 40, 40, 40);
-            texts[i].setText(i >= 2 ? "" : "[검색시작]을 눌러 주세요.");
+            texts[i].setText(i >= 2 ? "" : i == 0 ? "[재검색]을 눌러 주세요." : "[검색시작]을 눌러 주세요.");
 
             LinearLayout body = new LinearLayout(this);
             body.setOrientation(LinearLayout.VERTICAL);
@@ -259,21 +312,27 @@ public class MainActivity extends Activity {
             } else if (i == 3) {
                 buildSendTab(body);  // (4) 위치 보내기: 정해진 시각 위치 보내기
             } else if (i == 4) {
-                buildGuardianTab(body); // (5) 보호자 모드: 아직 준비 중 (빈 화면)
+                buildGuardianTab(body); // (5) 응답 모드: 원격 위치 요청에 회신
+            } else if (i == 5) {
+                buildWardTab(body);     // (6) 보호자 전용 모드: 피보호자 관리 (화면 1058)
             }
             if (i == 0) {
                 // (백그라운드 귀가 감지 체크는 화면 맨 위 가운데 [백그라운드 실행]으로 옮김)
                 savedBox = new LinearLayout(this); // 저장된 공유기 목록 (스캔 결과 위)
                 savedBox.setOrientation(LinearLayout.VERTICAL);
                 body.addView(savedBox);
+                body.addView(thickDivider(), thickDividerLp()); // 영역 1(저장된 공유기) | 영역 2
 
                 btBox = new LinearLayout(this); // 홈 PC 블루투스 (페어링된 기기에서 고르기)
                 btBox.setOrientation(LinearLayout.VERTICAL);
                 body.addView(btBox);
                 renderBt();
-            }
-            if (i == 1) {
-                buildSosBox(body); // (2) 현재 위치 맨 위: [SOS] (2초 길게) + 보호자 바로 걸기
+                body.addView(thickDivider(), thickDividerLp()); // 영역 2(홈 PC 블루투스) | 영역 3(검색 결과)
+                // 영역 3 맨 위: [재검색] (공유기 검색, 예전 상단 [검색시작])
+                LinearLayout scanRow = new LinearLayout(this);
+                scanRow.setPadding(30, 0, 30, 0);
+                startBtns[0] = addButton(scanRow, "재검색", v -> wifiScan());
+                body.addView(scanRow);
             }
             if (i < 2) { // (3)·(4) 탭은 결과 글자 화면 없음
                 body.addView(texts[i]);
@@ -282,6 +341,7 @@ public class MainActivity extends Activity {
                 wifiRows = new LinearLayout(this);
                 wifiRows.setOrientation(LinearLayout.VERTICAL);
                 body.addView(wifiRows);
+                body.addView(registerRow(v -> saveRouters())); // 영역 3(검색 결과) 오른쪽 아래 [등록]
             }
             ScrollView scroll = new ScrollView(this);
             scroll.addView(body);
@@ -294,7 +354,8 @@ public class MainActivity extends Activity {
             }
             panels[i].addView(scroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            panels[i].addView(ScreenId.label(this, String.valueOf(1010 + i * 10))); // 화면 번호 1010~1050 (맨 아래 검은 줄)
+            // 화면 번호 1010~1050 (맨 아래 검은 줄). (6) 탭은 1060 이 SOS 화면이라 1058
+            panels[i].addView(ScreenId.label(this, i == 5 ? "1058" : String.valueOf(1010 + i * 10)));
             root.addView(panels[i], new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         }
@@ -304,6 +365,10 @@ public class MainActivity extends Activity {
         text = texts[0];
         selectTab(0);
         checkHome(); // 실행 처음에 무조건 HomeBack / NotHome 판정
+        handleMailAsk(getIntent()); // 이메일 위치 질문 알림을 눌러 열린 경우 (화면 1057)
+        if (savedInstanceState == null) {
+            HomeService.mailRescan(this); // 앱 시작: 받은편지함에 남은 위치 요청 메일을 찾아 회신·삭제
+        }
         if (loadRouters().isEmpty() && BtHome.registered(this).isEmpty()) {
             showIntro(); // 홈 공유기가 아직 없으면 안내 팝업 -> 닫으면 위치 권한 요청
         } else {
@@ -454,11 +519,9 @@ public class MainActivity extends Activity {
         handler.post(homeCheck); // 실행 즉시 검사 후 주기적으로 반복
         if (tgBtn != null) {
             refreshMsgButtons(); // 설정 도우미 등에서 돌아왔을 때 체크·글자 갱신
-            updateSenderButton();
             updateEventInfo();
         }
         renderBt(); // 블루투스 설정(페어링)에서 돌아왔을 때 목록 갱신
-        renderSosCalls(); // 보호자 번호가 바뀌었을 수 있음
         updateRemoteInfo();
         updateSosInfo();
     }
@@ -468,7 +531,7 @@ public class MainActivity extends Activity {
         super.onPause();
         unregisterReceiver(receiver);
         handler.removeCallbacks(homeCheck);
-        lm.removeUpdates(locListener);
+        stopLocUpdates();
     }
 
     @Override
@@ -490,7 +553,7 @@ public class MainActivity extends Activity {
             }
         } else if (code == REQ_PERM) {
             if (hasPermission()) {
-                texts[curTab].setText("[검색시작]을 눌러 주세요.");
+                texts[curTab].setText(curTab == 0 ? "[재검색]을 눌러 주세요." : "[검색시작]을 눌러 주세요.");
                 checkHome();
                 sendStartMessageOnce(); // 앱 시작 위치 통보 (권한이 없어 미뤄 둔 경우)
                 if (HomeService.anyOn(this)) {
@@ -522,7 +585,7 @@ public class MainActivity extends Activity {
     private void begin(int newMode, String msg) {
         mode = newMode;
         scanId++;
-        lm.removeUpdates(locListener);
+        stopLocUpdates();
         int idx = newMode == MODE_WIFI ? 0 : 1; // (1) 홈 공유기 등록 / (2) 현재 위치
         text = texts[idx];
         startBtns[idx].setText("재검색");
@@ -606,7 +669,7 @@ public class MainActivity extends Activity {
         text.setText("[ 공유기 " + list.size() + "개 · 이름 " + groups.size() + "개 ]  " + now()
                 + (list.isEmpty()
                 ? "\n\n결과가 없습니다.\n위치(GPS) 서비스가 켜져 있는지 확인하세요."
-                : "\n체크한 공유기를 [등록]으로 등록하세요.\n(이름을 체크하면 같은 이름의 공유기가 모두 체크됩니다)"));
+                : "\n체크한 공유기를 [저장]으로 등록하세요.\n(이름을 체크하면 같은 이름의 공유기가 모두 체크됩니다)"));
 
         for (String ssid : order) {
             List<ScanResult> g = groups.get(ssid);
@@ -725,6 +788,7 @@ public class MainActivity extends Activity {
         String conn = connectedBssid();
         savedConn = String.valueOf(conn);
         savedBox.removeAllViews();
+        savedChecks.clear();
         Map<String, String> saved = loadRouters();
 
         TextView h = new TextView(this);
@@ -734,9 +798,17 @@ public class MainActivity extends Activity {
         h.setPadding(40, 30, 40, 10);
         savedBox.addView(h);
 
+        // 영역 1 안내문
+        TextView guide = new TextView(this);
+        guide.setText("사용자 폰이 이 목록에서 체크된 공유기들 중 하나에 연결되면, [HomeBack]로 판단합니다");
+        guide.setTextSize(13);
+        guide.setTextColor(Color.DKGRAY);
+        guide.setPadding(40, 0, 40, 10);
+        savedBox.addView(guide);
+
         if (saved.isEmpty()) {
             TextView e = new TextView(this);
-            e.setText("없음 — 아래 검색 결과에서 체크 후 [등록]을 누르세요.");
+            e.setText("없음 — 아래 검색 결과에서 체크 후 [저장]을 누르세요.");
             e.setTextColor(C_GRAY);
             e.setPadding(40, 0, 40, 10);
             savedBox.addView(e);
@@ -766,30 +838,82 @@ public class MainActivity extends Activity {
                 append(s, wifiScanned ? "주변에 없음" : "검색 전", C_GRAY, false);
             }
 
-            TextView tv = new TextView(this);
-            tv.setText(s);
-            tv.setTextSize(14);
-            Button del = new Button(this);
-            del.setText("삭제");
-            del.setTextSize(13);
-            del.setOnClickListener(v -> deleteRouter(bssid));
+            // 체크 = 계속 등록, 체크 해제 후 이 영역의 [등록] = 등록에서 빼기
+            CheckBox cb = new CheckBox(this);
+            cb.setText(s);
+            cb.setTextSize(14);
+            cb.setChecked(true);
+            cb.setTag(bssid);
+            savedChecks.add(cb);
 
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(40, 10, 20, 10);
+            row.setPadding(30, 6, 20, 6);
             if (bssid.equals(conn)) {
                 row.setBackgroundColor(0x1A2E7D32);
             }
-            row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            row.addView(del, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.addView(cb, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             savedBox.addView(row);
         }
+        if (!items.isEmpty()) {
+            savedBox.addView(registerRow(v -> commitSaved())); // 영역 1 오른쪽 아래 [등록]
+        }
+        // (아래 영역과의 구분은 굵은 구분선 thickDivider)
+    }
 
-        View line = new View(this);
-        line.setBackgroundColor(0xFFDDDDDD);
-        savedBox.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 3));
+    private final List<CheckBox> savedChecks = new ArrayList<>(); // 영역 1: 저장된 공유기 체크박스
+
+    // 영역 1 [등록]: 체크를 해제한 공유기만 등록에서 뺌
+    private void commitSaved() {
+        Map<String, String> saved = loadRouters();
+        int removed = 0;
+        for (CheckBox cb : savedChecks) {
+            if (!cb.isChecked() && saved.remove((String) cb.getTag()) != null) {
+                removed++;
+                for (CheckBox ap : apChecks) { // 아래 검색 결과의 체크도 맞춤
+                    if (((String[]) ap.getTag())[0].equals(cb.getTag())) {
+                        ap.setChecked(false);
+                    }
+                }
+            }
+        }
+        writeRouters(saved);
+        Toast.makeText(this, removed == 0 ? "변경 없음 (홈 공유기 " + saved.size() + "개)"
+                : removed + "개를 등록에서 뺐습니다 (홈 공유기 " + saved.size() + "개)", Toast.LENGTH_SHORT).show();
+        renderSaved();
+        checkHome();
+    }
+
+    // 영역마다 오른쪽 아래 [저장] 버튼 한 줄
+    private LinearLayout registerRow(View.OnClickListener l) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setGravity(Gravity.END);
+        r.setPadding(20, 6, 30, 0);
+        Button b = new Button(this);
+        b.setText("저장");
+        b.setTextSize(14);
+        b.setTypeface(null, Typeface.BOLD);
+        b.setOnClickListener(l);
+        r.addView(b);
+        return r;
+    }
+
+    // 화면 1010 영역 사이 굵은 구분선 (위아래로 넓은 공간)
+    private View thickDivider() {
+        View v = new View(this);
+        v.setBackgroundColor(0xFF424242);
+        return v;
+    }
+
+    private LinearLayout.LayoutParams thickDividerLp() {
+        float d = getResources().getDisplayMetrics().density;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * d)); // 굵기 4dp
+        lp.topMargin = (int) (28 * d);    // 위 공간
+        lp.bottomMargin = (int) (28 * d); // 아래 공간
+        return lp;
     }
 
     // [등록 확인]: 등록된 홈 공유기와 홈 PC 블루투스만 모아서 보여 줌
@@ -800,7 +924,7 @@ public class MainActivity extends Activity {
         Map<String, String> routers = loadRouters();
         append(s, "■ 홈 공유기 (" + routers.size() + "개)\n", C_MARK, true);
         if (routers.isEmpty()) {
-            append(s, "  없음 — [검색시작] 후 체크하고 [등록]을 누르세요.\n", C_GRAY, false);
+            append(s, "  없음 — [재검색] 후 체크하고 [저장]을 누르세요.\n", C_GRAY, false);
         }
         List<Map.Entry<String, String>> items = new ArrayList<>(routers.entrySet());
         Collections.sort(items, (a, b) -> a.getValue().compareTo(b.getValue()));
@@ -883,13 +1007,14 @@ public class MainActivity extends Activity {
             return;
         }
         btBox.removeAllViews();
+        btChecks.clear();
         TextView h = new TextView(this);
         h.setText("홈 PC 블루투스 (" + BtHome.registered(this).size() + "개 등록)");
         h.setTextSize(16);
         h.setTypeface(null, Typeface.BOLD);
         h.setPadding(40, 30, 40, 6);
         btBox.addView(h);
-        btNote("폰과 PC를 미리 페어링한 뒤 아래에서 PC를 체크하세요.\n"
+        btNote("폰과 PC를 미리 페어링한 뒤 아래에서 PC를 체크하고 [저장]을 누르세요.\n"
                 + "PC가 가까이 있으면 Wi-Fi가 꺼져 있어도 HomeBack으로 판정합니다. (PC 블루투스가 켜져 있어야 함)",
                 Color.GRAY);
 
@@ -926,24 +1051,8 @@ public class MainActivity extends Activity {
                 cb.setText(s);
                 cb.setTextSize(14);
                 cb.setChecked(on);
-                cb.setOnClickListener(v -> {
-                    Set<String> set = BtHome.registered(this);
-                    java.util.Iterator<String> it = set.iterator();
-                    while (it.hasNext()) {
-                        if (it.next().startsWith(d[0] + "|")) {
-                            it.remove();
-                        }
-                    }
-                    if (cb.isChecked()) {
-                        set.add(d[0] + "|" + d[1]);
-                    }
-                    BtHome.save(this, set);
-                    Toast.makeText(this, cb.isChecked() ? d[1] + " 을(를) 홈 PC로 등록했습니다."
-                            : d[1] + " 등록을 해제했습니다.", Toast.LENGTH_SHORT).show();
-                    renderBt();
-                    HomeService.refresh(this);
-                    checkHome();
-                });
+                cb.setTag(d); // {MAC, 이름}. 체크만 바꾸고, 이 영역의 [등록]을 눌러야 저장
+                btChecks.add(cb);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 lp.leftMargin = 40;
@@ -959,12 +1068,28 @@ public class MainActivity extends Activity {
             btButton(row, "지금 확인", v -> checkBtNow());
         }
         btBox.addView(row);
+        if (!btChecks.isEmpty()) {
+            btBox.addView(registerRow(v -> commitBt())); // 영역 2 오른쪽 아래 [등록]
+        }
+        // (아래 검색 결과 영역과의 구분은 굵은 구분선 thickDivider)
+    }
 
-        View line = new View(this);
-        line.setBackgroundColor(0xFFDDDDDD);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 3);
-        lp.topMargin = 16;
-        btBox.addView(line, lp);
+    private final List<CheckBox> btChecks = new ArrayList<>(); // 영역 2: 페어링된 기기 체크박스
+
+    // 영역 2 [등록]: 체크한 기기만 홈 PC 블루투스로 저장
+    private void commitBt() {
+        Set<String> set = new HashSet<>();
+        for (CheckBox cb : btChecks) {
+            if (cb.isChecked()) {
+                String[] d = (String[]) cb.getTag();
+                set.add(d[0] + "|" + d[1]);
+            }
+        }
+        BtHome.save(this, set);
+        Toast.makeText(this, "등록했습니다 (홈 PC 블루투스 " + set.size() + "개)", Toast.LENGTH_SHORT).show();
+        renderBt();
+        HomeService.refresh(this);
+        checkHome();
     }
 
     // [지금 확인]: 등록한 PC가 가까이 있는지 바로 찾아봄 (몇 초 걸림)
@@ -1047,7 +1172,7 @@ public class MainActivity extends Activity {
     // 화면에 나온 공유기 중 체크한 것은 저장, 체크 해제한 것은 삭제
     private void saveRouters() {
         if (apChecks.isEmpty()) {
-            Toast.makeText(this, "먼저 [검색시작]으로 공유기를 찾으세요.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "먼저 [재검색]으로 공유기를 찾으세요.", Toast.LENGTH_SHORT).show();
             return;
         }
         Map<String, String> saved = loadRouters();
@@ -1347,6 +1472,9 @@ public class MainActivity extends Activity {
             }
             lm.requestLocationUpdates(p, 1000, 0, locListener);
         }
+        if (startFused()) { // 구글 통합 위치도 함께 (더 정확한 값이 오면 그걸로 바뀜)
+            any = true;
+        }
         if (!any) {
             text.setText("위치(GPS) 서비스가 꺼져 있습니다.");
             return;
@@ -1584,15 +1712,19 @@ public class MainActivity extends Activity {
             return sp.getString("token", "").isEmpty() || sp.getString("chats", "").trim().isEmpty()
                     ? "텔레그램 설정(봇 토큰·받는 사람)을 먼저 해 주세요." : null;
         }
+        if (HomeService.PREF_KAKAO.equals(pref) && !kakaoInstalled()) {
+            return "카카오톡이 설치되어 있지 않습니다.";
+        }
+        // 그 밖: 1040 맨 아래 공통 '보내는 시각'이 저장되어 있어야 함
+        if (schedProblem() != null) {
+            return schedProblem();
+        }
         if (HomeService.PREF_KAKAO.equals(pref)) {
-            return kakaoInstalled() ? null : "카카오톡이 설치되어 있지 않습니다.";
+            return null;
         }
-        // 이메일 / 카톡 이메일 / 문자 / 본인 알림: 시각 설정 필요
-        if (!sp.contains("mode")) {
-            return "먼저 보내는 시각 등을 설정해 주세요.";
-        }
-        if ("times".equals(sp.getString("mode", "")) && sp.getString("times", "").trim().isEmpty()) {
-            return "보낼 시각을 먼저 등록해 주세요.";
+        if (HomeService.PREF_SMSAUTO.equals(pref) && (sp.getString("apiKey", "").isEmpty()
+                || sp.getString("apiSecret", "").isEmpty() || sp.getString("from", "").isEmpty())) {
+            return "솔라피 API Key·Secret·발신번호를 먼저 설정해 주세요.";
         }
         if (!HomeService.PREF_SELF.equals(pref) && sp.getString("to", "").trim().isEmpty()) {
             return "받는 사람을 먼저 설정해 주세요.";
@@ -1626,10 +1758,14 @@ public class MainActivity extends Activity {
                     != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTI);
             }
-            // 지정 시각: 다음 시각부터 / 그 밖(간격): 바로 1회 후 간격대로
-            long next = "times".equals(sp.getString("mode", ""))
-                    ? HomeService.nextTime(sp.getString("times", ""), System.currentTimeMillis()) : 0;
-            sp.edit().putBoolean("on", true).putLong("next", next).apply();
+            if (TelegramSender.PREF.equals(pref)) {
+                sp.edit().putBoolean("on", true).putLong("next", 0).apply(); // 텔레그램은 자체 간격
+            } else {
+                // 1040 공통 보내는 시각을 복사 (지정 시각: 다음 시각부터 / 간격: 바로 1회 후 간격대로)
+                SharedPreferences.Editor ed = sp.edit().putBoolean("on", true);
+                copySched(ed, true);
+                ed.apply();
+            }
         } else {
             sp.edit().putBoolean("on", false).apply();
         }
@@ -1641,10 +1777,13 @@ public class MainActivity extends Activity {
     // ---------- 본인 폰 알림 / 일반 문자(수동) : 정해진 시각·간격마다 알림 ----------
 
     private void updateJobButtons() {
-        String[] prefs = {HomeService.PREF_SELF, HomeService.PREF_SMS};
-        Button[] btns = {selfBtn, smsBtn};
-        String[] names = {"본인 폰 알림 (자동)", "일반 문자 (수동)"};
-        for (int i = 0; i < 2; i++) {
+        String[] prefs = {HomeService.PREF_SELF, HomeService.PREF_SMS, HomeService.PREF_SMSAUTO};
+        Button[] btns = {selfBtn, smsBtn, smsAutoBtn};
+        String[] names = {"본인 폰 알림 (자동)", "일반 문자 (수동)", "일반 문자 (자동)"};
+        for (int i = 0; i < prefs.length; i++) {
+            if (btns[i] == null) {
+                continue;
+            }
             SharedPreferences sp = getSharedPreferences(prefs[i], MODE_PRIVATE);
             boolean on = sp.getBoolean("on", false);
             setJobText(btns[i], names[i], on ? HomeService.emailSchedule(sp) : null);
@@ -1720,15 +1859,19 @@ public class MainActivity extends Activity {
 
     // 본인 폰 알림(PREF_SELF) / 일반 문자(PREF_SMS) 설정 팝업
     private void showJobDialog(final String pref) {
-        final boolean sms = HomeService.PREF_SMS.equals(pref);
-        final String title = sms ? "일반 문자 (수동)" : "본인 폰 알림 (자동)";
+        final boolean auto = HomeService.PREF_SMSAUTO.equals(pref); // 일반 문자(자동, 솔라피)
+        final boolean sms = HomeService.PREF_SMS.equals(pref) || auto;
+        final String title = auto ? "일반 문자 (자동 · 솔라피)" : sms ? "일반 문자 (수동)" : "본인 폰 알림 (자동)";
         final SharedPreferences sp = getSharedPreferences(pref, MODE_PRIVATE);
         LinearLayout f = new LinearLayout(this);
         f.setOrientation(LinearLayout.VERTICAL);
         f.setPadding(60, 10, 60, 10);
 
         TextView info = new TextView(this);
-        info.setText(sms
+        info.setText(auto
+                ? "정해진 시각마다 위치를 확인해 솔라피(유료 문자 서비스)로 바로 보냅니다.\n"
+                + "솔라피 가입, API 키 발급, 발신번호 사전등록이 필요합니다. https://solapi.com"
+                : sms
                 ? "정해진 시각마다 위치를 확인해 알림을 띄웁니다. 알림을 누르면 받는 사람 번호와 내용이 "
                 + "채워진 문자 앱이 열리고, [전송]을 누르면 보내집니다. (지금 요금제로 발송, 가입 불필요)"
                 : "정해진 시각마다 이 폰에 현재 위치 알림을 띄웁니다. 아무에게도 보내지 않습니다.\n"
@@ -1736,6 +1879,28 @@ public class MainActivity extends Activity {
         info.setTextColor(Color.DKGRAY);
         info.setPadding(0, 16, 0, 0);
         f.addView(info);
+
+        // 솔라피 (자동 문자 전용)
+        final EditText apiKey = new EditText(this), apiSecret = new EditText(this), sender = new EditText(this);
+        if (auto) {
+            info.setAutoLinkMask(android.text.util.Linkify.WEB_URLS);
+            info.setText(info.getText().toString());
+            label(f, "솔라피 API Key");
+            apiKey.setSingleLine(true);
+            apiKey.setText(sp.getString("apiKey", ""));
+            f.addView(apiKey);
+            label(f, "솔라피 API Secret");
+            apiSecret.setSingleLine(true);
+            apiSecret.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            apiSecret.setText(sp.getString("apiSecret", ""));
+            f.addView(apiSecret);
+            label(f, "발신번호 (솔라피에 등록한 번호)");
+            sender.setSingleLine(true);
+            sender.setInputType(InputType.TYPE_CLASS_PHONE);
+            sender.setHint("예: 010-1234-5678");
+            sender.setText(sp.getString("from", ""));
+            f.addView(sender);
+        }
 
         final EditText to = new EditText(this);
         final RadioButton rShort = new RadioButton(this), rFull = new RadioButton(this);
@@ -1751,6 +1916,7 @@ public class MainActivity extends Activity {
             pick.setTextSize(13);
             pick.setOnClickListener(v -> {
                 contactTarget = to;
+                contactNameTarget = null;
                 contactWithName = false; // 문자 받는 사람 칸에는 번호만
                 try {
                     startActivityForResult(new Intent(Intent.ACTION_PICK,
@@ -1774,22 +1940,14 @@ public class MainActivity extends Activity {
             f.addView(fmt);
         }
 
-        final ScheduleUi sch = new ScheduleUi(f, sp);
-
-        final CheckBox on = new CheckBox(this);
-        on.setText("자동알림시작");
-        on.setTextSize(16);
-        on.setTypeface(null, Typeface.BOLD);
-        on.setChecked(sp.getBoolean("on", false));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = 24;
-        // 켜기·끄기는 메인 화면 버튼 앞의 체크박스로 (팝업에는 표시하지 않음)
+        // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀 (이 팝업에서는 입력하지 않음)
+        schedNote(f);
 
         TextView last = new TextView(this);
         long lt = sp.getLong("lastTime", 0), nx = sp.getLong("next", 0);
         SimpleDateFormat df = new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA);
-        last.setText((lt == 0 ? "아직 알림을 띄운 적이 없습니다." : "마지막 알림: " + df.format(new Date(lt)))
+        last.setText((lt == 0 ? "아직 보낸 적이 없습니다." : (auto ? "마지막 발송: " : "마지막 알림: ") + df.format(new Date(lt))
+                + (auto ? "  " + sp.getString("lastResult", "") : ""))
                 + (sp.getBoolean("on", false) && nx > 0 ? "\n다음 알림: " + df.format(new Date(nx)) : ""));
         last.setTextColor(Color.GRAY);
         last.setPadding(0, 16, 0, 0);
@@ -1807,22 +1965,23 @@ public class MainActivity extends Activity {
         d.setOnShowListener(x -> {
             d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 String nums = to.getText().toString().trim();
-                String tm = sch.timesText();
-                boolean start = on.isChecked();
+                boolean start = true; // 저장 = 1040 화면의 이 줄 자동 체크(켜기)
                 if (sms && !nums.isEmpty() && !validPhones(nums)) {
                     Toast.makeText(this, "전화번호 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                if (sch.byTimes() && tm == null) {
-                    Toast.makeText(this, "시각은 08:00 처럼 입력하세요.", Toast.LENGTH_SHORT).show();
+                if (schedProblem() != null) {
+                    Toast.makeText(this, schedProblem(), Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (start && auto && (apiKey.getText().toString().trim().isEmpty()
+                        || apiSecret.getText().toString().trim().isEmpty()
+                        || sender.getText().toString().trim().isEmpty())) {
+                    Toast.makeText(this, "솔라피 API Key·Secret·발신번호를 입력하세요.", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 if (start && sms && nums.isEmpty()) {
                     Toast.makeText(this, "받는 사람 번호를 입력하세요.", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (start && sch.byTimes() && tm.isEmpty()) {
-                    Toast.makeText(this, "보낼 시각을 하나 이상 등록하세요.", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 if (start && !hasPermission()) {
@@ -1830,16 +1989,15 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "위치 권한을 허용한 뒤 다시 저장하세요.", Toast.LENGTH_LONG).show();
                     return;
                 }
-                SharedPreferences.Editor ed = sp.edit()
-                        .putString("mode", sch.byTimes() ? "times" : "interval")
-                        .putString("times", tm == null ? "" : tm)
-                        .putInt("interval", sch.minutes()).putBoolean("on", start);
+                SharedPreferences.Editor ed = sp.edit().putBoolean("on", start);
+                copySched(ed, start); // 1040 공통 보내는 시각 + 다음 송신 시각
                 if (sms) {
                     ed.putString("to", nums).putBoolean("short", rShort.isChecked());
                 }
-                if (start) {
-                    // 지정 시각: 다음 시각에 알림 / 일정 간격: 바로 1회 알림 후 간격대로
-                    ed.putLong("next", sch.byTimes() ? HomeService.nextTime(tm, System.currentTimeMillis()) : 0);
+                if (auto) {
+                    ed.putString("apiKey", apiKey.getText().toString().trim())
+                            .putString("apiSecret", apiSecret.getText().toString().trim())
+                            .putString("from", sender.getText().toString().trim());
                 }
                 ed.apply();
                 if (start && Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
@@ -1864,8 +2022,13 @@ public class MainActivity extends Activity {
                 last.setText("위치 메시지 만드는 중...");
                 new Thread(() -> {
                     String msg = shortFmt ? TelegramSender.shortMessage(this, loc) : TelegramSender.message(this, loc);
+                    // 자동 문자: 솔라피로 바로 발송하고 결과 표시 (팝업 유지)
+                    final String err = auto ? SmsSender.send(apiKey.getText().toString(), apiSecret.getText().toString(),
+                            sender.getText().toString(), nums, msg) : null;
                     runOnUiThread(() -> {
-                        if (sms) {
+                        if (auto) {
+                            last.setText(err == null ? "지금 테스트: 성공 (문자를 보냈습니다)" : "지금 테스트: 실패: " + err);
+                        } else if (sms) {
                             d.dismiss();
                             try {
                                 startActivity(HomeService.smsCompose(nums, msg));
@@ -1881,7 +2044,7 @@ public class MainActivity extends Activity {
             });
         });
         d.show();
-        ScreenId.tag(d, sms ? "1230" : "1140");
+        ScreenId.tag(d, auto ? "1235" : sms ? "1230" : "1140");
     }
 
     // 전화번호 목록 확인 (숫자 3자리 이상씩)
@@ -1909,6 +2072,14 @@ public class MainActivity extends Activity {
             if (c != null && c.moveToFirst()) {
                 String num = c.getString(0);
                 String name = c.getString(1);
+                if (contactNameTarget != null) { // (6) 피보호자 카드: 번호는 바꾸고, 이름은 비었을 때만
+                    contactTarget.setText(num);
+                    if (name != null && contactNameTarget.getText().toString().trim().isEmpty()) {
+                        contactNameTarget.setText(name);
+                    }
+                    contactNameTarget = null;
+                    return;
+                }
                 if (contactWithName && name != null && !name.trim().isEmpty()) {
                     num = name.replaceAll("[,;0-9+]", "").trim() + " " + num; // "엄마 010-1234-5678"
                 }
@@ -1920,12 +2091,321 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---------- (5) 보호자 모드 탭: 아직 비워 둠 (기능은 추후 결정) ----------
+    // 본인 발신 Gmail(사용자 등록 1075)이 없으면 경고 팝업(화면 1145)을 띄우고 true
+    private boolean noUserMail(String why) {
+        SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        if (!user.getString("mail", "").trim().isEmpty() && !user.getString("mailPass", "").trim().isEmpty()) {
+            return false;
+        }
+        ScreenId.tag(new AlertDialog.Builder(this)
+                .setTitle("⚠️ 발신 이메일 미등록")
+                .setMessage(why + " 먼저 본인 Gmail 과 앱 비밀번호를 등록해야 합니다.\n\n"
+                        + "(1) 홈 공유기 등록 → [사용자 등록] 에서 등록하고 검증하세요.")
+                .setPositiveButton("사용자 등록 열기", (d, w) -> startActivity(new Intent(this, UserActivity.class)))
+                .setNegativeButton("닫기", null)
+                .show(), "1145");
+        return true;
+    }
 
-    private TextView remoteInfo;
+    // ---------- 이메일 위치 질문: 회신할까요? (화면 1057, 알림을 눌러 앱이 열렸을 때) ----------
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleMailAsk(intent);
+    }
+
+    private void handleMailAsk(Intent it) {
+        final String from = it == null ? null : it.getStringExtra("mailAsk");
+        if (from == null) {
+            return;
+        }
+        it.removeExtra("mailAsk"); // 화면을 돌려도 다시 묻지 않게
+        ScreenId.tag(new AlertDialog.Builder(this)
+                .setTitle("📨 위치 질문")
+                .setMessage(HomeService.mailAskText(this, from) + " (Yes/No)")
+                .setCancelable(false)
+                .setPositiveButton("Yes", (d, w) -> mailAnswer(from, true))
+                .setNegativeButton("No", (d, w) -> mailAnswer(from, false))
+                .show(), "1057");
+    }
+
+    private void mailAnswer(String from, boolean yes) {
+        Intent i = new Intent(this, HomeService.class)
+                .setAction(yes ? HomeService.ACTION_MAIL_YES : HomeService.ACTION_MAIL_NO).putExtra("to", from);
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(i);
+        } else {
+            startService(i);
+        }
+        Toast.makeText(this, yes ? "위치를 확인해 이메일로 회신합니다." : "회신하지 않았습니다.", Toast.LENGTH_SHORT).show();
+    }
+
+    // ---------- (6) 보호자 전용 모드: 보호자가 피보호자를 관리 (화면 1058) ----------
+    // 피보호자 목록은 설정 "ward" 의 "wards" = [{name, phone, email}, …] (JSON)
+
+    private static final String PREF_WARD = "ward";
+
+    private static class WardCard {
+        LinearLayout box;
+        TextView title;
+        EditText name, phone, email;
+        Button rel; // 관계
+    }
+
+    private final List<WardCard> wardCards = new ArrayList<>();
+    private LinearLayout wardList;
+
+    private void buildWardTab(final LinearLayout body) {
+        TextView head = new TextView(this);
+        head.setText("이 화면에서는 사용자가 보호자 자격으로 피보호자를 관리합니다.");
+        head.setTextSize(16);
+        head.setTypeface(null, Typeface.BOLD);
+        head.setPadding(40, 36, 40, 8);
+        body.addView(head);
+        smallNote(body, "[지금 위치 확인]: 내 Gmail(사용자 등록)에서 피보호자 이메일로 \"#where\" 메일을 보냅니다. "
+                + "피보호자 폰의 집에왔어요가 위치를 내 Gmail 로 회신합니다.\n"
+                + "※ 피보호자 폰의 보호자 등록(1100)에 내 Gmail 주소가 적혀 있어야 합니다.");
+
+        wardList = new LinearLayout(this);
+        wardList.setOrientation(LinearLayout.VERTICAL);
+        wardList.setPadding(30, 0, 30, 0);
+        body.addView(wardList);
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(getSharedPreferences(PREF_WARD, MODE_PRIVATE)
+                    .getString("wards", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.getJSONObject(i);
+                addWardCard(o.optString("name"), o.optString("phone"), o.optString("email"), o.optString("rel"));
+            }
+        } catch (Exception ignored) {
+        }
+        if (wardCards.isEmpty()) {
+            addWardCard("", "", "", ""); // 처음엔 빈 카드 한 장
+        }
+
+        // 좌우 넓은 [피보호자 추가]: 새 카드를 맨 아래에 붙이고 그 자리로 스크롤
+        Button add = new Button(this);
+        add.setText("피보호자 추가");
+        add.setTypeface(null, Typeface.BOLD);
+        add.setOnClickListener(v -> {
+            final WardCard c = addWardCard("", "", "", "");
+            if (body.getParent() instanceof ScrollView) {
+                final ScrollView sv = (ScrollView) body.getParent();
+                sv.postDelayed(() -> { // 새 카드가 화면에 배치된 뒤 그 위치로
+                    sv.smoothScrollTo(0, wardList.getTop() + c.box.getTop());
+                    c.name.requestFocus();
+                }, 150);
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(30, 24, 30, 30);
+        body.addView(add, lp);
+    }
+
+    // 카드 한 장:  < 피보호자 N >  이름 / 전화번호 [연락처에서 선택] / 이메일 + [테스트] [지금 위치 확인] / [등록] [삭제]
+    private WardCard addWardCard(String name, String phone, String email, String relation) {
+        final WardCard c = new WardCard();
+        c.box = new LinearLayout(this);
+        c.box.setOrientation(LinearLayout.VERTICAL);
+        c.box.setPadding(30, 20, 30, 20);
+        c.box.setBackgroundColor(0x0F000000);
+
+        c.title = new TextView(this);
+        c.title.setTextSize(15);
+        c.title.setTypeface(null, Typeface.BOLD);
+        c.box.addView(c.title);
+
+        c.name = wardField(c.box, "이름 :", name, InputType.TYPE_CLASS_TEXT);
+        c.rel = wardRelation(c.box, relation);
+        c.phone = wardField(c.box, "전화번호 :", phone, InputType.TYPE_CLASS_PHONE);
+        Button pick = smallBtn("연락처에서 선택", v -> {
+            contactTarget = c.phone;
+            contactNameTarget = c.name;
+            contactWithName = false;
+            try {
+                startActivityForResult(new Intent(Intent.ACTION_PICK,
+                        android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), REQ_CONTACT);
+            } catch (Exception e) {
+                Toast.makeText(this, "연락처를 열 수 없습니다.", Toast.LENGTH_SHORT).show();
+            }
+        });
+        ((LinearLayout) c.phone.getParent()).addView(pick);
+        c.email = wardField(c.box, "이메일 :", email,
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        // 이메일 칸 오른쪽은 좁아서 두 버튼은 바로 아래 줄 오른쪽에
+        LinearLayout mailBtns = new LinearLayout(this);
+        mailBtns.setOrientation(LinearLayout.HORIZONTAL);
+        mailBtns.setGravity(Gravity.END);
+        mailBtns.addView(smallBtn("테스트", v -> wardMail(c, false)));
+        mailBtns.addView(smallBtn("지금 위치 확인", v -> wardMail(c, true)));
+        c.box.addView(mailBtns, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        Button reg = new Button(this);
+        reg.setText("등록");
+        reg.setOnClickListener(v -> saveWards(true));
+        row.addView(reg, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button del = new Button(this);
+        del.setText("삭제");
+        del.setOnClickListener(v -> ScreenId.tag(new AlertDialog.Builder(this)
+                .setTitle("피보호자 삭제")
+                .setMessage(c.title.getText() + " 을(를) 삭제할까요?")
+                .setPositiveButton("삭제", (d, w) -> {
+                    wardCards.remove(c);
+                    wardList.removeView(c.box);
+                    if (wardCards.isEmpty()) {
+                        addWardCard("", "", "", "");
+                    }
+                    renumberWards();
+                    saveWards(false);
+                    Toast.makeText(this, "삭제했습니다.", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("취소", null)
+                .show(), "1059"));
+        row.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = 12;
+        c.box.addView(row, rlp);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = 24;
+        wardList.addView(c.box, lp);
+        wardCards.add(c);
+        renumberWards();
+        return c;
+    }
+
+    private void renumberWards() {
+        for (int i = 0; i < wardCards.size(); i++) {
+            wardCards.get(i).title.setText("< 피보호자 " + (i + 1) + " >");
+        }
+    }
+
+    // "라벨 : [입력 칸]" 한 줄. 입력 칸을 돌려줌 (부모 줄에 버튼을 더 붙일 수 있음)
+    private EditText wardField(LinearLayout parent, String label, String value, int type) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView l = new TextView(this);
+        l.setText(label);
+        l.setTextSize(14);
+        l.setMinWidth((int) (72 * getResources().getDisplayMetrics().density));
+        row.addView(l);
+        EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setInputType(type);
+        e.setText(value);
+        e.setTextSize(14);
+        row.addView(e, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        parent.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return e;
+    }
+
+    // "관계 : [관계 버튼 ▼]" 한 줄. 버튼을 누르면 고르기 팝업(1102), 고르면 바로 저장
+    private Button wardRelation(LinearLayout parent, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView l = new TextView(this);
+        l.setText("관계 :");
+        l.setTextSize(14);
+        l.setMinWidth((int) (72 * getResources().getDisplayMetrics().density));
+        row.addView(l);
+        Button b = GuardianActivity.relationButton(this, value, () -> saveWards(false));
+        row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        parent.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return b;
+    }
+
+    private Button smallBtn(String text, View.OnClickListener l) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(12);
+        b.setAllCaps(false);
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    // 모든 카드를 저장. 이메일 형식이 틀리면 저장하지 않고 안내
+    private boolean saveWards(boolean toast) {
+        org.json.JSONArray a = new org.json.JSONArray();
+        for (WardCard c : wardCards) {
+            String nm = c.name.getText().toString().trim();
+            String ph = c.phone.getText().toString().trim();
+            String em = c.email.getText().toString().trim();
+            if (!em.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(em).matches()) {
+                Toast.makeText(this, c.title.getText() + " 이메일 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
+                return false;
+            }
+            if (nm.isEmpty() && ph.isEmpty() && em.isEmpty()) {
+                continue; // 빈 카드는 저장 안 함
+            }
+            try {
+                a.put(new org.json.JSONObject().put("name", nm).put("phone", ph).put("email", em)
+                        .put("rel", GuardianActivity.relationOf(c.rel)));
+            } catch (Exception ignored) {
+            }
+        }
+        getSharedPreferences(PREF_WARD, MODE_PRIVATE).edit().putString("wards", a.toString()).apply();
+        if (toast) {
+            Toast.makeText(this, "등록했습니다. (피보호자 " + a.length() + "명)", Toast.LENGTH_SHORT).show();
+        }
+        return true;
+    }
+
+    // [테스트] = 테스트 문구 메일, [지금 위치 확인] = 제목 "#where" 메일 (내 Gmail -> 피보호자 이메일)
+    private void wardMail(WardCard c, final boolean locate) {
+        if (noUserMail(locate ? "위치를 물어보려면" : "테스트 메일을 보내려면")) {
+            return;
+        }
+        final String to = c.email.getText().toString().trim();
+        if (!Patterns.EMAIL_ADDRESS.matcher(to).matches()) {
+            Toast.makeText(this, "피보호자 이메일을 확인하세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveWards(false);
+        SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        final String from = u.getString("mail", "");
+        final String pass = u.getString("mailPass", "");
+        String nm = c.name.getText().toString().trim();
+        final String ward = nm.isEmpty() ? "피보호자" : nm;
+        String me = TelegramSender.senderName(this);
+        final String meName = me.isEmpty() ? from : me;
+        final String subject = locate ? "#where" : "[집에왔어요] 테스트 메일";
+        final String body = locate
+                ? "'집에왔어요' 앱이 보낸 위치 요청입니다.\n"
+                + ward + " 님 폰의 집에왔어요 앱이 현재 위치를 이 주소(" + from + ")로 회신합니다.\n"
+                + "(" + ward + " 님 폰의 보호자 등록에 " + from + " 이 적혀 있어야 합니다)"
+                : "보호자 " + meName + " 님이 '집에왔어요' 앱에서 보낸 테스트 메일입니다.\n"
+                + "이 메일이 보이면 보호자 → " + ward + " 이메일 연결이 정상입니다.";
+        Toast.makeText(this, "보내는 중...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String err = EmailSender.send(from, pass, to, subject, body);
+            runOnUiThread(() -> Toast.makeText(this, err != null ? "보내기 실패: " + err
+                    : locate ? "위치 요청을 보냈습니다. 잠시 후 Gmail 받은편지함에서 회신을 확인하세요."
+                    : "테스트 메일을 보냈습니다. (" + to + ")", Toast.LENGTH_LONG).show());
+        }).start();
+    }
+
+    // ---------- (5) 응답 모드 탭 ----------
+
+    private TextView remoteInfo, mailRemoteInfo;
 
     private void buildGuardianTab(LinearLayout body) {
         final SharedPreferences tg = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
+
+        // 0) 원격 위치 요청 (이메일): 권한 필요 없음. 요청도 회신도 이메일
+        buildMailRemote(body);
+        body.addView(thickDivider(), thickDividerLp());
 
         // 1) 원격 위치 요청
         sectionTitle(body, "■ 원격 위치 요청 (텔레그램)");
@@ -2014,7 +2494,111 @@ public class MainActivity extends Activity {
                 .show(), "가족 전체 조회".equals(name) ? "1260" : "1270");
     }
 
+    // ■ 원격 위치 요청 (이메일): 보호자가 사용자 Gmail 로 제목 "#where" 메일 -> 이 폰이 위치를 이메일로 회신
+    private void buildMailRemote(LinearLayout body) {
+        final SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        sectionTitle(body, "■ 원격 위치 요청 (이메일)");
+        smallNote(body, "보호자가 이 사용자의 Gmail 로 제목 \"#where\" (대소문자 무관) 메일을 보내면, 이 폰이 현재 위치를 이메일로 회신합니다.\n"
+                + "☑ 체크: 바로 자동 회신 (이 폰을 만질 필요 없음)\n"
+                + "☐ 체크 안 함: \"보호자 ○○님으로부터 위치 질문을 받았습니다. 회신할까요?\" 를 물어보고 Yes 일 때만 회신\n"
+                + "※ 사용자 등록(1075)의 Gmail 인증과, 보호자 등록(1100)에 보호자 이메일이 있어야 요청을 받습니다.\n"
+                + "※ 앱을 켤 때 받은편지함에 남아 있는 요청 메일도 찾아 처리합니다. 처리한 요청 메일은 삭제(휴지통)합니다.");
+        final CheckBox on = new CheckBox(this);
+        on.setText("이메일 위치 요청에 자동으로 회신응답");
+        on.setTextSize(15);
+        on.setTypeface(null, Typeface.BOLD);
+        on.setChecked(u.getBoolean("mailRemote", false));
+        on.setOnClickListener(v -> {
+            if (on.isChecked()) {
+                if (!u.getBoolean("mailVerified", false) || u.getString("mailPass", "").isEmpty()) {
+                    on.setChecked(false);
+                    Toast.makeText(this, "사용자 등록에서 발신 이메일(Gmail) 인증을 먼저 해 주세요.", Toast.LENGTH_LONG).show();
+                    startActivity(new Intent(this, UserActivity.class));
+                    return;
+                }
+                if (SosActivity.prefs(this).getString("emails", "").trim().isEmpty()) {
+                    on.setChecked(false);
+                    Toast.makeText(this, "보호자 등록에서 보호자 이메일을 먼저 적어 주세요.", Toast.LENGTH_LONG).show();
+                    showSosSettings();
+                    return;
+                }
+                if (!hasPermission()) {
+                    on.setChecked(false);
+                    ensurePermission();
+                    Toast.makeText(this, "위치 권한을 허용한 뒤 다시 눌러 주세요.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+            u.edit().putBoolean("mailRemote", on.isChecked()).putString("mailRemoteErr", "").apply();
+            HomeService.refresh(this);
+            Toast.makeText(this, on.isChecked()
+                    ? "자동 회신을 켰습니다. 보호자가 \"#where\" 메일을 보내 보세요."
+                    : "자동 회신을 껐습니다. 요청이 오면 회신할지 물어봅니다.", Toast.LENGTH_LONG).show();
+            updateRemoteInfo();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = 30;
+        body.addView(on, lp);
+
+        mailRemoteInfo = smallNote(body, "");
+        mailRemoteInfo.setTextColor(Color.DKGRAY);
+        mailRemoteInfo.setTextSize(13);
+        msgStyleButtonFor(body, "지금 확인 (Gmail 접속·최근 메일 판단 보기)", v -> diagnoseMailRemote());
+
+        smallNote(body, "보호자가 하는 방법:\n"
+                + " 1. 아무 메일 앱(Gmail, 네이버 메일 …)을 엽니다.\n"
+                + " 2. 받는 사람 = 이 사용자의 Gmail, 제목 = #where (대소문자 무관, 내용은 비워도 됨)\n"
+                + " 3. 보내면 잠시 뒤 주소·지도 링크가 담긴 회신 메일이 옵니다. (보통 1분 안)\n"
+                + "   (보호자 폰에도 집에왔어요가 있으면 (6) 보호자 전용 모드의 [지금 위치 확인]으로 보낼 수 있습니다)\n\n"
+                + "※ 이 폰의 배터리 설정을 '제한 없음'으로 해야 화면이 꺼져 있을 때도 빨리 회신합니다.");
+    }
+
+    // [지금 확인]: Gmail 에 접속해 최근 메일 5통을 앱이 어떻게 판단하는지 팝업(화면 1055)으로 보여 줌
+    private void diagnoseMailRemote() {
+        final SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        if (u.getString("mail", "").isEmpty() || u.getString("mailPass", "").isEmpty()) {
+            Toast.makeText(this, "사용자 등록에서 발신 이메일(Gmail)을 먼저 등록하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "Gmail 에 접속하는 중...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String rep = MailWatcher.diagnose(u.getString("mail", ""), u.getString("mailPass", ""),
+                    u.getLong("mailUid", 0), HomeService.guardianEmails(this));
+            String head = "감시: " + (HomeService.mailRemoteOn(this) ? "켜짐" : "꺼짐 (Gmail 인증·보호자 이메일 필요)")
+                    + " / 회신: " + (u.getBoolean("mailRemote", false) ? "자동" : "물어보고")
+                    + "\n감시 상태: " + u.getString("mailRemoteState", "아직 접속한 적 없음 (서비스가 안 돌고 있을 수 있음)")
+                    + "\n\n";
+            runOnUiThread(() -> {
+                updateRemoteInfo();
+                TextView t = new TextView(this);
+                t.setText(head + rep);
+                t.setTextSize(13);
+                t.setTextIsSelectable(true);
+                t.setPadding(50, 20, 50, 20);
+                ScrollView sv = new ScrollView(this);
+                sv.addView(t);
+                ScreenId.tag(new AlertDialog.Builder(this)
+                        .setTitle("이메일 위치 요청 - 지금 확인")
+                        .setView(sv)
+                        .setPositiveButton("닫기", null)
+                        .show(), "1055");
+            });
+        }).start();
+    }
+
     private void updateRemoteInfo() {
+        if (mailRemoteInfo != null) {
+            SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+            long t = u.getLong("mailRemoteTime", 0);
+            String err = u.getString("mailRemoteErr", "");
+            boolean on = HomeService.mailRemoteOn(this); // Gmail 인증 + 보호자 이메일 있으면 감시 중
+            mailRemoteInfo.setText((on ? "상태: " + u.getString("mailRemoteState", "아직 접속 안 함") + "\n" : "")
+                    + (t == 0 ? "아직 요청을 받은 적이 없습니다."
+                    : "마지막 요청: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
+                    + "  " + u.getString("mailRemoteResult", ""))
+                    + (on && !err.isEmpty() ? "\n⚠️ " + err : ""));
+        }
         if (remoteInfo == null) {
             return;
         }
@@ -2062,47 +2646,7 @@ public class MainActivity extends Activity {
         return sos;
     }
 
-    // (2) 현재 위치 탭 맨 위: 보호자 바로 걸기 (SOS 버튼은 화면 오른쪽 위로 옮김)
-    private void buildSosBox(LinearLayout body) {
-        sosCallBox = new LinearLayout(this);
-        sosCallBox.setOrientation(LinearLayout.HORIZONTAL);
-        sosCallBox.setPadding(36, 0, 36, 0);
-        body.addView(sosCallBox);
-        renderSosCalls();
-    }
-
-    // 보호자 바로 걸기 버튼 (최대 3명). 번호가 없으면 등록 안내
-    private void renderSosCalls() {
-        if (sosCallBox == null) {
-            return;
-        }
-        sosCallBox.removeAllViews();
-        List<String[]> ps = SosActivity.entries(this); // {이름, 번호}
-        if (ps.isEmpty()) {
-            return; // 등록 버튼은 (1) 홈 공유기 등록 탭의 [보호자 등록]으로 옮김
-        }
-        for (int k = 0; k < ps.size() && k < 3; k++) {
-            final String p = ps.get(k)[1];
-            String name = ps.get(k)[0].isEmpty() ? "보호자" + (k + 1) : ps.get(k)[0];
-            Button b = new Button(this);
-            b.setText("📞 " + name + "\n" + p);
-            b.setTextSize(12);
-            b.setAllCaps(false);
-            b.setOnClickListener(v -> callWithPermission(p));
-            sosCallBox.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        }
-    }
-
-    private void callWithPermission(String phone) {
-        if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED
-                && !getSharedPreferences(SosActivity.PREF_SOS, MODE_PRIVATE).getBoolean("askedCall", false)) {
-            // 처음 한 번만 권한 요청 (거절하면 전화 화면까지만 띄우는 방식으로 계속 동작)
-            getSharedPreferences(SosActivity.PREF_SOS, MODE_PRIVATE).edit().putBoolean("askedCall", true).apply();
-            requestPermissions(new String[]{Manifest.permission.CALL_PHONE}, REQ_CALL);
-        }
-        SosActivity.call(this, phone);
-    }
-
+    // (2) 현재 위치 탭의 보호자 전화 걸기 버튼은 삭제 (화면 1020). SOS 는 화면 오른쪽 위 버튼으로
     // 앱 화면의 SOS: 2초 길게 눌러 확인했으므로 카운트다운 없이 바로 실행
     private void startSosNow() {
         if (!hasPermission()) {
@@ -2149,62 +2693,9 @@ public class MainActivity extends Activity {
                 + "  " + ev.getString("sosResult", "")));
     }
 
+    // 보호자 등록: 화면 1100 (별도 화면 GuardianActivity) 열기
     private void showSosSettings() {
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(60, 20, 60, 10);
-        TextView info = new TextView(this);
-        info.setText("이 기능은 필수 기능은 아닙니다.\n"
-                + "SOS 때 첫 번째 번호로 전화를 겁니다.\n(2) 현재 위치 탭에 보호자 바로 걸기 버튼(최대 3명)이 생깁니다.");
-        info.setTextColor(Color.DKGRAY);
-        f.addView(info);
-        label(f, "보호자 이름과 전화번호 (쉼표로 구분, 첫 번째 = SOS 전화)");
-        final EditText phones = new EditText(this);
-        phones.setSingleLine(true);
-        phones.setInputType(InputType.TYPE_CLASS_TEXT); // 이름(한글)도 입력하므로 일반 글자
-        phones.setHint("예: 엄마 010-1234-5678, 아빠 010-9876-5432");
-        phones.setText(SosActivity.phones(this));
-        f.addView(phones);
-        Button pick = new Button(this);
-        pick.setText("연락처에서 선택 (이름과 번호)");
-        pick.setTextSize(13);
-        pick.setOnClickListener(v -> {
-            contactTarget = phones;
-            contactWithName = true; // 보호자 칸에는 "이름 번호"로 넣음
-            try {
-                startActivityForResult(new Intent(Intent.ACTION_PICK,
-                        android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), REQ_CONTACT);
-            } catch (Exception e) {
-                Toast.makeText(this, "연락처를 열 수 없습니다.", Toast.LENGTH_SHORT).show();
-            }
-        });
-        f.addView(pick, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        final AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("보호자 전화번호")
-                .setView(f)
-                .setPositiveButton("저장", null)
-                .setNegativeButton("취소", null)
-                .create();
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String ps = phones.getText().toString().trim();
-            if (!ps.isEmpty() && !validPhones(ps)) {
-                Toast.makeText(this, "전화번호 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            SosActivity.prefs(this).edit().putString("phones", ps).apply();
-            if (!ps.isEmpty() && checkSelfPermission(Manifest.permission.CALL_PHONE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                SosActivity.prefs(this).edit().putBoolean("askedCall", true).apply();
-                requestPermissions(new String[]{Manifest.permission.CALL_PHONE}, REQ_CALL);
-            }
-            renderSosCalls();
-            updateSosInfo();
-            Toast.makeText(this, "저장했습니다.", Toast.LENGTH_SHORT).show();
-            d.dismiss();
-        }));
-        d.show();
-        ScreenId.tag(d, "1100");
+        startActivity(new Intent(this, GuardianActivity.class));
     }
 
     // 홈 화면에 SOS 아이콘 추가 (Android 8 이상, 런처가 지원하는 경우)
@@ -2234,8 +2725,8 @@ public class MainActivity extends Activity {
     private TextView evLast;
     // 귀가·외출 알림을 보낼 곳: {설정 키, 표시 이름}
     private static final String[][] EV_CHANNELS = {
-            {"ch_self", "본인 폰"}, {"ch_email", "일반 이메일"}, {"ch_kmail", "카톡 이메일"},
-            {"ch_kakao", "카톡 본인 메시지"}, {"ch_tg", "텔레그램"}, {"ch_sms", "일반 문자"}};
+            {"ch_self", "본인 폰"}, {"ch_email", "일반 이메일"},
+            {"ch_kakao", "카톡 본인 메시지"}, {"ch_tg", "텔레그램"}, {"ch_sms", "일반 문자(수동)"}, {"ch_smsauto", "일반 문자(자동)"}};
 
     private TextView sectionTitle(LinearLayout body, String s) {
         TextView t = new TextView(this);
@@ -2399,16 +2890,121 @@ public class MainActivity extends Activity {
         msgBox.setPadding(10, 0, 30, 30);
         body.addView(msgBox);
 
-        senderBtn = msgButton(v -> showSenderDialog()); // 보내는 사람 별명 (모든 위치 메시지 제목에 표시)
-        updateSenderButton();
+        // '보내는 사람' 줄은 삭제: 메시지의 보내는 사람 이름은 사용자 등록(1075)의 이름(별명)을 씀
         // 아래 줄들: [☐ 체크박스] = 켜기/끄기, [버튼] = 설정 팝업
         selfBtn = msgRow(HomeService.PREF_SELF);   // 본인 폰 알림 (이 폰에 위치 알림)
         emailBtn = msgRow(HomeService.PREF_EMAIL); // 일반 이메일 (자동/수동)
-        kmailBtn = msgRow(HomeService.PREF_KMAIL); // 카톡 이메일 (자동/수동)
+        // (카톡 이메일 1160 은 삭제)
         kakaoBtn = msgRow(HomeService.PREF_KAKAO); // 카톡 본인 메시지 (수동: 알림 -> 카톡 공유 화면)
         tgBtn = msgRow(TelegramSender.PREF);       // 텔레그램 (자동)
         smsBtn = msgRow(HomeService.PREF_SMS);     // 일반 문자 (수동: 알림 -> 문자 앱)
+        smsAutoBtn = msgRow(HomeService.PREF_SMSAUTO); // 일반 문자 (자동: 솔라피로 바로 발송)
         refreshMsgButtons();
+
+        // ---------- 맨 끝: 공통 보내는 시각 (1140·1150·1170·1230·1235 가 함께 씀) + [저장] ----------
+        body.addView(thickDivider(), thickDividerLp());
+        sectionTitle(body, "■ 보내는 시각 (공통)");
+        smallNote(body, "위 본인 폰 알림·일반 이메일·카톡 본인 메시지·일반 문자(수동·자동)가 모두 이 시각에 보냅니다. "
+                + "(텔레그램은 자체 간격)");
+        LinearLayout schBox = new LinearLayout(this);
+        schBox.setOrientation(LinearLayout.VERTICAL);
+        schBox.setPadding(40, 0, 40, 30);
+        body.addView(schBox);
+        seedSched();
+        final ScheduleUi sch = new ScheduleUi(schBox, sched());
+        Button save = new Button(this);
+        save.setText("저장");
+        save.setTypeface(null, Typeface.BOLD);
+        save.setOnClickListener(v -> saveSched(sch));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = 20;
+        schBox.addView(save, slp);
+    }
+
+    // ---------- 공통 보내는 시각 (설정 이름 HomeService.PREF_SCHED) ----------
+
+    private static final String[] SCHED_JOBS = {HomeService.PREF_SELF, HomeService.PREF_EMAIL,
+            HomeService.PREF_KAKAO, HomeService.PREF_SMS, HomeService.PREF_SMSAUTO};
+
+    private SharedPreferences sched() {
+        return getSharedPreferences(HomeService.PREF_SCHED, MODE_PRIVATE);
+    }
+
+    // 공통 시각이 아직 없으면(업데이트 직후) 예전에 각 팝업에서 저장해 둔 시각을 가져옴
+    private void seedSched() {
+        if (sched().contains("mode")) {
+            return;
+        }
+        for (String p : SCHED_JOBS) {
+            SharedPreferences sp = getSharedPreferences(p, MODE_PRIVATE);
+            if (sp.contains("mode") && !(p.equals(HomeService.PREF_KAKAO))) {
+                sched().edit().putString("mode", sp.getString("mode", "times"))
+                        .putString("times", sp.getString("times", ""))
+                        .putInt("interval", sp.getInt("interval", 60)).apply();
+                return;
+            }
+        }
+    }
+
+    // 공통 시각이 준비되지 않았으면 이유, 됐으면 null
+    private String schedProblem() {
+        SharedPreferences s = sched();
+        if (!s.contains("mode")) {
+            return "(4) 위치 보내기 화면 맨 아래 '보내는 시각'을 먼저 저장하세요.";
+        }
+        if ("times".equals(s.getString("mode", "")) && s.getString("times", "").trim().isEmpty()) {
+            return "(4) 위치 보내기 화면 맨 아래 '보내는 시각'에 시각을 하나 이상 등록하세요.";
+        }
+        return null;
+    }
+
+    // 공통 시각을 한 채널 설정에 복사. start 면 다음 송신 시각도 다시 계산
+    // (지정 시각: 다음 시각에 / 일정 간격: 바로 1회 후 간격대로)
+    private void copySched(SharedPreferences.Editor ed, boolean start) {
+        SharedPreferences s = sched();
+        String mode = s.getString("mode", "times");
+        String tm = s.getString("times", "");
+        ed.putString("mode", mode).putString("times", tm).putInt("interval", s.getInt("interval", 60));
+        if (start) {
+            ed.putLong("next", "times".equals(mode) ? HomeService.nextTime(tm, System.currentTimeMillis()) : 0);
+        }
+    }
+
+    // 팝업 안내: 보내는 시각은 1040 공통 설정
+    private void schedNote(LinearLayout f) {
+        TextView t = new TextView(this);
+        String p = schedProblem();
+        t.setText("보내는 시각: " + (p == null ? HomeService.emailSchedule(sched()) : "아직 없음")
+                + "\n((4) 위치 보내기 화면 맨 아래에서 바꿉니다)");
+        t.setTextColor(p == null ? Color.DKGRAY : 0xFFC62828);
+        t.setPadding(0, 24, 0, 0);
+        f.addView(t);
+    }
+
+    // 1040 [저장]: 공통 시각 저장 -> 모든 채널에 복사 (켜져 있는 채널은 다음 송신 시각 다시 계산)
+    private void saveSched(ScheduleUi sch) {
+        String tm = sch.timesText();
+        if (sch.byTimes() && tm == null) {
+            Toast.makeText(this, "시각은 08:00 처럼 입력하세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (sch.byTimes() && tm.isEmpty()) {
+            Toast.makeText(this, "보낼 시각을 하나 이상 등록하세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        sched().edit().putString("mode", sch.byTimes() ? "times" : "interval")
+                .putString("times", tm == null ? "" : tm)
+                .putInt("interval", sch.minutes()).apply();
+        for (String p : SCHED_JOBS) {
+            SharedPreferences sp = getSharedPreferences(p, MODE_PRIVATE);
+            SharedPreferences.Editor ed = sp.edit();
+            copySched(ed, sp.getBoolean("on", false));
+            ed.apply();
+        }
+        HomeService.refresh(this);
+        refreshMsgButtons();
+        Toast.makeText(this, "저장했습니다. (" + HomeService.emailSchedule(sched()) + ")", Toast.LENGTH_SHORT).show();
     }
 
     // msgBox 밖(본문)에 같은 모양의 버튼 하나
@@ -2459,44 +3055,6 @@ public class MainActivity extends Activity {
         evLast.setText(t == 0 ? "아직 보낸 적이 없습니다."
                 : "마지막: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
                 + "  " + ev.getString("lastResult", ""));
-    }
-
-    // ---------- 보내는 사람 이름 ----------
-
-    private void updateSenderButton() {
-        String who = TelegramSender.senderName(this);
-        senderBtn.setTextColor(Color.BLACK);
-        if (who.isEmpty()) {
-            setJobText(senderBtn, "보내는 사람 별명 설정 (예: 할머니)", null);
-        } else {
-            setJobText(senderBtn, "보내는 사람 별명", who);
-        }
-    }
-
-    private void showSenderDialog() {
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(60, 20, 60, 10);
-        TextView info = new TextView(this);
-        info.setText("받는 사람이 누구의 위치인지 알 수 있게 모든 위치 메시지(텔레그램·카톡·이메일) 맨 위에 표시됩니다.\n\n"
-                + "예) 📍 할머니의 현재 위치 (11-21 14:30:05)");
-        info.setTextColor(Color.DKGRAY);
-        f.addView(info);
-        final EditText name = new EditText(this);
-        name.setSingleLine(true);
-        name.setHint("예: 할머니, 민준이, 아빠");
-        name.setText(TelegramSender.senderName(this));
-        f.addView(name);
-        ScreenId.tag(new AlertDialog.Builder(this)
-                .setTitle("보내는 사람 별명")
-                .setView(f)
-                .setPositiveButton("저장", (d, w) -> {
-                    TelegramSender.setSenderName(this, name.getText().toString());
-                    updateSenderButton();
-                    Toast.makeText(this, "저장했습니다.", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("취소", null)
-                .show(), "1130");
     }
 
     // ---------- 텔레그램 자동 송신 ----------
@@ -2833,7 +3391,7 @@ public class MainActivity extends Activity {
         SharedPreferences sp = getSharedPreferences(HomeService.PREF_KAKAO, MODE_PRIVATE);
         boolean on = sp.getBoolean("on", false);
         setJobText(kakaoBtn, "카톡 본인 메시지 (수동)",
-                on ? TelegramSender.intervalLabel(sp.getInt("interval", 10)) + "마다 알림" : null);
+                on ? HomeService.emailSchedule(sp) + " 알림" : null);
         kakaoBtn.setTextColor(on ? 0xFF2E7D32 : Color.BLACK);
         syncCheck(HomeService.PREF_KAKAO, on);
     }
@@ -2850,7 +3408,7 @@ public class MainActivity extends Activity {
         f.setPadding(60, 10, 60, 10);
 
         TextView info = new TextView(this);
-        info.setText("정해진 간격마다 위치를 확인해 알림을 띄웁니다.\n"
+        info.setText("정해진 시각마다 위치를 확인해 알림을 띄웁니다.\n"
                 + "알림을 누르면 위치가 채워진 카톡 화면이 열리고, "
                 + "받는 사람을 골라 [전송]을 누르면 보내집니다.\n"
                 + "(카톡은 완전 자동 전송을 지원하지 않습니다)");
@@ -2858,27 +3416,8 @@ public class MainActivity extends Activity {
         info.setPadding(0, 16, 0, 0);
         f.addView(info);
 
-        label(f, "보내기 간격");
-        final Spinner interval = new Spinner(this);
-        interval.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
-        int cur = sp.getInt("interval", 10);
-        for (int i = 0; i < TelegramSender.INTERVALS.length; i++) {
-            if (TelegramSender.INTERVALS[i] == cur) {
-                interval.setSelection(i);
-            }
-        }
-        f.addView(interval);
-
-        final CheckBox on = new CheckBox(this);
-        on.setText("자동보내기시작");
-        on.setTextSize(16);
-        on.setTypeface(null, Typeface.BOLD);
-        on.setChecked(sp.getBoolean("on", false));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = 24;
-        // 켜기·끄기는 메인 화면 버튼 앞의 체크박스로 (팝업에는 표시하지 않음)
+        // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀
+        schedNote(f);
 
         TextView last = new TextView(this);
         long lt = sp.getLong("lastTime", 0);
@@ -2904,10 +3443,13 @@ public class MainActivity extends Activity {
                 .create();
         d.setOnShowListener(x -> {
             d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                int min = TelegramSender.INTERVALS[interval.getSelectedItemPosition()];
-                boolean start = on.isChecked();
+                boolean start = true; // 저장 = 1040 화면의 이 줄 자동 체크(켜기)
                 if (start && !kakaoInstalled()) {
                     Toast.makeText(this, "카카오톡이 설치되어 있지 않습니다.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (schedProblem() != null) {
+                    Toast.makeText(this, schedProblem(), Toast.LENGTH_LONG).show();
                     return;
                 }
                 if (start && !hasPermission()) {
@@ -2915,11 +3457,8 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "위치 권한을 허용한 뒤 다시 저장하세요.", Toast.LENGTH_LONG).show();
                     return;
                 }
-                boolean changed = start && (!sp.getBoolean("on", false) || sp.getInt("interval", 10) != min);
-                SharedPreferences.Editor ed = sp.edit().putInt("interval", min).putBoolean("on", start);
-                if (changed) {
-                    ed.putLong("next", 0); // 시작하거나 간격이 바뀌면 바로 1회 알림 후 간격대로
-                }
+                SharedPreferences.Editor ed = sp.edit().putBoolean("on", start);
+                copySched(ed, start); // 1040 공통 보내는 시각 + 다음 송신 시각
                 ed.apply();
                 if (start && Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
                         Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -2928,7 +3467,7 @@ public class MainActivity extends Activity {
                 HomeService.refresh(this);
                 updateKakaoButton();
                 Toast.makeText(this, start
-                        ? "저장했습니다. (켜져 있음 · " + TelegramSender.intervalLabel(min) + "마다 알림)"
+                        ? "저장했습니다. (켜져 있음 · " + HomeService.emailSchedule(sp) + " 알림)"
                         : "저장했습니다.", Toast.LENGTH_SHORT).show();
                 d.dismiss();
             });
@@ -2964,19 +3503,13 @@ public class MainActivity extends Activity {
 
     // ---------- 이메일 자동 송신 (정해진 시각/간격마다: 앱 비밀번호로 자동 발송, 또는 알림 -> Gmail 작성 화면) ----------
 
-    // 일반 이메일 / 카톡 이메일 버튼 글자 (체크 표시, 시각, 자동/수동)
+    // 일반 이메일 버튼 글자 (체크 표시, 시각). 카톡 이메일(1160)은 삭제
     private void updateEmailButton() {
-        String[] prefs = {HomeService.PREF_EMAIL, HomeService.PREF_KMAIL};
-        Button[] btns = {emailBtn, kmailBtn};
-        for (int i = 0; i < 2; i++) {
-            SharedPreferences sp = getSharedPreferences(prefs[i], MODE_PRIVATE);
-            boolean on = sp.getBoolean("on", false);
-            String name = HomeService.emailTitle(prefs[i]) + " (자동 / 수동)";
-            setJobText(btns[i], name, on ? HomeService.emailSchedule(sp)
-                    + (HomeService.emailSmtp(sp) ? " · 자동" : " · 수동") : null);
-            btns[i].setTextColor(on ? 0xFF2E7D32 : Color.BLACK);
-            syncCheck(prefs[i], on);
-        }
+        SharedPreferences sp = getSharedPreferences(HomeService.PREF_EMAIL, MODE_PRIVATE);
+        boolean on = sp.getBoolean("on", false);
+        setJobText(emailBtn, HomeService.emailTitle(HomeService.PREF_EMAIL), on ? HomeService.emailSchedule(sp) : null);
+        emailBtn.setTextColor(on ? 0xFF2E7D32 : Color.BLACK);
+        syncCheck(HomeService.PREF_EMAIL, on);
     }
 
     // 카톡 이메일 받는 주소: 카카오메일 도메인만 (kakao.com, daum.net, hanmail.net)
@@ -3009,162 +3542,46 @@ public class MainActivity extends Activity {
     // 설정 팝업: 보내는 방식, 받는 사람, 보내는 시각(지정 시각/일정 간격), 자동송신시작
     // pref: HomeService.PREF_EMAIL(일반 이메일) / HomeService.PREF_KMAIL(카톡 이메일: 받는 주소가 카카오메일)
     private void showEmailDialog(final String pref) {
-        final boolean kakao = HomeService.PREF_KMAIL.equals(pref);
+        // 본인 발신 이메일(사용자 등록 1075)이 없으면 경고 팝업(화면 1145)만 띄우고 끝
+        SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        if (noUserMail("일반 이메일을 보내려면")) {
+            return;
+        }
+        // 보내는 계정 = 사용자 등록(1075)의 Gmail·앱 비밀번호 (이 팝업에서는 입력하지 않음)
+        final String fr = user.getString("mail", "").trim();
+        final String pw = user.getString("mailPass", "").replace(" ", "");
         final SharedPreferences sp = getSharedPreferences(pref, MODE_PRIVATE);
         LinearLayout f = new LinearLayout(this);
         f.setOrientation(LinearLayout.VERTICAL);
         f.setPadding(60, 10, 60, 10);
 
-        // 보내는 방식: 자동 발송(앱 비밀번호) / Gmail 작성 화면(알림 -> 직접 보내기)
-        label(f, "보내는 방식");
-        final RadioGroup how = new RadioGroup(this);
-        final RadioButton rSmtp = new RadioButton(this), rCompose = new RadioButton(this);
-        rSmtp.setText("완전 자동 발송 (앱 비밀번호)");
-        rSmtp.setId(View.generateViewId());
-        rCompose.setText("Gmail 작성 화면 (알림 → 직접 [보내기])");
-        rCompose.setId(View.generateViewId());
-        how.addView(rSmtp);
-        how.addView(rCompose);
-        f.addView(how);
-
-        final TextView info = new TextView(this);
-        info.setTextColor(Color.DKGRAY);
-        info.setPadding(0, 8, 0, 0);
-        f.addView(info);
-
-        // 자동 발송 전용: 보내는 이메일 + 앱 비밀번호
-        final LinearLayout smtpBox = new LinearLayout(this);
-        smtpBox.setOrientation(LinearLayout.VERTICAL);
-        label(smtpBox, "보내는 이메일 (내 계정)");
-        final EditText from = new EditText(this);
-        from.setSingleLine(true);
-        from.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        from.setHint("예: mygmail@gmail.com");
-        // 카톡 이메일을 처음 설정할 때는 일반 이메일에 넣어 둔 보내는 계정을 미리 채움
-        SharedPreferences gen = getSharedPreferences(HomeService.PREF_EMAIL, MODE_PRIVATE);
-        from.setText(sp.getString("from", kakao ? gen.getString("from", "") : ""));
-        smtpBox.addView(from);
-        label(smtpBox, "앱 비밀번호 (16자리)");
-        final EditText pass = new EditText(this);
-        pass.setSingleLine(true);
-        pass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        pass.setHint("abcd efgh ijkl mnop");
-        pass.setText(sp.getString("pass", kakao ? gen.getString("pass", "") : ""));
-        smtpBox.addView(pass);
-        final CheckBox showPass = new CheckBox(this);
-        showPass.setText("비밀번호 보기");
-        showPass.setOnCheckedChangeListener((b, c) -> {
-            pass.setInputType(InputType.TYPE_CLASS_TEXT | (c
-                    ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD : InputType.TYPE_TEXT_VARIATION_PASSWORD));
-            pass.setSelection(pass.getText().length());
-        });
-        smtpBox.addView(showPass);
-        TextView help = new TextView(this);
-        help.setAutoLinkMask(android.text.util.Linkify.WEB_URLS); // 링크를 눌러 브라우저로 열기 (setText 전에 설정)
-        help.setText(EmailSender.HELP);
-        help.setTextColor(Color.GRAY);
-        help.setTextSize(12);
-        smtpBox.addView(help);
-        f.addView(smtpBox);
-
-        how.setOnCheckedChangeListener((g, id) -> {
-            boolean smtp = id == rSmtp.getId();
-            smtpBox.setVisibility(smtp ? View.VISIBLE : View.GONE);
-            info.setText(smtp
-                    ? "정해진 시각마다 위치를 확인해, 알림 없이 바로 메일을 보냅니다."
-                    : "정해진 시각마다 위치를 확인해 알림을 띄웁니다. 알림을 누르면 내용이 채워진 "
-                    + "Gmail 작성 화면이 열리고, [보내기]를 누르면 보내집니다.");
-        });
-        how.check(HomeService.emailSmtp(sp) ? rSmtp.getId() : rCompose.getId());
-
-        label(f, kakao ? "받는 사람 카카오메일 (여러 명은 쉼표로 구분)" : "받는 사람 (이메일 · 여러 명은 쉼표로 구분)");
-        final EditText to = new EditText(this);
-        to.setSingleLine(true);
-        to.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        to.setHint(kakao ? "예: minjun@kakao.com" : "예: friend@gmail.com, family@naver.com");
-        to.setText(sp.getString("to", ""));
-        f.addView(to);
-        if (kakao) { // 카톡 이메일: 카카오메일 안내 + 주소 확인 버튼
-            TextView kakaoHint = new TextView(this);
-            kakaoHint.setText("💡 카카오메일(@kakao.com)로 보내면 받는 사람이 카카오톡에서 바로 받아볼 수 있습니다.\n"
-                    + "카톡 ID와 메일 주소는 다를 수 있으니 실제 주소를 확인하세요.");
-            kakaoHint.setTextColor(Color.GRAY);
-            kakaoHint.setTextSize(12);
-            f.addView(kakaoHint);
-            Button kakaoMail = new Button(this);
-            kakaoMail.setText("카톡 메일 열기 (내 @kakao.com 주소 확인)");
-            kakaoMail.setTextSize(13);
-            kakaoMail.setOnClickListener(v -> openKakaoMail());
-            f.addView(kakaoMail, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
-
-        label(f, "보내는 시각");
-        final RadioGroup mode = new RadioGroup(this);
-        final RadioButton rTimes = new RadioButton(this), rInterval = new RadioButton(this);
-        rTimes.setText("지정 시각 (매일)");
-        rTimes.setId(View.generateViewId());
-        rInterval.setText("일정 간격");
-        rInterval.setId(View.generateViewId());
-        mode.addView(rTimes);
-        mode.addView(rInterval);
-        f.addView(mode);
-
-        // 지정 시각: 직접 입력 + [시각 추가] (시계에서 고르기)
-        final LinearLayout timesRow = new LinearLayout(this);
-        timesRow.setOrientation(LinearLayout.HORIZONTAL);
-        final EditText times = new EditText(this);
-        times.setSingleLine(true);
-        times.setHint("예: 08:00, 12:00, 18:00");
-        times.setText(sp.getString("times", ""));
-        Button addTime = new Button(this);
-        addTime.setText("시각 추가");
-        addTime.setTextSize(13);
-        addTime.setOnClickListener(v -> showTagged(new TimePickerDialog(this, (tp, h, m) -> {
-            String cur = times.getText().toString().trim();
-            String add = String.format(Locale.US, "%02d:%02d", h, m);
-            String n = normalizeTimes(cur.isEmpty() ? add : cur + ", " + add);
-            times.setText(n == null ? cur + ", " + add : n);
-        }, 8, 0, true), "1250"));
-        timesRow.addView(times, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        timesRow.addView(addTime);
-        f.addView(timesRow);
-
-        // 일정 간격
-        final Spinner interval = new Spinner(this);
-        interval.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
-        int cur = sp.getInt("interval", 60);
-        for (int i = 0; i < TelegramSender.INTERVALS.length; i++) {
-            if (TelegramSender.INTERVALS[i] == cur) {
-                interval.setSelection(i);
+        // 받는 사람: 최대 5명, 한 줄에 한 명. 저장할 때 "a, b, c" 한 줄로 묶음
+        label(f, "받는 사람 이메일 (최대 5명)");
+        final EditText[] tos = new EditText[5];
+        String[] saved = sp.getString("to", "").split("[,;\\s]+");
+        int k = 0;
+        for (int i = 0; i < tos.length; i++) {
+            tos[i] = new EditText(this);
+            tos[i].setSingleLine(true);
+            tos[i].setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            tos[i].setHint((i + 1) + ") 예: family@gmail.com");
+            while (k < saved.length && saved[k].trim().isEmpty()) {
+                k++;
             }
+            if (k < saved.length) {
+                tos[i].setText(saved[k++].trim());
+            }
+            f.addView(tos[i]);
         }
-        f.addView(interval);
 
-        mode.setOnCheckedChangeListener((g, id) -> {
-            timesRow.setVisibility(id == rTimes.getId() ? View.VISIBLE : View.GONE);
-            interval.setVisibility(id == rInterval.getId() ? View.VISIBLE : View.GONE);
-        });
-        mode.check("times".equals(sp.getString("mode", "times")) ? rTimes.getId() : rInterval.getId());
-
-        final CheckBox on = new CheckBox(this);
-        on.setText("자동송신시작");
-        on.setTextSize(16);
-        on.setTypeface(null, Typeface.BOLD);
-        on.setChecked(sp.getBoolean("on", false));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = 24;
-        // 켜기·끄기는 메인 화면 버튼 앞의 체크박스로 (팝업에는 표시하지 않음)
+        // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀
+        schedNote(f);
 
         final TextView last = new TextView(this);
         long lt = sp.getLong("lastTime", 0), nx = sp.getLong("next", 0);
         SimpleDateFormat fmt = new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA);
-        boolean wasSmtp = HomeService.emailSmtp(sp);
         last.setText((lt == 0 ? "아직 보낸 적이 없습니다."
-                : (wasSmtp ? "마지막 발송: " + fmt.format(new Date(lt)) + "  " + sp.getString("lastResult", "")
-                : "마지막 알림: " + fmt.format(new Date(lt))))
+                : "마지막 발송: " + fmt.format(new Date(lt)) + "  " + sp.getString("lastResult", ""))
                 + (sp.getBoolean("on", false) && nx > 0 ? "\n다음 송신: " + fmt.format(new Date(nx)) : ""));
         last.setTextColor(Color.GRAY);
         last.setPadding(0, 16, 0, 0);
@@ -3174,7 +3591,7 @@ public class MainActivity extends Activity {
         sv.addView(f);
 
         final AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle(HomeService.emailTitle(pref) + " (자동 / 수동)")
+                .setTitle(HomeService.emailTitle(pref))
                 .setView(sv)
                 .setPositiveButton("저장", null)
                 .setNeutralButton("지금 테스트", null)
@@ -3182,46 +3599,18 @@ public class MainActivity extends Activity {
                 .create();
         d.setOnShowListener(x -> {
             d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                String addr = to.getText().toString().trim();
-                boolean byTimes = mode.getCheckedRadioButtonId() == rTimes.getId();
-                String tm = normalizeTimes(times.getText().toString());
-                int min = TelegramSender.INTERVALS[interval.getSelectedItemPosition()];
-                boolean start = on.isChecked();
-                boolean smtp = how.getCheckedRadioButtonId() == rSmtp.getId();
-                String fr = from.getText().toString().trim();
-                String pw = pass.getText().toString().replace(" ", "");
+                String addr = joinEmails(tos);
+                boolean start = true; // 저장 = 1040 화면의 이 줄 자동 체크(켜기)
                 if (!addr.isEmpty() && !validEmails(addr)) {
                     Toast.makeText(this, "이메일 주소 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (kakao && !kakaoMailOnly(addr)) {
-                    Toast.makeText(this, "카톡 이메일은 카카오메일 주소(@kakao.com, @daum.net, @hanmail.net)만 "
-                            + "넣을 수 있습니다. 다른 주소는 [일반 이메일]을 쓰세요.", Toast.LENGTH_LONG).show();
-                    return;
-                }
-                if (!fr.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(fr).matches()) {
-                    Toast.makeText(this, "보내는 이메일 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (smtp && !fr.isEmpty() && EmailSender.smtpHost(fr) == null) {
-                    Toast.makeText(this, "보내는 계정은 " + EmailSender.SUPPORTED + " 만 사용할 수 있습니다.",
-                            Toast.LENGTH_LONG).show();
-                    return;
-                }
-                if (start && smtp && (fr.isEmpty() || pw.isEmpty())) {
-                    Toast.makeText(this, "보내는 이메일과 앱 비밀번호를 입력하세요.", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (byTimes && tm == null) {
-                    Toast.makeText(this, "시각은 08:00 처럼 입력하세요.", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 if (start && addr.isEmpty()) {
                     Toast.makeText(this, "받는 사람 이메일을 입력하세요.", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                if (start && byTimes && tm.isEmpty()) {
-                    Toast.makeText(this, "보낼 시각을 하나 이상 등록하세요.", Toast.LENGTH_SHORT).show();
+                if (schedProblem() != null) {
+                    Toast.makeText(this, schedProblem(), Toast.LENGTH_LONG).show();
                     return;
                 }
                 if (start && !hasPermission()) {
@@ -3230,17 +3619,11 @@ public class MainActivity extends Activity {
                     return;
                 }
                 SharedPreferences.Editor ed = sp.edit().putString("to", addr)
-                        .putString("send", smtp ? "smtp" : "compose")
+                        .putString("send", "smtp")
                         .putString("from", fr).putString("pass", pw)
-                        .putString("mode", byTimes ? "times" : "interval")
-                        .putString("times", tm == null ? "" : tm)
-                        .putInt("interval", min).putBoolean("on", start);
+                        .putBoolean("on", start);
+                copySched(ed, start); // 1040 공통 보내는 시각 + 다음 송신 시각
                 ed.apply();
-                if (start) {
-                    // 지정 시각: 다음 시각에 알림 / 일정 간격: 바로 1회 알림 후 간격대로
-                    sp.edit().putLong("next", byTimes
-                            ? HomeService.nextTime(tm, System.currentTimeMillis()) : 0).apply();
-                }
                 if (start && Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
                         Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                     requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTI);
@@ -3254,54 +3637,39 @@ public class MainActivity extends Activity {
             });
             // 지금 테스트: 자동 발송이면 바로 전송(팝업 유지), 아니면 Gmail 작성 화면 열기
             d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-                String addr = to.getText().toString().trim();
+                final String addr = joinEmails(tos);
                 if (addr.isEmpty() || !validEmails(addr)) {
                     Toast.makeText(this, "받는 사람 이메일을 확인하세요.", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                if (kakao && !kakaoMailOnly(addr)) {
-                    Toast.makeText(this, "카톡 이메일은 카카오메일 주소(@kakao.com 등)만 넣을 수 있습니다.",
-                            Toast.LENGTH_LONG).show();
-                    return;
-                }
-                sp.edit().putString("to", addr).apply();
+                sp.edit().putString("to", addr).putString("from", fr).putString("pass", pw).apply();
                 final Location loc = currentOrLastLocation();
-                if (how.getCheckedRadioButtonId() == rSmtp.getId()) {
-                    final String fr = from.getText().toString().trim();
-                    final String pw = pass.getText().toString().replace(" ", "");
-                    if (!Patterns.EMAIL_ADDRESS.matcher(fr).matches() || pw.isEmpty()) {
-                        Toast.makeText(this, "보내는 이메일과 앱 비밀번호를 확인하세요.", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    sp.edit().putString("from", fr).putString("pass", pw).apply();
-                    last.setText("보내는 중...");
-                    new Thread(() -> {
-                        String err = EmailSender.send(fr, pw, addr, HomeService.emailSubject(this),
-                                TelegramSender.message(this, loc));
-                        runOnUiThread(() -> {
-                            String r = err == null ? "성공" : "실패: " + err;
-                            last.setText("지금 테스트: " + r);
-                            Toast.makeText(this, err == null ? "메일을 보냈습니다." : r, Toast.LENGTH_LONG).show();
-                        });
-                    }).start();
-                    return;
-                }
-                last.setText("위치 메시지 만드는 중...");
+                last.setText("보내는 중...");
                 new Thread(() -> {
-                    String msg = TelegramSender.message(this, loc);
+                    String err = EmailSender.send(fr, pw, addr, HomeService.emailSubject(this),
+                            TelegramSender.message(this, loc));
                     runOnUiThread(() -> {
-                        d.dismiss();
-                        try {
-                            startActivity(HomeService.emailCompose(this, addr, HomeService.emailSubject(this), msg));
-                        } catch (Exception e) {
-                            Toast.makeText(this, "메일 앱을 열 수 없습니다.", Toast.LENGTH_SHORT).show();
-                        }
+                        String r = err == null ? "성공" : "실패: " + err;
+                        last.setText("지금 테스트: " + r);
+                        Toast.makeText(this, err == null ? "메일을 보냈습니다." : r, Toast.LENGTH_LONG).show();
                     });
                 }).start();
             });
         });
         d.show();
-        ScreenId.tag(d, HomeService.PREF_KMAIL.equals(pref) ? "1160" : "1150");
+        ScreenId.tag(d, "1150");
+    }
+
+    // 받는 사람 칸들(최대 5개) -> "a@x.com, b@y.com" 한 줄 (빈칸은 건너뜀)
+    private static String joinEmails(EditText[] tos) {
+        StringBuilder sb = new StringBuilder();
+        for (EditText e : tos) {
+            String s = e.getText().toString().trim();
+            if (!s.isEmpty()) {
+                sb.append(sb.length() > 0 ? ", " : "").append(s);
+            }
+        }
+        return sb.toString();
     }
 
     // 카카오메일 웹(mail.kakao.com) 열기 -> 안 되면 카카오톡 앱 열기
