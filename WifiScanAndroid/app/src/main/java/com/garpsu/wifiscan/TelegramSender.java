@@ -39,9 +39,9 @@ final class TelegramSender {
 
     /*
      * 메시지 첫 줄: 지금 상태
-     *   🏠 HomeBack · 공유기 MyHome (AA:BB:CC:DD:EE:01)
-     *   🏠 HomeBack · 블루투스 GARPSU-PC (11:22:33:44:55:66)
-     *   🚶 NotHome
+     *   🏠 홈 (우리집 거실) · 공유기 MyHome (AA:BB:CC:DD:EE:01)   ← 별명이 없으면 "🏠 홈 · 공유기 ..."
+     *   🏠 홈 · 블루투스 GARPSU-PC (11:22:33:44:55:66)
+     *   🚶 외출
      *   ❔ 상태 확인 불가 (이유)
      */
     static String statusLine(Context c) {
@@ -57,7 +57,10 @@ final class TelegramSender {
                 String[] t = s.split("\\|", 2);
                 if (t[0].equals(bssid)) {
                     String ssid = t.length > 1 && !t[1].isEmpty() ? t[1] : "<숨김>";
-                    return "🏠 HomeBack · 공유기 " + ssid + " (" + bssid.toUpperCase(Locale.US) + ")";
+                    // 공유기 등록 별명(1010 에서 입력)이 있으면 "홈 (우리집 거실)" 처럼 함께
+                    String alias = MainActivity.routerAlias(c, bssid);
+                    return "🏠 홈" + (alias.isEmpty() ? "" : " (" + alias + ")")
+                            + " · 공유기 " + ssid + " (" + bssid.toUpperCase(Locale.US) + ")";
                 }
             }
         }
@@ -70,7 +73,7 @@ final class TelegramSender {
                     mac = t[0];
                 }
             }
-            return "🏠 HomeBack · 블루투스 " + name + (mac.isEmpty() ? "" : " (" + mac + ")");
+            return "🏠 홈 · 블루투스 " + name + (mac.isEmpty() ? "" : " (" + mac + ")");
         }
         boolean btReg = !BtHome.registered(c).isEmpty();
         if (routers.isEmpty() && !btReg) {
@@ -79,7 +82,7 @@ final class TelegramSender {
         if (!btReg && !HomeService.locationOn(c)) {
             return "❔ 상태 확인 불가 (위치 서비스 꺼짐)";
         }
-        return "🚶 NotHome";
+        return "🚶 외출";
     }
 
     // 위치 -> 메시지 (주소 조회 포함). 첫 줄 = 지금 상태
@@ -192,19 +195,36 @@ final class TelegramSender {
 
     // 지도 링크 3개 (구글 / 카카오 / 네이버). 누르면 각 지도 앱(없으면 웹)에서 열림
     static String mapLinks(double lat, double lng) {
-        String la = String.format(Locale.US, "%.6f", lat), lo = String.format(Locale.US, "%.6f", lng);
-        String name;
-        try {
-            name = URLEncoder.encode("현재 위치", "UTF-8").replace("+", "%20");
-        } catch (Exception e) {
-            name = "here";
-        }
         return "■ 지도에서 보기\n"
-                + "   구글: https://maps.google.com/?q=" + la + "," + lo + "\n\n"
-                + "   카카오: https://map.kakao.com/link/map/" + name + "," + la + "," + lo + "\n\n"
-                // 네이버: 예전 "p?c=경도,위도" 형식은 지도 중심만 옮기고 표시(핀)가 없었음
-                //  -> lng/lat/title 형식 (네이버 담당자 포럼 안내): 그 자리에 "현재 위치" 핀 표시
-                + "   네이버: https://map.naver.com/?lng=" + lo + "&lat=" + la + "&title=" + name;
+                + "   구글: " + googleUrl(lat, lng) + "\n\n"
+                + "   카카오: " + kakaoUrl(lat, lng) + "\n\n"
+                + "   네이버: " + naverUrl(lat, lng);
+    }
+
+    private static String f6(double v) {
+        return String.format(Locale.US, "%.6f", v);
+    }
+
+    private static String hereName() {
+        try {
+            return URLEncoder.encode("현재 위치", "UTF-8").replace("+", "%20");
+        } catch (Exception e) {
+            return "here";
+        }
+    }
+
+    static String googleUrl(double lat, double lng) {
+        return "https://maps.google.com/?q=" + f6(lat) + "," + f6(lng);
+    }
+
+    static String kakaoUrl(double lat, double lng) {
+        return "https://map.kakao.com/link/map/" + hereName() + "," + f6(lat) + "," + f6(lng);
+    }
+
+    // 네이버: 예전 "p?c=경도,위도" 형식은 지도 중심만 옮기고 표시(핀)가 없었음
+    //  -> lng/lat/title 형식 (네이버 담당자 포럼 안내): 그 자리에 "현재 위치" 핀 표시
+    static String naverUrl(double lat, double lng) {
+        return "https://map.naver.com/?lng=" + f6(lng) + "&lat=" + f6(lat) + "&title=" + hereName();
     }
 
     // 받는 사람(쉼표 구분) 모두에게 전송. 성공하면 null, 실패하면 오류 내용

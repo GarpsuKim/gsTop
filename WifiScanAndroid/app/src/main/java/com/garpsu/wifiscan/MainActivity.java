@@ -97,6 +97,7 @@ public class MainActivity extends Activity {
     private final Button[] tabBtns = new Button[TABS];
     private final LinearLayout[] panels = new LinearLayout[TABS];
     private int curTab = 0;
+    private boolean statusHome; // 메인 상태: true = 홈(HomeBack), false = 외출(NotHome)
     private final Handler handler = new Handler(Looper.getMainLooper());
     private int mode = MODE_NONE;
     private int scanId = 0; // 기기 목록 결과가 다른 화면을 덮어쓰지 않게 구분
@@ -230,9 +231,9 @@ public class MainActivity extends Activity {
         top.addView(exit, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // HomeBack / NotHome
+        // 상태: 홈 / 외출
         status = new TextView(this);
-        status.setTextSize(40); // 오른쪽에 SOS 버튼이 있어 조금 작게
+        status.setTextSize(40); // "홈" / "외출" 두 글자라 크게 (양옆에 [현재 위치]·[SOS] 버튼)
         status.setTypeface(null, Typeface.BOLD);
         status.setGravity(Gravity.CENTER);
         status.setPadding(0, 30, 0, 0);
@@ -255,12 +256,14 @@ public class MainActivity extends Activity {
             tabBtns[i] = addButton(tabs, names[i], v -> selectTab(idx));
             tabBtns[i].setTextSize(10); // 탭 6개라 글자를 작게
         }
+        // (2) 현재 위치(1020)는 탭 메뉴에서 떼어 앱 시작 팝업으로 독립. 다른 탭 번호가 밀리지 않게 자리만 남기고 숨김
+        tabBtns[1].setVisibility(View.GONE);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.addView(top, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        // 상태(HomeBack/NotHome) 왼쪽 + 큰 [SOS] 오른쪽 ([종료] 바로 아래)
+        // 상태(홈/외출) 왼쪽 + 큰 [SOS] 오른쪽 ([종료] 바로 아래)
         LinearLayout statusCol = new LinearLayout(this);
         statusCol.setOrientation(LinearLayout.VERTICAL);
         statusCol.setGravity(Gravity.CENTER);
@@ -271,8 +274,22 @@ public class MainActivity extends Activity {
         LinearLayout statusRow = new LinearLayout(this);
         statusRow.setOrientation(LinearLayout.HORIZONTAL);
         statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        // 2번째 줄: 왼쪽 [현재 위치](화면 1020 팝업) / 가운데 홈·외출 / 오른쪽 [SOS]
+        int sosSize = (int) (100 * getResources().getDisplayMetrics().density); // 약 100dp 정사각형 (양쪽 같은 크기)
+        Button locBtn = new Button(this);
+        locBtn.setText("📍\n현재\n위치");
+        locBtn.setTextSize(18);
+        locBtn.setTypeface(null, Typeface.BOLD);
+        locBtn.setTextColor(Color.WHITE);
+        locBtn.setBackgroundColor(0xFF1976D2);
+        locBtn.setAllCaps(false);
+        locBtn.setGravity(Gravity.CENTER);
+        locBtn.setPadding(10, 10, 10, 10);
+        locBtn.setOnClickListener(v -> showLocPopup());
+        LinearLayout.LayoutParams locLp = new LinearLayout.LayoutParams(sosSize, sosSize);
+        locLp.setMargins(16, 8, 0, 8);
+        statusRow.addView(locBtn, locLp);
         statusRow.addView(statusCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        int sosSize = (int) (110 * getResources().getDisplayMetrics().density); // 약 110dp 정사각형
         LinearLayout.LayoutParams sosLp = new LinearLayout.LayoutParams(sosSize, sosSize);
         sosLp.setMargins(0, 8, 16, 8);
         statusRow.addView(makeSosButton(), sosLp);
@@ -286,18 +303,11 @@ public class MainActivity extends Activity {
             final int idx = i;
             LinearLayout actions = new LinearLayout(this);
             actions.setOrientation(LinearLayout.HORIZONTAL);
-            if (starts[i] != null && i != 0) { // 1010 의 [재검색] 은 영역 3 맨 위로 옮김
-                startBtns[i] = addButton(actions, "검색시작", v -> starts[idx].run());
-            }
+            // 1010 의 [재검색] 은 영역 3 맨 위로 옮김, (2) 현재 위치(1020)는 탭에서 떼어 팝업으로 (showLocPopup)
             if (i == 0) {
                 addButton(actions, "등록 확인", v -> showRegistered());
                 addButton(actions, "나의 보호자", v -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
                 addButton(actions, "사용자 등록", v -> startActivity(new Intent(this, UserActivity.class))); // 화면 1075
-            }
-            if (i == 1) { // (2) 현재 위치
-                addButton(actions, "지도", v -> openMap());
-                addButton(actions, "복사", v -> copyLocation());
-                addButton(actions, "즉시 공유", v -> shareLocation());
             }
 
             texts[i] = new TextView(this);
@@ -364,16 +374,15 @@ public class MainActivity extends Activity {
 
         text = texts[0];
         selectTab(0);
-        checkHome(); // 실행 처음에 무조건 HomeBack / NotHome 판정
-        handleMailAsk(getIntent()); // 이메일 위치 질문 알림을 눌러 열린 경우 (화면 1057)
+        checkHome(); // 실행 처음에 무조건 홈 / 외출 판정
         if (savedInstanceState == null) {
             HomeService.mailRescan(this); // 앱 시작: 받은편지함에 남은 위치 요청 메일을 찾아 회신·삭제
-        }
-        if (loadRouters().isEmpty() && BtHome.registered(this).isEmpty()) {
-            showIntro(); // 홈 공유기가 아직 없으면 안내 팝업 -> 닫으면 위치 권한 요청
+            // 앱 시작: 먼저 현재 위치 팝업(1020). [닫기]를 누르면 탭 메뉴로 (공유기 안내 팝업은 그 다음)
+            showLocPopup();
         } else {
-            ensurePermission(); // 실행 처음에 위치 권한 요청 (공유기 연결 검사에 필요)
+            afterLocPopup();
         }
+        handleMailAsk(getIntent()); // 이메일 위치 질문 알림을 눌러 열린 경우 (화면 1057, 현재 위치 팝업보다 위에)
         if (HomeService.anyOn(this) && hasPermission()) {
             HomeService.refresh(this); // 혹시 종료되어 있으면 다시 시작
         }
@@ -479,7 +488,7 @@ public class MainActivity extends Activity {
         ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("집에왔어요 · 홈 공유기 등록")
                 .setMessage("홈 공유기를 등록하세요.\n\n귀가 할 때 마다 자동으로 검색하여, "
-                        + "\"HomeBack\" 또는 \"NotHome\" 상태를 확인합니다.\n\n"
+                        + "\"홈\" 또는 \"외출\" 상태를 확인합니다.\n\n"
                         + "어린이, 노약자, 치매어르신 들의 안심 귀가 확인에 유용합니다.")
                 .setPositiveButton("확인", null)
                 .setOnDismissListener(d -> ensurePermission())
@@ -524,6 +533,9 @@ public class MainActivity extends Activity {
         renderBt(); // 블루투스 설정(페어링)에서 돌아왔을 때 목록 갱신
         updateRemoteInfo();
         updateSosInfo();
+        if (locPopupOpen() && hasPermission() && mode == MODE_LOC) {
+            location(); // 다른 앱(지도·공유)에 갔다 오면 멈췄던 위치 갱신을 다시 시작
+        }
     }
 
     @Override
@@ -553,14 +565,19 @@ public class MainActivity extends Activity {
             }
         } else if (code == REQ_PERM) {
             if (hasPermission()) {
-                texts[curTab].setText(curTab == 0 ? "[재검색]을 눌러 주세요." : "[검색시작]을 눌러 주세요.");
+                if (curTab == 0) {
+                    texts[0].setText("[재검색]을 눌러 주세요.");
+                }
+                if (locPopupOpen()) {
+                    location(); // 현재 위치 팝업(1020)이 떠 있으면 권한 허용 직후 바로 검색
+                }
                 checkHome();
                 sendStartMessageOnce(); // 앱 시작 위치 통보 (권한이 없어 미뤄 둔 경우)
                 if (HomeService.anyOn(this)) {
                     HomeService.refresh(this);
                 }
             } else {
-                texts[curTab].setText("위치 권한이 필요합니다.\n(Wi-Fi 스캔과 위치 확인에 필요합니다.)");
+                (locPopupOpen() ? texts[1] : texts[curTab]).setText("위치 권한이 필요합니다.\n(Wi-Fi 스캔과 위치 확인에 필요합니다.)");
             }
         }
     }
@@ -783,6 +800,33 @@ public class MainActivity extends Activity {
         return b.toLowerCase(Locale.US);
     }
 
+    // 지금 연결된 공유기 이름(SSID). 모르면 null
+    private String connectedSsid() {
+        if (!hasPermission() || !wm.isWifiEnabled()) {
+            return null;
+        }
+        String s = wm.getConnectionInfo().getSSID();
+        if (s == null || s.equals("<unknown ssid>") || s.isEmpty()) {
+            return null;
+        }
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            s = s.substring(1, s.length() - 1);
+        }
+        return s.isEmpty() ? null : s;
+    }
+
+    // 화면 1020 첫 줄: "공유기: 이름, MAC, 등록 별명" (별명이 없으면 '.....', 별명은 1010 에서 입력)
+    private String routerLine() {
+        String bssid = connectedBssid();
+        if (bssid == null) {
+            return "공유기: (연결 안 됨)";
+        }
+        String ssid = connectedSsid();
+        String alias = routerAlias(this, bssid);
+        return "공유기: " + (ssid == null ? "<숨김>" : ssid) + ", " + bssid.toUpperCase(Locale.US) + ", "
+                + (alias.isEmpty() ? "....." : alias);
+    }
+
     // 저장된 공유기 목록 (주변에 안 보여도 표시, [삭제] 가능)
     private void renderSaved() {
         String conn = connectedBssid();
@@ -800,7 +844,7 @@ public class MainActivity extends Activity {
 
         // 영역 1 안내문
         TextView guide = new TextView(this);
-        guide.setText("사용자 폰이 이 목록에서 체크된 공유기들 중 하나에 연결되면, [HomeBack]로 판단합니다");
+        guide.setText("사용자 폰이 이 목록에서 체크된 공유기들 중 하나에 연결되면, [홈]으로 판단합니다");
         guide.setTextSize(13);
         guide.setTextColor(Color.DKGRAY);
         guide.setPadding(40, 0, 40, 10);
@@ -855,6 +899,41 @@ public class MainActivity extends Activity {
             }
             row.addView(cb, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             savedBox.addView(row);
+
+            // 공유기 등록 별명 (예: 우리집 거실). 글자를 바꾸면 바로 저장
+            LinearLayout aliasRow = new LinearLayout(this);
+            aliasRow.setOrientation(LinearLayout.HORIZONTAL);
+            aliasRow.setGravity(Gravity.CENTER_VERTICAL);
+            aliasRow.setPadding(110, 0, 40, 10); // 체크박스 글자 시작 위치에 맞춤
+            if (bssid.equals(conn)) {
+                aliasRow.setBackgroundColor(0x1A2E7D32);
+            }
+            TextView al = new TextView(this);
+            al.setText("별명 ");
+            al.setTextSize(14);
+            al.setTypeface(null, Typeface.BOLD);
+            aliasRow.addView(al);
+            EditText alias = new EditText(this);
+            alias.setSingleLine(true);
+            alias.setTextSize(14);
+            alias.setHint("예: 우리집 거실");
+            alias.setText(routerAlias(this, bssid));
+            alias.addTextChangedListener(new android.text.TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int a, int b, int c) {
+                }
+
+                @Override
+                public void afterTextChanged(android.text.Editable e) {
+                    setRouterAlias(MainActivity.this, bssid, e.toString());
+                }
+            });
+            aliasRow.addView(alias, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            savedBox.addView(aliasRow);
         }
         if (!items.isEmpty()) {
             savedBox.addView(registerRow(v -> commitSaved())); // 영역 1 오른쪽 아래 [등록]
@@ -863,6 +942,17 @@ public class MainActivity extends Activity {
     }
 
     private final List<CheckBox> savedChecks = new ArrayList<>(); // 영역 1: 저장된 공유기 체크박스
+
+    // 공유기 등록 별명: "home" 설정의 "alias_<MAC 소문자>"
+    static String routerAlias(Context c, String bssid) {
+        return c.getSharedPreferences("home", MODE_PRIVATE)
+                .getString("alias_" + bssid.toLowerCase(Locale.US), "");
+    }
+
+    static void setRouterAlias(Context c, String bssid, String alias) {
+        c.getSharedPreferences("home", MODE_PRIVATE).edit()
+                .putString("alias_" + bssid.toLowerCase(Locale.US), alias.trim()).apply();
+    }
 
     // 영역 1 [등록]: 체크를 해제한 공유기만 등록에서 뺌
     private void commitSaved() {
@@ -931,6 +1021,10 @@ public class MainActivity extends Activity {
         for (Map.Entry<String, String> it : items) {
             String bssid = it.getKey();
             append(s, "  " + (it.getValue().isEmpty() ? "<숨김>" : it.getValue()), 0, true);
+            String alias = routerAlias(this, bssid); // 공유기 등록 별명 (1010 에서 입력)
+            if (!alias.isEmpty()) {
+                append(s, " (" + alias + ")", C_MARK, true);
+            }
             append(s, "   " + bssid, C_GRAY, false);
             Integer lv = seenLevel.get(bssid);
             if (bssid.equals(conn)) {
@@ -963,8 +1057,8 @@ public class MainActivity extends Activity {
         }
 
         s.append('\n');
-        boolean home = status.getText().toString().equals("HomeBack");
-        append(s, "지금 상태: " + (home ? "HomeBack (집)" : "NotHome (외출)"), home ? C_GOOD : C_BAD, true);
+        boolean home = statusHome;
+        append(s, "지금 상태: " + (home ? "홈" : "외출"), home ? C_GOOD : C_BAD, true);
 
         TextView tv = new TextView(this);
         tv.setText(s);
@@ -1015,7 +1109,7 @@ public class MainActivity extends Activity {
         h.setPadding(40, 30, 40, 6);
         btBox.addView(h);
         btNote("폰과 PC를 미리 페어링한 뒤 아래에서 PC를 체크하고 [저장]을 누르세요.\n"
-                + "PC가 가까이 있으면 Wi-Fi가 꺼져 있어도 HomeBack으로 판정합니다. (PC 블루투스가 켜져 있어야 함)",
+                + "PC가 가까이 있으면 Wi-Fi가 꺼져 있어도 홈으로 판정합니다. (PC 블루투스가 켜져 있어야 함)",
                 Color.GRAY);
 
         LinearLayout row = new LinearLayout(this);
@@ -1198,7 +1292,7 @@ public class MainActivity extends Activity {
         getSharedPreferences("home", MODE_PRIVATE).edit().putStringSet("routers", set).apply();
     }
 
-    // 지금 연결된 공유기가 저장된 공유기(BSSID)인지 검사 -> 항상 HomeBack 또는 NotHome 표시
+    // 지금 연결된 공유기가 저장된 공유기(BSSID)인지 검사 -> 항상 홈 또는 외출 표시
     private void checkHome() {
         Map<String, String> saved = loadRouters();
         boolean btReg = !BtHome.registered(this).isEmpty();
@@ -1222,7 +1316,8 @@ public class MainActivity extends Activity {
         if (!savedConn.equals(String.valueOf(connectedBssid()))) {
             renderSaved();
         }
-        status.setText(home ? "HomeBack" : "NotHome");
+        statusHome = home;
+        status.setText(home ? "홈" : "외출"); // 메인 화면 표시는 한국말 (HomeBack -> 홈, NotHome -> 외출)
         status.setTextColor(home ? Color.rgb(46, 125, 50) : Color.rgb(198, 40, 40));
         statusNote.setText(note);
         statusNote.setVisibility(note.isEmpty() ? View.GONE : View.VISIBLE);
@@ -1450,6 +1545,211 @@ public class MainActivity extends Activity {
         return r;
     }
 
+    // ---------- 현재 위치 팝업 (화면 1020) ----------
+    // 앱을 켜면 처음에 보여 줌. 위: [재검색] [현재 위치(검은 제목)] [닫기], 가운데: 위치 정보, 아래: [지도] [복사] [즉시 공유]
+    // [닫기](또는 뒤로 가기) -> 위치 갱신을 멈추고 탭 메뉴로
+
+    private android.app.Dialog locDlg;
+
+    private int dpx(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    // 타원 버튼 (입체: 오른쪽 아래 그림자 + 위가 밝은 파랑 그라데이션 + 위쪽 광택, 흰 굵은 글자)
+    // 색: 가장 흔한 버튼 색인 파랑 (Material Blue 계열)
+    private Button ovalButton(String label, View.OnClickListener l) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(16);
+        b.setTypeface(null, Typeface.BOLD);
+        b.setTextColor(Color.WHITE);
+        b.setShadowLayer(2f, 0f, 1.5f, 0x80000000); // 글자도 살짝 그림자
+        b.setAllCaps(false);
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        b.setGravity(Gravity.CENTER);
+        int sh = dpx(3);
+        b.setPadding(0, 0, sh, sh); // 글자를 그림자 뺀 타원 가운데에
+        android.graphics.drawable.StateListDrawable st = new android.graphics.drawable.StateListDrawable();
+        st.addState(new int[]{android.R.attr.state_pressed}, ovalBevel(true));
+        st.addState(new int[]{}, ovalBevel(false));
+        b.setBackground(st);
+        b.setStateListAnimator(null); // 기본 그림자 대신 직접 그린 그림자 사용
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    // 타원 버튼 배경. pressed: 그림자 쪽으로 눌려 들어간 모양 (더 진한 파랑, 그림자 없음)
+    private android.graphics.drawable.Drawable ovalBevel(boolean pressed) {
+        int sh = dpx(3);
+        android.graphics.drawable.GradientDrawable shadow = new android.graphics.drawable.GradientDrawable();
+        shadow.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        shadow.setColor(pressed ? Color.TRANSPARENT : 0x55000000);
+        android.graphics.drawable.GradientDrawable face = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                pressed ? new int[]{0xFF1565C0, 0xFF0D47A1} : new int[]{0xFF64B5F6, 0xFF1E88E5, 0xFF1565C0});
+        face.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        face.setStroke(dpx(1), 0xFF0D47A1);
+        android.graphics.drawable.GradientDrawable gloss = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{pressed ? 0x22FFFFFF : 0x66FFFFFF, 0x00FFFFFF});
+        gloss.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        android.graphics.drawable.LayerDrawable ld = new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{shadow, face, gloss});
+        ld.setLayerInset(0, sh, sh, 0, 0);
+        int off = pressed ? sh : 0; // 누르면 그림자 자리로 내려앉음
+        ld.setLayerInset(1, off, off, sh - off, sh - off);
+        // 광택: 타원 위쪽 절반 안쪽에만
+        ld.setLayerInset(2, off + dpx(8), off + dpx(3), sh - off + dpx(8), sh - off + dpx(22));
+        return ld;
+    }
+
+    private android.graphics.drawable.GradientDrawable rounded(int color, int radiusDp) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dpx(radiusDp));
+        return g;
+    }
+
+    // 1020 카드 배경: 겹친 그림 5장으로 입체 테두리
+    //  1) 오른쪽 아래로 비낀 흐린 그림자  2) 진한 남색 테두리
+    //  3) 흰색 (위·왼쪽 밝은 경사면)  4) 회색 (아래·오른쪽 어두운 경사면)  5) 약한 회색 바탕 (위가 조금 밝은 그라데이션)
+    private android.graphics.drawable.Drawable bevelCard() {
+        int sh = 6, edge = 2, bevel = 3, r = 18;
+        android.graphics.drawable.GradientDrawable face = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xFFF5F5F5, 0xFFE8E8E8});
+        face.setCornerRadius(dpx(r - edge - bevel));
+        android.graphics.drawable.LayerDrawable ld = new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{
+                        rounded(0x40000000, r),            // 1) 그림자
+                        rounded(0xFF0B2533, r),            // 2) 진한 테두리
+                        rounded(0xFFFFFFFF, r - edge),     // 3) 밝은 경사면
+                        rounded(0xFFA9A9A9, r - edge),     // 4) 어두운 경사면
+                        face});                            // 5) 바탕
+        ld.setLayerInset(0, dpx(sh), dpx(sh), 0, 0);
+        ld.setLayerInset(1, 0, 0, dpx(sh), dpx(sh));
+        ld.setLayerInset(2, dpx(edge), dpx(edge), dpx(sh + edge + bevel), dpx(sh + edge + bevel));
+        ld.setLayerInset(3, dpx(edge + bevel), dpx(edge + bevel), dpx(sh + edge), dpx(sh + edge));
+        ld.setLayerInset(4, dpx(edge + bevel), dpx(edge + bevel), dpx(sh + edge + bevel), dpx(sh + edge + bevel));
+        return ld;
+    }
+
+    private void showLocPopup() {
+        if (locDlg != null && locDlg.isShowing()) {
+            return;
+        }
+        // 가장 바깥: 둥근 테두리 카드 (입체감: 오른쪽 아래 그림자 + 밝은 위·왼쪽 / 어두운 아래·오른쪽 경사면)
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(bevelCard());
+        int sh = 6, edge = 2, bevel = 3; // dp: 그림자 / 진한 테두리 / 경사면 두께
+        int in = edge + bevel;
+        card.setPadding(dpx(in + 10), dpx(in + 10), dpx(sh + in + 10), dpx(sh + in + 4));
+
+        // 위쪽 줄: [재검색]  현재 위치  [닫기]
+        int ow = dpx(82), oh = dpx(56); // 그림자 3dp 포함 ("즉시 공유" 두 줄이 들어가게)
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        Button again = ovalButton("재검색", v -> location());
+        top.addView(again, new LinearLayout.LayoutParams(ow, oh));
+        TextView title = new TextView(this);
+        title.setText("현재 위치");
+        title.setTextSize(24);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setTextColor(Color.WHITE);
+        title.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable tb = new android.graphics.drawable.GradientDrawable();
+        tb.setColor(Color.BLACK);
+        tb.setStroke(dpx(2), 0xFF0B2533);
+        title.setBackground(tb);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, oh, 1f);
+        tlp.setMargins(dpx(8), 0, dpx(8), 0);
+        top.addView(title, tlp);
+        top.addView(ovalButton("닫기", v -> locDlg.dismiss()), new LinearLayout.LayoutParams(ow, oh));
+        card.addView(top, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 가운데: 위치 정보 (길면 스크롤)
+        TextView info = new TextView(this);
+        info.setTextSize(17);
+        info.setTextColor(Color.BLACK);
+        info.setLineSpacing(0, 1.15f);
+        info.setPadding(dpx(14), dpx(16), dpx(14), dpx(16));
+        info.setText("위치 확인 중...");
+        info.setMovementMethod(android.text.method.LinkMovementMethod.getInstance()); // 지도 링크 누르기
+        info.setLinkTextColor(0xFF1565C0);
+        info.setHighlightColor(Color.TRANSPARENT);
+        ScrollView sc = new ScrollView(this);
+        sc.addView(info);
+        card.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // 아래쪽 줄: [복사] [즉시 공유] 두 개를 가운데에 넉넉히 벌려 배치 ([지도]는 삭제 - 데이터 영역의 지도 링크 사용)
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.HORIZONTAL);
+        bottom.setGravity(Gravity.CENTER);
+        String[] labels = {"복사", "즉시\n공유"};
+        View.OnClickListener[] acts = {v -> copyLocation(), v -> shareLocation()};
+        for (int k = 0; k < labels.length; k++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dpx(96), oh);
+            lp.setMargins(dpx(20), 0, dpx(20), 0);
+            bottom.addView(ovalButton(labels[k], acts[k]), lp);
+        }
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.setMargins(0, dpx(6), 0, dpx(10));
+        card.addView(bottom, blp);
+        card.addView(ScreenId.label(this, "1020"), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 위치 검색(location/begin/showLocation)이 이 팝업의 글자·[재검색]을 쓰도록 연결
+        texts[1] = info;
+        startBtns[1] = again;
+
+        locDlg = new android.app.Dialog(this);
+        locDlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        locDlg.setContentView(card);
+        android.view.Window w = locDlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            w.setLayout((int) (dm.widthPixels * 0.92), (int) (dm.heightPixels * 0.80));
+        }
+        locDlg.setOnDismissListener(d -> {
+            if (mode == MODE_LOC) {
+                mode = MODE_NONE;
+                scanId++;
+            }
+            stopLocUpdates();
+            text = texts[curTab] != null ? texts[curTab] : texts[0];
+            afterLocPopup();
+        });
+        locDlg.show();
+        location(); // 바로 위치 검색 (권한이 없으면 권한 요청 -> 허용되면 다시 검색)
+    }
+
+    private boolean locPopupOpen() {
+        return locDlg != null && locDlg.isShowing();
+    }
+
+    // 현재 위치 팝업을 닫은 뒤(또는 팝업 없이 다시 그릴 때): 예전 시작 순서 그대로
+    private boolean afterLocDone;
+
+    private void afterLocPopup() {
+        if (afterLocDone) {
+            return;
+        }
+        afterLocDone = true;
+        if (loadRouters().isEmpty() && BtHome.registered(this).isEmpty()) {
+            showIntro(); // 홈 공유기가 아직 없으면 안내 팝업 -> 닫으면 위치 권한 요청
+        } else {
+            ensurePermission(); // 위치 권한 요청 (공유기 연결 검사에 필요)
+        }
+    }
+
     // ---------- 현재 위치 ----------
 
     private void location() {
@@ -1493,15 +1793,124 @@ public class MainActivity extends Activity {
     private void showLocation(Location l, boolean cached) {
         lastLoc = l;
         boolean fresh = geoLoc != null && geoLoc.distanceTo(l) < 100;
-        text.setText("[ 현재 위치 ]" + (cached ? "  (마지막 위치, 갱신 중...)" : "") + "\n\n"
-                + "위도: " + String.format(Locale.US, "%.6f", l.getLatitude()) + "\n"
+        // 첫 줄 "[ 현재 위치 ]" 는 제거 (팝업 제목이 '현재 위치'). 마지막 영역: 지도 링크 3개 (누르면 열림)
+        SpannableStringBuilder sb = new SpannableStringBuilder();
+        if (cached) {
+            sb.append("(마지막 위치, 갱신 중...)\n\n");
+        }
+        sb.append(routerLine() + "\n");
+        sb.append("위도: " + String.format(Locale.US, "%.6f", l.getLatitude()) + "\n"
                 + "경도: " + String.format(Locale.US, "%.6f", l.getLongitude()) + "\n"
                 + "정확도: " + Math.round(l.getAccuracy()) + " m\n"
                 + "제공: " + l.getProvider() + "\n"
                 + "시각: " + new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(l.getTime()))
-                + "\n\n" + (fresh ? geoText : "주소: 조회 중..."));
+                + "\n\n" + (fresh ? geoText : "주소: 조회 중...") + "\n\n");
+        double la = l.getLatitude(), lo = l.getLongitude();
+        String ll = String.format(Locale.US, "%.6f,%.6f", la, lo);
+        String lat = String.format(Locale.US, "%.6f", la), lng = String.format(Locale.US, "%.6f", lo);
+        String here = Uri.encode("현재 위치");
+        // 지도 앱이 깔려 있으면 앱의 주소 형식으로, 없으면 웹 주소로
+        mapLink(sb, "구글 지도", "com.google.android.apps.maps",
+                "geo:" + ll + "?q=" + ll + "(" + here + ")",
+                TelegramSender.googleUrl(la, lo));
+        sb.append("\n");
+        mapLink(sb, "네이버 지도", "com.nhn.android.nmap",
+                "nmap://place?lat=" + lat + "&lng=" + lng + "&name=" + here + "&appname=" + getPackageName(),
+                TelegramSender.naverUrl(la, lo));
+        sb.append("\n");
+        mapLink(sb, "카카오 지도", "net.daum.android.map",
+                "kakaomap://look?p=" + ll,
+                TelegramSender.kakaoUrl(la, lo));
+        // 티맵·아틀란: 공개된 좌표 보기 주소가 없어 표준 geo: 로 시도 -> 안 되면 앱만 실행. 웹 지도가 없어 미설치면 Play 스토어
+        sb.append("\n");
+        mapLink(sb, "티맵 (TMAP)", "com.skt.tmap.ku|com.skt.skaf.l001mtm091", null,
+                "https://play.google.com/store/apps/details?id=com.skt.tmap.ku");
+        sb.append("\n");
+        mapLink(sb, "아틀란 (ATLAN)", "kr.mappers.AtlanSmart", null,
+                "https://play.google.com/store/apps/details?id=kr.mappers.AtlanSmart");
+        // 웨이즈: 공식 링크 waze://?ll=위도,경도 / 웹 waze.com/ul (앱이 없으면 웨이즈 웹 지도)
+        sb.append("\n");
+        mapLink(sb, "웨이즈 (Waze)", "com.waze",
+                "waze://?ll=" + ll + "&z=17",
+                "https://www.waze.com/ul?ll=" + ll + "&z=17");
+        // 맵스미: 공식 API mapsme://map?v=1&ll=위도,경도&n=이름 / 웹 지도가 없어 미설치면 Play 스토어
+        sb.append("\n");
+        mapLink(sb, "맵스미 (MAPS.ME)", "com.mapswithme.maps.pro",
+                "mapsme://map?v=1&ll=" + ll + "&n=" + here,
+                "https://play.google.com/store/apps/details?id=com.mapswithme.maps.pro");
+        text.setText(sb);
         if (!fresh && !geoBusy) {
             lookupAddress(l);
+        }
+    }
+
+    // "▶ 구글 지도" 처럼 파란 밑줄 글자. 누르면: 그 지도 앱이 설치되어 있으면 앱으로(appUri), 없으면 웹으로(webUrl)
+    private void mapLink(SpannableStringBuilder sb, String label, final String pkg, final String appUri,
+                         final String webUrl) {
+        sb.append("▶ ");
+        int s = sb.length();
+        sb.append(label);
+        sb.setSpan(new android.text.style.ClickableSpan() {
+            @Override
+            public void onClick(View v) {
+                openMapApp(pkg, appUri, webUrl);
+            }
+        }, s, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), s, sb.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    // 지도 앱이 설치되어 있는지 먼저 확인 (Android 11 이상은 매니페스트 <queries> 에 패키지가 있어야 보임)
+    private boolean installed(String pkg) {
+        try {
+            getPackageManager().getPackageInfo(pkg, 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // pkgs: 패키지 이름 하나 또는 "새이름|옛이름" (앱이 이름을 바꾼 경우). 설치된 첫 번째를 돌려줌, 없으면 null
+    private String installedPkg(String pkgs) {
+        for (String p : pkgs.split("\\|")) {
+            if (installed(p)) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    // 1) 그 앱 전용 주소(appUri)  2) 표준 좌표 주소(geo:)를 그 앱으로  3) 그냥 그 앱 실행
+    // 앱이 없으면 webUrl (웹 지도, 웹 지도가 없는 내비 앱은 Play 스토어 설치 페이지)
+    private void openMapApp(String pkgs, String appUri, String webUrl) {
+        String pkg = installedPkg(pkgs);
+        if (pkg != null && lastLoc != null) {
+            String ll = String.format(Locale.US, "%.6f,%.6f", lastLoc.getLatitude(), lastLoc.getLongitude());
+            String geo = "geo:" + ll + "?q=" + ll + "(" + Uri.encode("현재 위치") + ")";
+            for (String u : new String[]{appUri, geo}) {
+                if (u == null) {
+                    continue;
+                }
+                Intent app = new Intent(Intent.ACTION_VIEW, Uri.parse(u));
+                app.setPackage(pkg); // 브라우저나 다른 지도 앱이 아니라 바로 그 앱으로
+                try {
+                    startActivity(app);
+                    return;
+                } catch (Exception ignored) {
+                    // 앱이 이 주소 형식을 못 받으면 다음 방법으로
+                }
+            }
+            Intent launch = getPackageManager().getLaunchIntentForPackage(pkg);
+            if (launch != null) {
+                startActivity(launch);
+                Toast.makeText(this, "이 앱은 좌표로 바로 열 수 없어 앱만 실행했습니다.", Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)));
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "링크를 열 수 있는 앱이 없습니다.", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1544,18 +1953,10 @@ public class MainActivity extends Activity {
 
     private boolean needLocation() {
         if (lastLoc == null) {
-            Toast.makeText(this, "먼저 [검색시작]으로 위치를 확인하세요.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "아직 위치를 받지 못했습니다. 잠시 기다리거나 [재검색]을 누르세요.", Toast.LENGTH_SHORT).show();
             return true;
         }
         return false;
-    }
-
-    private String latLng() {
-        return String.format(Locale.US, "%.6f,%.6f", lastLoc.getLatitude(), lastLoc.getLongitude());
-    }
-
-    private String mapUrl() {
-        return "https://maps.google.com/?q=" + latLng();
     }
 
     // 좌표 + (조회된 경우) 주소/우편번호 + 지도 링크
@@ -1574,24 +1975,7 @@ public class MainActivity extends Activity {
         return TelegramSender.format(this, lastLoc, addr, zip); // 텔레그램·카톡·이메일과 같은 모양
     }
 
-    // 설치된 지도 앱(구글 지도, 네이버 지도 등)으로 열기, 없으면 브라우저로
-    private void openMap() {
-        if (needLocation()) {
-            return;
-        }
-        String ll = latLng();
-        Intent geo = new Intent(Intent.ACTION_VIEW,
-                Uri.parse("geo:" + ll + "?q=" + ll + "(" + Uri.encode("현재 위치") + ")"));
-        try {
-            startActivity(Intent.createChooser(geo, "지도 앱 선택"));
-        } catch (ActivityNotFoundException e) {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(mapUrl())));
-            } catch (ActivityNotFoundException e2) {
-                Toast.makeText(this, "지도를 열 수 있는 앱이 없습니다.", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
+    // ([지도] 버튼은 삭제: 1020 데이터 영역의 구글·네이버·카카오 지도 링크로 대신)
 
     private void copyLocation() {
         if (needLocation()) {
@@ -2760,13 +3144,13 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = 30;
         evHome = new CheckBox(this);
-        evHome.setText("귀가하면 알림 (HomeBack)");
+        evHome.setText("귀가하면 알림");
         evHome.setTextSize(15);
         evHome.setChecked(ev.getBoolean("home", false));
         evHome.setOnClickListener(v -> toggleEvent("home", evHome));
         body.addView(evHome, lp);
         evAway = new CheckBox(this);
-        evAway.setText("외출하면 알림 (NotHome · 2분 넘게 밖에 있을 때)");
+        evAway.setText("외출하면 알림 (2분 넘게 밖에 있을 때)");
         evAway.setTextSize(15);
         evAway.setChecked(ev.getBoolean("away", false));
         evAway.setOnClickListener(v -> toggleEvent("away", evAway));

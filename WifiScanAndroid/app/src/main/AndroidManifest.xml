@@ -27,6 +27,16 @@
         <package android:name="com.kakao.talk" />
         <package android:name="com.google.android.gm" />
         <package android:name="org.telegram.messenger" />
+        <!-- 지도 앱 설치 여부 확인 (화면 1020 지도 링크: 앱이 있으면 앱, 없으면 웹) -->
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.nhn.android.nmap" />
+        <package android:name="net.daum.android.map" />
+        <!-- 내비 앱: 티맵(새/옛 이름), 아틀란, 웨이즈, 맵스미 -->
+        <package android:name="com.skt.tmap.ku" />
+        <package android:name="com.skt.skaf.l001mtm091" />
+        <package android:name="kr.mappers.AtlanSmart" />
+        <package android:name="com.waze" />
+        <package android:name="com.mapswithme.maps.pro" />
         <intent>
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="mailto" />

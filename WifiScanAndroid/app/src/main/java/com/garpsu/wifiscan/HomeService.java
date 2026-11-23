@@ -36,7 +36,7 @@ import java.util.Set;
 
 /**
  * 백그라운드 작업 (포그라운드 서비스, 상단 알림 1개).
- * 1) 귀가 감지: Wi-Fi 연결이 바뀔 때마다 홈 공유기 연결 여부 검사 -> HomeBack / NotHome, 귀가 알림
+ * 1) 귀가 감지: Wi-Fi 연결이 바뀔 때마다 홈 공유기 연결 여부 검사 -> 홈 / 외출, 귀가 알림
  * 2) 텔레그램 자동 송신: 정해진 간격마다 현재 위치를 텔레그램으로 전송
  * 3) 카톡 자동 보내기: 정해진 간격마다 위치를 측정해 알림 -> 누르면 카톡 공유 화면 (전송은 사람이)
  * 하나라도 켜져 있으면 실행되고, 모두 꺼지면 종료된다.
@@ -105,7 +105,7 @@ public class HomeService extends Service {
     private ConnectivityManager cm;
     private LocationManager lm;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private String homeTitle = "NotHome", homeNote = "";
+    private String homeTitle = "외출", homeNote = "";
     private boolean tgBusy, kakaoBusy;
     private final Set<String> jobBusy = new HashSet<>(); // 처리 중인 작업 설정 (email / kmail / sms / self)
 
@@ -593,7 +593,7 @@ public class HomeService extends Service {
         boolean known = btHome || (!routers.isEmpty() && locationOn(this));
 
         // 이전 상태 (서비스가 재시작되어도 이어지도록 저장)
-        int prev = sp.getInt("bgState", -1); // -1 모름, 0 NotHome, 1 HomeBack
+        int prev = sp.getInt("bgState", -1); // -1 모름, 0 외출, 1 홈
         long leftAt = sp.getLong("leftAt", 0);
         long now = System.currentTimeMillis();
         SharedPreferences ev = getSharedPreferences(PREF_EVENT, MODE_PRIVATE);
@@ -633,7 +633,7 @@ public class HomeService extends Service {
             startSendingOnLeave(); // 외출 중에만 보내기: 지금부터 위치 보내기 시작
         }
 
-        homeTitle = home ? "HomeBack" : "NotHome";
+        homeTitle = home ? "홈" : "외출";
         if (btHome) {
             homeNote = "홈 PC 블루투스 확인됨 · " + sp.getString("btSeenName", "");
         } else if (routers.isEmpty() && !btReg) {
@@ -707,8 +707,8 @@ public class HomeService extends Service {
             String w = who.isEmpty() ? "" : who + " ";
             String time = new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date());
             String head = (test ? "[테스트] " : "")
-                    + (kind == KIND_HOME ? "🏠 " + w + "귀가했습니다 (HomeBack)"
-                    : kind == KIND_AWAY ? "🚶 " + w + "외출했습니다 (NotHome)"
+                    + (kind == KIND_HOME ? "🏠 " + w + "귀가했습니다"
+                    : kind == KIND_AWAY ? "🚶 " + w + "외출했습니다"
                     : kind == KIND_LATE ? "⚠️ " + w + "아직 귀가하지 않았습니다 ("
                     + ev.getString("lateTime", "22:00") + " 기준)"
                     : kind == KIND_START ? "📱 " + w + "앱을 시작했습니다"
@@ -716,7 +716,7 @@ public class HomeService extends Service {
                     // 백그라운드 기능이 하나라도 켜져 있으면 서비스는 계속 동작 -> 오해하지 않게 안내
                     + (anyOn(this) ? "\n(백그라운드 감지는 계속됩니다)" : "")
                     : "🆘 긴급 SOS — " + w + "도움을 요청했습니다");
-            // 첫 줄 = 지금 상태 (HomeBack · 공유기 이름 (MAC) / NotHome), 그다음 알림 제목
+            // 첫 줄 = 지금 상태 (홈 · 공유기 이름 (MAC) / 외출), 그다음 알림 제목
             String status = TelegramSender.statusLine(this);
             final String full = status + "\n" + head + "  " + time
                     + "\n\n" + TelegramSender.message(this, loc, false)
@@ -1728,8 +1728,8 @@ public class HomeService extends Service {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
-                .setColor(title.equals("HomeBack") ? 0xFF2E7D32
-                        : title.equals("NotHome") ? 0xFFC62828 : 0xFF1976D2)
+                .setColor(title.equals("홈") ? 0xFF2E7D32
+                        : title.equals("외출") ? 0xFFC62828 : 0xFF1976D2)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .build();
@@ -1737,7 +1737,7 @@ public class HomeService extends Service {
 
     private void alertHomeBack(String ssid) {
         Notification.Builder b = builder(CH_ALERT)
-                .setContentTitle("HomeBack")
+                .setContentTitle("홈")
                 .setContentText("집에 도착했습니다" + (ssid == null || ssid.isEmpty() ? "" : " (" + ssid + ")"))
                 .setColor(0xFF2E7D32)
                 .setAutoCancel(true);
