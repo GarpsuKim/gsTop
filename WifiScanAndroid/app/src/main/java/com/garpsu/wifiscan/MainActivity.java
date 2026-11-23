@@ -198,37 +198,39 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        HomeService.installCrashLog(this);
+        if (savedInstanceState == null) {
+            AppLog.add(this, "앱", "시작 · 버전 " + AppLog.version(this) + " · 켜진 기능: " + HomeService.featureSummary(this));
+        }
 
         wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 
-        // 상단: 좌 [초기화] / 가운데 [☐ 백그라운드 실행] / 우 [종료]
-        Button reset = new Button(this);
-        reset.setText("초기화");
-        reset.setTextColor(0xFFC62828);
-        reset.setOnClickListener(view -> confirmReset());
+        // 상단: 왼쪽 앱 이름·버전 / 오른쪽 [...] (초기화·백그라운드 실행·블루투스 포함·종료는 [...] 팝업 1085 으로)
+        TextView appName = new TextView(this);
+        String ver = "";
+        try {
+            ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {
+        }
+        SpannableStringBuilder nameText = new SpannableStringBuilder();
+        append(nameText, "집에왔어요", 0, true);
+        append(nameText, ver == null || ver.isEmpty() ? "" : "  v" + ver, Color.GRAY, false);
+        appName.setText(nameText);
+        appName.setTextSize(17);
+        appName.setPadding(dpx(14), 0, 0, 0);
 
-        bgCheck = new CheckBox(this); // 백그라운드 귀가 감지 켜기/끄기 (앱을 닫아도 상단 알림으로 표시)
-        bgCheck.setText("백그라운드 실행");
-        bgCheck.setTextSize(15);
-        bgCheck.setTypeface(null, Typeface.BOLD);
-        bgCheck.setChecked(HomeService.homeOn(this));
-        bgCheck.setOnClickListener(view -> setBackground(bgCheck.isChecked()));
-        LinearLayout center = new LinearLayout(this);
-        center.setGravity(Gravity.CENTER);
-        center.addView(bgCheck);
-
-        Button exit = new Button(this);
-        exit.setText("종료");
-        exit.setOnClickListener(view -> finish());
+        Button more = new Button(this);
+        more.setText("...");
+        more.setTextSize(18);
+        more.setTypeface(null, Typeface.BOLD);
+        more.setOnClickListener(view -> showMenu());
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(reset, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        top.addView(center, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        top.addView(exit, new LinearLayout.LayoutParams(
+        top.addView(appName, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        top.addView(more, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // 상태: 홈 / 외출
@@ -411,6 +413,7 @@ public class MainActivity extends Activity {
     // ※ 최근 앱 목록에서 밀어서 지우거나 시스템이 강제로 끝내면 Android 가 알려 주지 않아 보낼 수 없음
     @Override
     protected void onDestroy() {
+        AppLog.add(this, "앱", isFinishing() ? "화면 종료" : "화면 다시 그림 (회전 등)");
         if (isFinishing() && hasPermission()) {
             try {
                 HomeService.stopMessage(this);
@@ -461,6 +464,7 @@ public class MainActivity extends Activity {
     }
 
     private void resetAll() {
+        AppLog.add(this, "설정", "초기화 (모든 설정 삭제)");
         HomeService.stopAll(this); // 백그라운드 서비스·예약 알람·알림 모두 정리
         for (String prefName : ALL_PREFS) {
             getSharedPreferences(prefName, MODE_PRIVATE).edit().clear().commit(); // 화면 다시 그리기 전에 확실히 저장
@@ -469,6 +473,200 @@ public class MainActivity extends Activity {
         getSharedPreferences(HomeService.PREF_EVENT, MODE_PRIVATE).edit().putBoolean("ch_self", true).commit();
         Toast.makeText(this, "초기화했습니다.", Toast.LENGTH_SHORT).show();
         recreate(); // 화면을 처음부터 다시 그림 (홈 공유기 등록 안내 팝업도 다시 나옴)
+    }
+
+    // ---------- 상단 [...] 팝업 (화면 1085): 초기화 / 백그라운드 실행 / 블루투스 포함 / 종료 ----------
+
+    private void showMenu() {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dpx(20), dpx(8), dpx(20), dpx(8));
+
+        // 백그라운드 실행
+        bgCheck = new CheckBox(this); // 백그라운드 귀가 감지 켜기/끄기 (앱을 닫아도 상단 알림으로 표시)
+        bgCheck.setText("백그라운드 실행");
+        bgCheck.setTextSize(16);
+        bgCheck.setTypeface(null, Typeface.BOLD);
+        bgCheck.setChecked(HomeService.homeOn(this));
+        bgCheck.setOnClickListener(view -> setBackground(bgCheck.isChecked()));
+        form.addView(bgCheck);
+        menuNote(form, "앱 화면을 닫아도 귀가·외출을 계속 감지합니다. 휴대폰 맨 위에 알림이 하나 떠 있습니다.");
+
+        // 블루투스 포함
+        final CheckBox btInclude = new CheckBox(this);
+        btInclude.setText("블루투스 포함");
+        btInclude.setTextSize(16);
+        btInclude.setTypeface(null, Typeface.BOLD);
+        btInclude.setChecked(BtHome.scanIncluded(this));
+        btInclude.setOnClickListener(view -> {
+            BtHome.setScanIncluded(this, btInclude.isChecked());
+            AppLog.add(this, "설정", "블루투스 포함 " + (btInclude.isChecked() ? "켬" : "끔"));
+            if (btInclude.isChecked()) {
+                BtHome.requestScan(this); // 근처 기기 권한 (Android 12 이상)
+            }
+            Toast.makeText(this, btInclude.isChecked() ? "주변 블루투스 검색을 포함합니다."
+                    : "주변 블루투스 검색을 하지 않습니다.", Toast.LENGTH_SHORT).show();
+        });
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.topMargin = dpx(14);
+        form.addView(btInclude, clp);
+        menuNote(form, "켜면 현재 위치 화면(1020)과 보호자 회신에 주변 블루투스 기기 목록(약 6초 검색)을 넣습니다.\n"
+                + "(등록한 홈 PC 블루투스로 귀가를 판정하는 기능은 이와 상관없이 그대로 동작)");
+
+        // 로그 보내기
+        Button sendLog = new Button(this);
+        sendLog.setText("로그 보내기");
+        sendLog.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        glp.topMargin = dpx(18);
+        form.addView(sendLog, glp);
+        menuNote(form, "앱이 한 일(보내기 결과·홈/외출 판정·위치 요청·오류 등) 기록 파일을 본인 Gmail(첨부)·"
+                + "텔레그램 받는 사람·카톡(나와의 채팅 등 고르기)으로 보내고, 이메일·텔레그램으로 보내지면 폰의 기록은 지웁니다. "
+                + "지금 기록 크기: " + (AppLog.size(this) / 1024 + 1) + " KB");
+
+        // 초기화
+        Button reset = new Button(this);
+        reset.setText("초기화");
+        reset.setTextColor(0xFFC62828);
+        reset.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dpx(18);
+        form.addView(reset, blp);
+        menuNote(form, "모든 설정(공유기·보호자·보내기 설정 등)을 지우고 처음 설치한 상태로 되돌립니다. (확인을 한 번 더 묻습니다)");
+
+        // 종료
+        Button exit = new Button(this);
+        exit.setText("종료");
+        exit.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        elp.topMargin = dpx(18);
+        form.addView(exit, elp);
+        menuNote(form, "앱 화면을 닫습니다. 백그라운드 실행이 켜져 있으면 감지는 계속됩니다.");
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(form);
+        final AlertDialog menu = new AlertDialog.Builder(this)
+                .setTitle("메뉴")
+                .setView(sv)
+                .setNegativeButton("닫기", null)
+                .create();
+        reset.setOnClickListener(view -> {
+            menu.dismiss();
+            confirmReset();
+        });
+        sendLog.setOnClickListener(view -> {
+            menu.dismiss();
+            sendLogMail();
+        });
+        exit.setOnClickListener(view -> {
+            menu.dismiss();
+            finish();
+        });
+        showTagged(menu, "1085");
+    }
+
+    // [로그 보내기]: 로그 파일을 ① 본인 Gmail(첨부) ② 텔레그램 받는 사람(파일) ③ 카톡(공유 화면 - 나와의 채팅 등)으로.
+    // 이메일·텔레그램 중 하나라도 성공하면 폰의 로그 삭제 (카톡은 사용자가 [전송]을 눌러야 해서 성공 여부를 알 수 없음)
+    private void sendLogMail() {
+        final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        final String mail = user.getString("mail", "").trim(), pass = user.getString("mailPass", "").trim();
+        final SharedPreferences tg = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
+        final String tgToken = tg.getString("token", ""), tgChats = tg.getString("chats", "").trim();
+        final boolean viaMail = !mail.isEmpty() && !pass.isEmpty();
+        final boolean viaTg = !tgToken.isEmpty() && !tgChats.isEmpty();
+        final boolean viaKakao = kakaoInstalled();
+        if (!viaMail && !viaTg && !viaKakao) {
+            noUserMail("로그를 보내려면"); // 보낼 곳이 하나도 없으면 사용자 등록 안내(1145)
+            return;
+        }
+        if (AppLog.size(this) == 0) {
+            Toast.makeText(this, "보낼 기록이 없습니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        AppLog.add(this, "앱", "로그 보내기 요청 -> " + (viaMail ? "이메일 " + mail + " " : "")
+                + (viaTg ? "텔레그램 " + tgChats + " " : "") + (viaKakao ? "카톡" : ""));
+        Toast.makeText(this, "로그를 보내는 중...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final byte[] data = AppLog.read(this);
+            String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(new Date());
+            final String fileName = "wifiscan_log_" + stamp + ".txt";
+            final String about = "집에왔어요 앱 로그\n기기: " + Build.MANUFACTURER + " " + Build.MODEL
+                    + " · Android " + Build.VERSION.RELEASE + " · 앱 " + AppLog.version(this)
+                    + "\n크기: " + (data.length / 1024 + 1) + " KB";
+            final String mailErr = viaMail ? EmailSender.send(mail, pass, mail, "[집에왔어요] 로그 " + stamp,
+                    about, fileName, data) : null;
+            final String tgErr = viaTg ? TelegramSender.sendDocument(tgToken, tgChats, fileName, data, about) : null;
+            // 카톡으로 넘길 파일 (앱 캐시 logs/ - 다음 번에 덮어씀)
+            android.net.Uri kakaoUri = null;
+            if (viaKakao) {
+                try {
+                    java.io.File dir = new java.io.File(getCacheDir(), "logs");
+                    java.io.File[] old = dir.listFiles();
+                    if (old != null) {
+                        for (java.io.File oldFile : old) {
+                            //noinspection ResultOfMethodCallIgnored
+                            oldFile.delete();
+                        }
+                    }
+                    //noinspection ResultOfMethodCallIgnored
+                    dir.mkdirs();
+                    java.io.File out = new java.io.File(dir, fileName);
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(out)) {
+                        fos.write(data);
+                    }
+                    kakaoUri = androidx.core.content.FileProvider.getUriForFile(this, "com.garpsu.wifiscan.logs", out);
+                } catch (Exception e) {
+                    AppLog.error(this, "카톡용 로그 파일 만들기", e);
+                }
+            }
+            final android.net.Uri shareUri = kakaoUri;
+            runOnUiThread(() -> {
+                boolean sent = (viaMail && mailErr == null) || (viaTg && tgErr == null);
+                StringBuilder result = new StringBuilder();
+                if (viaMail) {
+                    result.append("이메일 ").append(mailErr == null ? "✓" : "✗ " + mailErr).append('\n');
+                }
+                if (viaTg) {
+                    result.append("텔레그램 ").append(tgErr == null ? "✓" : "✗ " + tgErr).append('\n');
+                }
+                if (viaKakao) {
+                    result.append("카톡 ").append(shareUri != null ? "공유 화면에서 받는 곳(나와의 채팅 등)을 고르세요" : "✗ 파일 준비 실패").append('\n');
+                }
+                if (sent) {
+                    AppLog.clear(this); // 보낸 기록은 지움
+                }
+                AppLog.add(this, "앱", "로그 보내기 결과 (" + (data.length / 1024 + 1) + " KB): "
+                        + result.toString().trim().replace("\n", ", ") + (sent ? " -> 폰의 기록 지움" : " -> 기록 그대로 둠"));
+                Toast.makeText(this, result.toString().trim() + (sent ? "\n폰의 기록은 지웠습니다."
+                        : "\n(기록은 그대로 둡니다)"), Toast.LENGTH_LONG).show();
+                if (shareUri != null) {
+                    Intent share = new Intent(Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(Intent.EXTRA_STREAM, shareUri)
+                            .putExtra(Intent.EXTRA_TEXT, about)
+                            .setPackage(HomeService.KAKAO_PKG)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    try {
+                        startActivity(share);
+                    } catch (Exception e) {
+                        AppLog.error(this, "카톡 공유 화면 열기", e);
+                    }
+                }
+            });
+        }).start();
+    }
+
+    private void menuNote(LinearLayout form, String msg) {
+        TextView tv = new TextView(this);
+        tv.setText(msg);
+        tv.setTextSize(13);
+        tv.setTextColor(Color.DKGRAY);
+        tv.setPadding(dpx(8), dpx(2), 0, 0);
+        form.addView(tv);
     }
 
     // 백그라운드 귀가 감지 켜기/끄기
@@ -486,6 +684,7 @@ public class MainActivity extends Activity {
             }
         }
         getSharedPreferences("home", MODE_PRIVATE).edit().putBoolean(HomeService.PREF_BG, on).apply();
+        AppLog.add(this, "설정", "백그라운드 실행 " + (on ? "켬" : "끔"));
         if (on) {
             HomeService.refresh(this);
             Toast.makeText(this, loadRouters().isEmpty()
@@ -564,6 +763,12 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
+        StringBuilder permLog = new StringBuilder("권한 응답:");
+        for (int idx = 0; idx < perms.length && idx < results.length; idx++) {
+            permLog.append(' ').append(perms[idx].replace("android.permission.", ""))
+                    .append(results[idx] == PackageManager.PERMISSION_GRANTED ? "=허용" : "=거부");
+        }
+        AppLog.add(this, "권한", permLog.toString());
         if (code == REQ_CALL) {
             Toast.makeText(this, results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED
                     ? "이제 SOS·보호자 버튼이 바로 전화를 겁니다."
@@ -1941,6 +2146,7 @@ public class MainActivity extends Activity {
         }
         begin(MODE_LOC, "위치 확인 중...");
         geoLoc = null;
+        scanNearbyForPopup(); // 1020 맨 끝에 넣을 주변 블루투스·공유기 검색
 
         Location best = null;
         boolean any = false;
@@ -2025,10 +2231,48 @@ public class MainActivity extends Activity {
         mapLink(sb, "맵스미 (MAPS.ME)", "com.mapswithme.maps.pro",
                 "mapsme://map?v=1&ll=" + ll + "&n=" + here,
                 "https://play.google.com/store/apps/details?id=com.mapswithme.maps.pro");
+        // 맨 끝: 주변 공유기 (연결된 공유기 자세히 + 주변 5개) / 주변 블루투스 (작업 스레드에서 약 6초 검색한 결과)
+        sb.append("\n\n").append(TelegramSender.wifiDetails(this));
+        if (BtHome.scanIncluded(this)) { // [...] 메뉴 '블루투스 포함'이 켜져 있을 때만
+            sb.append("\n\n").append(btNearbyText == null ? "■ 주변 블루투스\n   검색 중... (약 6초)" : btNearbyText);
+        }
+        lastCached = cached;
         text.setText(sb);
         if (!fresh && !geoBusy) {
             lookupAddress(loc);
         }
+    }
+
+    // ---------- 1020 주변 블루투스 검색 (팝업을 열 때·[재검색] 때 한 번, 약 6초) ----------
+
+    private String btNearbyText;   // 검색 결과 글 (null = 검색 중)
+    private boolean btNearbyBusy;
+    private boolean lastCached;    // 화면에 보이는 위치가 '마지막 위치(갱신 중)' 인지 - 다시 그릴 때 그대로
+
+    private void scanNearbyForPopup() {
+        if (btNearbyBusy) {
+            return;
+        }
+        btNearbyBusy = true;
+        btNearbyText = null;
+        try {
+            wm.startScan(); // 주변 공유기 목록도 새로 (안 되면 마지막 검색 결과 사용)
+        } catch (Exception ignored) {
+        }
+        if (!BtHome.scanIncluded(this)) { // 블루투스 포함이 꺼져 있으면 공유기만 새로 검색
+            btNearbyBusy = false;
+            return;
+        }
+        new Thread(() -> {
+            final String result = TelegramSender.btDetails(this);
+            runOnUiThread(() -> {
+                btNearbyBusy = false;
+                btNearbyText = result;
+                if (locPopupOpen() && mode == MODE_LOC && lastLoc != null) {
+                    showLocation(lastLoc, lastCached); // 결과가 나오면 다시 그림
+                }
+            });
+        }).start();
     }
 
     // "▶ 구글 지도" 처럼 파란 밑줄 글자. 누르면: 그 지도 앱이 설치되어 있으면 앱으로(appUri), 없으면 웹으로(webUrl)
@@ -2339,6 +2583,7 @@ public class MainActivity extends Activity {
         }
         HomeService.refresh(this);
         refreshMsgButtons();
+        AppLog.add(this, "설정", pref + " " + (cb.isChecked() ? "켬" : "끔"));
         Toast.makeText(this, cb.isChecked() ? "켰습니다." : "껐습니다.", Toast.LENGTH_SHORT).show();
     }
 
@@ -3647,6 +3892,7 @@ public class MainActivity extends Activity {
         }
         HomeService.refresh(this);
         refreshMsgButtons();
+        AppLog.add(this, "설정", "공통 보내는 시각 저장: " + HomeService.emailSchedule(sched()));
         Toast.makeText(this, "저장했습니다. (" + HomeService.emailSchedule(sched()) + ")", Toast.LENGTH_SHORT).show();
     }
 

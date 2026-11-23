@@ -140,6 +140,8 @@ public class GuardianActivity extends Activity {
         android.content.SharedPreferences tg = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
         boolean tgReady = !tg.getString("token", "").isEmpty() && !tg.getString("chats", "").trim().isEmpty();
         tg.edit().putBoolean("remote", on && tgReady).apply();
+        AppLog.add(this, "설정", "위치 질문 자동 응답 " + (on ? "Yes" : "No") + " (이메일 자동 회신 " + (on ? "켬" : "끔")
+                + ", 텔레그램 원격 요청 " + (on && tgReady ? "켬" : "끔") + ")");
         HomeService.refresh(this);
         Toast.makeText(this, on
                 ? "자동 응답을 켰습니다. (응답 모드: 이메일 자동 회신" + (tgReady ? " · 텔레그램 원격 위치 요청" : "") + ")"

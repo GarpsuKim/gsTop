@@ -107,6 +107,17 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- 로그 파일을 카톡(나와의 채팅 등)으로 보낼 때 파일을 넘겨주는 통로 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.garpsu.wifiscan.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/log_paths" />
+        </provider>
     </application>
 
 </manifest>

@@ -137,6 +137,71 @@ public class HomeService extends Service {
 
     // ---------- 시작 / 중지 (Activity, 부팅 수신기에서 호출) ----------
 
+    // ---------- 로그 도우미 ----------
+
+    // 켜진 기능 목록 (로그용)
+    static String featureSummary(Context ctx) {
+        List<String> on = new ArrayList<>();
+        if (homeOn(ctx)) on.add("백그라운드 감지");
+        if (eventOn(ctx)) on.add("귀가·외출 알림");
+        if (tgOn(ctx)) on.add("텔레그램");
+        if (kakaoOn(ctx)) on.add("카톡");
+        if (emailOn(ctx, PREF_EMAIL)) on.add("일반 이메일");
+        for (String[] job : new String[][]{{PREF_SELF, "본인 알림"}, {PREF_SMS, "문자(수동)"}, {PREF_SMSAUTO, "문자(자동)"}}) {
+            if (ctx.getSharedPreferences(job[0], MODE_PRIVATE).getBoolean("on", false)) on.add(job[1]);
+        }
+        if (remoteOn(ctx)) on.add("텔레그램 원격 요청");
+        if (mailRemoteOn(ctx)) on.add("이메일 원격 요청("
+                + (ctx.getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).getBoolean("mailRemote", false)
+                ? "자동 회신" : "물어보고") + ")");
+        if (awayOnly(ctx)) on.add("외출 중에만");
+        on.add("공통 시각 " + emailSchedule(ctx.getSharedPreferences(PREF_SCHED, MODE_PRIVATE)));
+        on.add("블루투스 포함 " + (BtHome.scanIncluded(ctx) ? "켬" : "끔"));
+        return android.text.TextUtils.join(", ", on);
+    }
+
+    // 위치 한 줄 (로그용): 위도,경도 ±정확도 제공 시각
+    static String locText(Location loc) {
+        if (loc == null) {
+            return "없음 (측정 실패)";
+        }
+        return String.format(Locale.US, "%.6f,%.6f ±%dm %s %s", loc.getLatitude(), loc.getLongitude(),
+                Math.round(loc.getAccuracy()), loc.getProvider(),
+                new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(loc.getTime())));
+    }
+
+    // 다음 송신 시각 (로그용)
+    static String nextText(long next) {
+        return next > 0 ? new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(next)) : "없음";
+    }
+
+    // 앱이 예기치 않게 죽으면 그 원인을 로그에 남김 (기존 처리기는 그대로 이어서 실행)
+    static void installCrashLog(final Context ctx) {
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        if (prev instanceof CrashLogger) {
+            return;
+        }
+        Thread.setDefaultUncaughtExceptionHandler(new CrashLogger(ctx.getApplicationContext(), prev));
+    }
+
+    private static final class CrashLogger implements Thread.UncaughtExceptionHandler {
+        private final Context app;
+        private final Thread.UncaughtExceptionHandler next;
+
+        CrashLogger(Context app, Thread.UncaughtExceptionHandler next) {
+            this.app = app;
+            this.next = next;
+        }
+
+        @Override
+        public void uncaughtException(Thread thread, Throwable ex) {
+            AppLog.error(app, "앱이 멈춤 (스레드 " + thread.getName() + ")", ex);
+            if (next != null) {
+                next.uncaughtException(thread, ex);
+            }
+        }
+    }
+
     static boolean homeOn(Context ctx) {
         return ctx.getSharedPreferences("home", MODE_PRIVATE).getBoolean(PREF_BG, false);
     }
@@ -464,6 +529,8 @@ public class HomeService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        installCrashLog(this);
+        AppLog.add(this, "서비스", "시작 · 켜진 기능: " + featureSummary(this));
         createChannels();
         try {
             Notification notification = statusNotification("확인 중...", "백그라운드 실행 중");
@@ -489,6 +556,11 @@ public class HomeService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
+        if (action != null) {
+            AppLog.add(this, "서비스", "명령: " + action.replace("com.garpsu.wifiscan.", ""));
+        } else if (intent == null) {
+            AppLog.add(this, "서비스", "시스템이 다시 시작함 (START_STICKY)");
+        }
         if (ACTION_MAIL_RESCAN.equals(action)) {
             // 감시 중이면 연결을 끊고 바로 다시 접속 (접속할 때마다 받은편지함 전체를 찾음).
             // 감시 중이 아니면 아래 updateMailRemote() 가 새로 시작하면서 찾음
@@ -505,6 +577,7 @@ public class HomeService extends Service {
             if (to != null && cm != null && ACTION_MAIL_YES.equals(action)) {
                 replyMailLocation(to);
             } else if (to != null) {
+                AppLog.add(this, "요청", "이메일 위치 요청에 '회신 안 함' 선택 (" + to + ")");
                 getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).edit()
                         .putLong("mailRemoteTime", System.currentTimeMillis())
                         .putString("mailRemoteResult", "회신 안 함 (" + guardianName(this, to) + ")").apply();
@@ -553,6 +626,7 @@ public class HomeService extends Service {
 
     @Override
     public void onDestroy() {
+        AppLog.add(this, "서비스", "종료 (onDestroy)");
         pollRunning = false; // 원격 위치 요청 수신 중지
         if (pollThread != null) {
             pollThread.interrupt();
@@ -665,6 +739,18 @@ public class HomeService extends Service {
             if (sp.getBoolean("fromHome", false) && ev.getBoolean("away", false)) {
                 sendEvent(false, null, false);
             }
+        }
+        // 로그: 매번 검사 결과, 상태가 바뀌면 따로 한 줄 더
+        String seen = (bssid == null ? "Wi-Fi 연결 없음" : "공유기 " + (ssid == null || btHome ? "" : ssid) + " (" + bssid.toUpperCase(Locale.US)
+                + ", 별명 " + (MainActivity.routerAlias(this, bssid).isEmpty() ? "(없음)" : MainActivity.routerAlias(this, bssid))
+                + (otherRouter ? ", 기타" : home && !btHome ? ", 홈" : ", 등록 안 됨") + ")")
+                + (btHome ? " · 홈 블루투스 " + BtHome.seenName(this) : BtHome.seenOther(this) ? " · 기타 블루투스 " + BtHome.seenName(this) : "");
+        AppLog.add(this, "판정", "검사: " + (known ? (home ? "홈" : "외출") : "알 수 없음") + " · " + seen);
+        if (known && prev != (home ? 1 : 0)) {
+            AppLog.add(this, "판정", "상태 바뀜: " + (prev == 1 ? "홈" : prev == 0 ? "외출" : "모름") + " -> " + (home ? "홈" : "외출"));
+        }
+        if (leaveConfirmed) {
+            AppLog.add(this, "판정", "외출 확정 (2분 넘게 밖)");
         }
         if (known) {
             ed.putInt("bgState", home ? 1 : 0);
@@ -853,6 +939,7 @@ public class HomeService extends Service {
             }
             final String summary = KIND_NAME[kind] + (test ? "(테스트)" : "") + ": "
                     + (res.isEmpty() ? "보낼 곳이 선택되지 않음" : android.text.TextUtils.join(", ", res));
+            AppLog.add(this, "보내기", summary + " · 위치 " + locText(loc));
             handler.post(() -> {
                 for (Runnable note : notes) {
                     note.run();
@@ -930,6 +1017,8 @@ public class HomeService extends Service {
                     continue;
                 }
                 final String cid = String.valueOf(msg.optJSONObject("chat").optLong("id"));
+                AppLog.add(this, "요청", "텔레그램 위치 요청: 채팅 " + cid + " \"" + msg.optString("text") + "\""
+                        + (allowed.contains(cid) ? "" : " - 등록 안 된 사람이라 거절"));
                 if (!allowed.contains(cid)) {
                     TelegramSender.send(token, cid, "등록된 보호자만 위치를 요청할 수 있습니다.");
                     continue;
@@ -950,7 +1039,8 @@ public class HomeService extends Service {
         fetchLocation(loc -> new Thread(() -> {
             String err = TelegramSender.send(token, cid, TelegramSender.statusLine(this)
                     + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false)
-                    + "\n\n" + TelegramSender.btDetails(this)); // 주변 블루투스 (약 6초 검색)
+                    + TelegramSender.btSection(this)); // 주변 블루투스 (약 6초 검색, [...] 메뉴에서 끄면 없음)
+            AppLog.add(this, "요청", "텔레그램 답장 -> " + cid + " : " + (err == null ? "성공" : "실패: " + err) + " · 위치 " + locText(loc));
             handler.post(() -> {
                 getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).edit()
                         .putLong("remoteTime", System.currentTimeMillis())
@@ -1019,7 +1109,11 @@ public class HomeService extends Service {
 
                 @Override
                 public boolean onRequest(String from, String subject) {
-                    if (!guardianEmails(HomeService.this).contains(from)) {
+                    boolean known = guardianEmails(HomeService.this).contains(from);
+                    AppLog.add(HomeService.this, "요청", "이메일 위치 요청: " + from + " \"" + subject + "\" - "
+                            + (!known ? "등록 안 된 주소라 무시"
+                            : user.getBoolean("mailRemote", false) ? "자동 회신" : "회신할지 물어봄"));
+                    if (!known) {
                         // 등록되지 않은 주소: 답장하지 않음 (메일도 읽지 않은 채로 둠)
                         user.edit().putLong("mailRemoteTime", System.currentTimeMillis())
                                 .putString("mailRemoteResult", "등록 안 된 주소라 무시: " + from).apply();
@@ -1035,10 +1129,15 @@ public class HomeService extends Service {
 
                 @Override
                 public void state(String msg) {
+                    // 같은 상태가 4분마다 반복되므로 바뀔 때만 로그
+                    if (!msg.equals(user.getString("mailRemoteState", ""))) {
+                        AppLog.add(HomeService.this, "메일", "감시 상태: " + msg);
+                    }
                     user.edit().putString("mailRemoteState", msg).putString("mailRemoteErr", "").apply();
                 }
             });
             mailWatcher = null;
+            AppLog.add(this, "메일", "감시 연결 끝남" + (err == null ? "" : " - 오류: " + err));
             user.edit().putString("mailRemoteErr", err == null ? "" : err)
                     .putString("mailRemoteState", mailRunning ? "연결 끊김 - 잠시 후 다시 접속" : "꺼짐").apply();
             if (mailRescanNow) {
@@ -1103,7 +1202,8 @@ public class HomeService extends Service {
                     emailSubject(this) + " - 요청하신 위치",
                     // 공유기 식별 정보(이름·별명·MAC·신호·채널·IP·주변 공유기)는 message() 끝에 들어 있음
                     TelegramSender.statusLine(this) + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false)
-                            + "\n\n" + TelegramSender.btDetails(this)); // 주변 블루투스 (약 6초 검색)
+                            + TelegramSender.btSection(this)); // 주변 블루투스 (약 6초 검색, [...] 메뉴에서 끄면 없음)
+            AppLog.add(this, "요청", "이메일 회신 -> " + to + " : " + (err == null ? "성공" : "실패: " + err) + " · 위치 " + locText(loc));
             handler.post(() -> {
                 user.edit().putLong("mailRemoteTime", System.currentTimeMillis())
                         .putString("mailRemoteResult", (err == null ? "회신 ✓" : "회신 실패: " + err) + " (" + to + ")")
@@ -1166,6 +1266,8 @@ public class HomeService extends Service {
         if (!atHomeForSending()) {
             return false;
         }
+        AppLog.add(this, "보내기", "집에 있어서 건너뜀 (외출 중에만 보내기): "
+                + action.replace("com.garpsu.wifiscan.", "") + " · 다음 " + nextText(nx));
         sp.edit().putLong("next", nx).apply();
         if (nx > 0) {
             setAlarm(action, nx);
@@ -1223,6 +1325,7 @@ public class HomeService extends Service {
                 handler.post(() -> {
                     long now = System.currentTimeMillis();
                     long nx = emailNext(sp, now); // 공통 시각: 다음 지정 시각 또는 간격 뒤
+                    AppLog.add(this, "보내기", "정해진 시각 텔레그램 : " + (err == null ? "성공" : "실패: " + err) + " · 위치 " + locText(loc) + " · 다음 " + nextText(nx));
                     sp.edit().putLong("lastTime", now)
                             .putString("lastResult", err == null ? "성공" : "실패: " + err)
                             .putLong("next", nx)
@@ -1263,6 +1366,7 @@ public class HomeService extends Service {
             handler.post(() -> {
                 long now = System.currentTimeMillis();
                 long nx = emailNext(sp, now);
+                AppLog.add(this, "보내기", "정해진 시각 카톡 : " + (kakaoOn(this) ? "알림 띄움" : "꺼져 있어 안 보냄") + " · 위치 " + locText(loc) + " · 다음 " + nextText(nx));
                 sp.edit().putLong("lastTime", now).putLong("next", nx).apply();
                 kakaoBusy = false;
                 if (kakaoOn(this)) {
@@ -1328,6 +1432,8 @@ public class HomeService extends Service {
             handler.post(() -> {
                 long now = System.currentTimeMillis();
                 long nx = emailNext(sp, now);
+                AppLog.add(this, "보내기", "정해진 시각 이메일 : " + (smtp ? (err == null ? "성공" : "실패: " + err) : "알림 띄움")
+                        + " · 위치 " + locText(loc) + " · 다음 " + nextText(nx));
                 SharedPreferences.Editor ed = sp.edit().putLong("lastTime", now).putLong("next", nx);
                 if (smtp) {
                     ed.putString("lastResult", err == null ? "성공" : "실패: " + err);
@@ -1401,6 +1507,9 @@ public class HomeService extends Service {
             handler.post(() -> {
                 long now = System.currentTimeMillis();
                 long nx = emailNext(sp, now); // 지정 시각 / 일정 간격 (이메일과 같은 설정 방식)
+                AppLog.add(this, "보내기", "정해진 시각 " + (auto ? "문자(자동)" : PREF_SELF.equals(pref) ? "본인 알림" : "문자(수동) 알림")
+                        + " : " + (auto ? (err == null ? "성공" : "실패: " + err) : "알림 띄움")
+                        + " · 위치 " + locText(loc) + " · 다음 " + nextText(nx));
                 SharedPreferences.Editor ed = sp.edit().putLong("lastTime", now).putLong("next", nx);
                 if (auto) {
                     ed.putString("lastResult", err == null ? "성공" : "실패: " + err);
@@ -1602,6 +1711,7 @@ public class HomeService extends Service {
             } catch (SecurityException ignored) {
             }
         }
+        AppLog.add(this, "위치", (best != null ? "측정 완료: " : "새 측정 실패 -> 마지막 위치: ") + locText(fix) + " (요청 " + waiting.size() + "건)");
         List<LocCallback> cbs = new ArrayList<>(waiting);
         waiting.clear();
         for (LocCallback cb : cbs) {

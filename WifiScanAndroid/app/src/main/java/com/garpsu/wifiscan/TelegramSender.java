@@ -147,6 +147,11 @@ final class TelegramSender {
      *       5A:3C:..:.. · -70 dBm
      * 오래 걸림(검색 시간) -> 작업 스레드에서 호출
      */
+    // 메시지에 붙일 주변 블루투스 단락 ("\n\n■ 주변 블루투스 …"). [...] 메뉴에서 '블루투스 포함'을 껐으면 빈 글
+    static String btSection(Context ctx) {
+        return BtHome.scanIncluded(ctx) ? "\n\n" + btDetails(ctx) : "";
+    }
+
     static String btDetails(Context ctx) {
         String problem = BtHome.scanProblem(ctx);
         if (problem != null) {
@@ -453,6 +458,68 @@ final class TelegramSender {
             }
         }
         return err.length() == 0 ? null : err.toString();
+    }
+
+    // 파일 보내기 (sendDocument): 받는 사람 모두에게. 성공하면 null, 실패하면 "채팅: 이유" 들
+    static String sendDocument(String token, String chats, String fileName, byte[] data, String caption) {
+        StringBuilder err = new StringBuilder();
+        for (String chat : chats.split("[,\\s]+")) {
+            if (chat.isEmpty()) {
+                continue;
+            }
+            String sendErr = sendDocumentOne(token, chat, fileName, data, caption);
+            if (sendErr != null) {
+                if (err.length() > 0) {
+                    err.append(" / ");
+                }
+                err.append(chat).append(": ").append(sendErr);
+            }
+        }
+        return err.length() == 0 ? null : err.toString();
+    }
+
+    private static String sendDocumentOne(String token, String chat, String fileName, byte[] data, String caption) {
+        HttpURLConnection con = null;
+        try {
+            String boundary = "----wifiscan" + System.currentTimeMillis();
+            URL url = new URL("https://api.telegram.org/bot" + token + "/sendDocument");
+            con = (HttpURLConnection) url.openConnection();
+            con.setConnectTimeout(15000);
+            con.setReadTimeout(60000);
+            con.setRequestMethod("POST");
+            con.setDoOutput(true);
+            con.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            String head = "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + chat + "\r\n"
+                    + "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"caption\"\r\n\r\n" + caption + "\r\n"
+                    + "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"document\"; filename=\"" + fileName + "\"\r\n"
+                    + "Content-Type: text/plain; charset=UTF-8\r\n\r\n";
+            String tail = "\r\n--" + boundary + "--\r\n";
+            try (OutputStream os = con.getOutputStream()) {
+                os.write(head.getBytes(StandardCharsets.UTF_8));
+                os.write(data);
+                os.write(tail.getBytes(StandardCharsets.UTF_8));
+            }
+            int code = con.getResponseCode();
+            if (code == 200) {
+                return null;
+            }
+            String res = read(con.getErrorStream());
+            int start = res.indexOf("\"description\":\"");
+            if (start >= 0) {
+                int end = res.indexOf('"', start + 15);
+                return end > 0 ? res.substring(start + 15, end) : res;
+            }
+            return "HTTP " + code;
+        } catch (Exception e) {
+            return "연결 실패 (인터넷 확인)";
+        } finally {
+            if (con != null) {
+                con.disconnect();
+            }
+        }
     }
 
     private static String sendOne(String token, String chat, String text) {

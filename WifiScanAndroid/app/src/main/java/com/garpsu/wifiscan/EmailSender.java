@@ -46,6 +46,12 @@ final class EmailSender {
 
     // 성공하면 null, 실패하면 오류 내용
     static String send(String from, String appPassword, String toCsv, String subject, String body) {
+        return send(from, appPassword, toCsv, subject, body, null, null);
+    }
+
+    // 첨부 파일 1개 포함 (attachName·attachData 가 null 이면 첨부 없음). 성공하면 null, 실패하면 오류 내용
+    static String send(String from, String appPassword, String toCsv, String subject, String body,
+                       String attachName, byte[] attachData) {
         from = from.trim();
         String pass = appPassword.replace(" ", ""); // 구글은 4자리씩 띄어 보여 줌
         List<String> to = new ArrayList<>();
@@ -108,11 +114,28 @@ final class EmailSender {
             msg.append("Date: ").append(new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
                     .format(new Date())).append("\r\n");
             msg.append("MIME-Version: 1.0\r\n");
-            msg.append("Content-Type: text/plain; charset=UTF-8\r\n");
-            msg.append("Content-Transfer-Encoding: base64\r\n\r\n");
-            // 본문: base64 76자 줄바꿈 (줄이 '.' 으로 시작할 일이 없음)
+            // 본문·첨부 모두 base64 76자 줄바꿈 (줄이 '.' 으로 시작할 일이 없음)
             String enc = Base64.encodeToString(body.getBytes(StandardCharsets.UTF_8), Base64.DEFAULT);
-            msg.append(enc.replace("\r\n", "\n").replace("\n", "\r\n"));
+            if (attachData == null) {
+                msg.append("Content-Type: text/plain; charset=UTF-8\r\n");
+                msg.append("Content-Transfer-Encoding: base64\r\n\r\n");
+                msg.append(enc.replace("\r\n", "\n").replace("\n", "\r\n"));
+            } else {
+                String boundary = "----wifiscan" + System.currentTimeMillis();
+                msg.append("Content-Type: multipart/mixed; boundary=\"").append(boundary).append("\"\r\n\r\n");
+                msg.append("--").append(boundary).append("\r\n");
+                msg.append("Content-Type: text/plain; charset=UTF-8\r\n");
+                msg.append("Content-Transfer-Encoding: base64\r\n\r\n");
+                msg.append(enc.replace("\r\n", "\n").replace("\n", "\r\n"));
+                msg.append("\r\n--").append(boundary).append("\r\n");
+                String fileName = "=?UTF-8?B?" + b64(attachName) + "?=";
+                msg.append("Content-Type: text/plain; charset=UTF-8; name=\"").append(fileName).append("\"\r\n");
+                msg.append("Content-Disposition: attachment; filename=\"").append(fileName).append("\"\r\n");
+                msg.append("Content-Transfer-Encoding: base64\r\n\r\n");
+                String att = Base64.encodeToString(attachData, Base64.DEFAULT);
+                msg.append(att.replace("\r\n", "\n").replace("\n", "\r\n"));
+                msg.append("\r\n--").append(boundary).append("--\r\n");
+            }
             msg.append("\r\n.\r\n");
             out.write(msg.toString().getBytes(StandardCharsets.UTF_8));
             out.flush();

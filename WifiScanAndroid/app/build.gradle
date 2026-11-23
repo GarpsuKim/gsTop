@@ -10,8 +10,8 @@ android {
         applicationId 'com.garpsu.wifiscan'
         minSdk 23
         targetSdk 34
-        versionCode 12
-        versionName '1.6.0'
+        versionCode 13
+        versionName '1.7.0'
     }
 
     compileOptions {
@@ -23,4 +23,6 @@ android {
 dependencies {
     // 구글 통합 위치 (Fused Location): GPS + Wi-Fi + 기지국 + 센서를 합쳐 더 정확한 위치 (실내 포함)
     implementation 'com.google.android.gms:play-services-location:21.3.0'
+    // 로그 파일을 카톡으로 넘길 때 FileProvider (구글 위치 라이브러리가 이미 함께 쓰는 라이브러리라 크기 증가 거의 없음)
+    implementation 'androidx.core:core:1.13.1'
 }

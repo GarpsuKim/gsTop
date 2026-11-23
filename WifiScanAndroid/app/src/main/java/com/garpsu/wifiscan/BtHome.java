@@ -39,6 +39,15 @@ final class BtHome {
 
     static final int REQ_SCAN = 7; // 근처 기기(블루투스 검색) 권한 요청 번호
 
+    // 상단 [...] 메뉴(1085)의 '블루투스 포함': 켜져 있을 때만 각종 검색(1020·보호자 회신)에 주변 블루투스를 넣음
+    static boolean scanIncluded(Context ctx) {
+        return ctx.getSharedPreferences("home", Context.MODE_PRIVATE).getBoolean("btScan", true);
+    }
+
+    static void setScanIncluded(Context ctx, boolean on) {
+        ctx.getSharedPreferences("home", Context.MODE_PRIVATE).edit().putBoolean("btScan", on).apply();
+    }
+
     // 검색할 수 없으면 이유, 할 수 있으면 null
     static String scanProblem(Context ctx) {
         BluetoothAdapter ad = adapter(ctx);
@@ -60,6 +69,9 @@ final class BtHome {
 
     // 근처 기기 권한이 없으면 요청 (Android 12 이상). 위치 권한 요청과 겹치지 않게 부르는 쪽에서 순서를 맞춤
     static void requestScan(android.app.Activity activity) {
+        if (!scanIncluded(activity)) {
+            return; // [...] 메뉴에서 블루투스 포함을 껐으면 묻지 않음
+        }
         if (Build.VERSION.SDK_INT >= 31
                 && activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
             activity.requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN,

@@ -9,6 +9,8 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
         String action = intent.getAction();
+        AppLog.add(ctx, "앱", (Intent.ACTION_BOOT_COMPLETED.equals(action) ? "폰 재부팅됨" : "앱 업데이트됨")
+                + " -> 백그라운드 " + (HomeService.anyOn(ctx) ? "다시 시작" : "꺼져 있음"));
         if ((Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action))
                 && HomeService.anyOn(ctx)) {
             try {
