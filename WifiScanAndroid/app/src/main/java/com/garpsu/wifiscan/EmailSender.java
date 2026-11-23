@@ -21,27 +21,91 @@ import javax.net.ssl.SSLSocketFactory;
 
 /**
  * 앱 비밀번호로 메일 서버(SMTP, SSL 465)에 직접 접속해 메일을 보낸다. (네트워크 사용 -> 작업 스레드에서 호출)
- * 보내는 계정은 구글(Gmail)만 지원 (2단계 인증 + 앱 비밀번호 필요).
+ * 보내는 계정은 네이버·카카오·구글(Gmail) 3가지.
+ * (구글은 2단계 인증 + 앱 비밀번호, 네이버·카카오는 메일 환경설정에서 SMTP/IMAP 사용 켜기 + 앱 비밀번호)
  */
 final class EmailSender {
 
-    static final String SUPPORTED = "구글(@gmail.com)";
+    // 고를 수 있는 메일: {도메인, 이름, SMTP 서버, IMAP 서버} (1075 화면 목록 순서)
+    static final String[][] PROVIDERS = {
+            {"naver.com", "네이버", "smtp.naver.com", "imap.naver.com"},
+            {"kakao.com", "카카오", "smtp.kakao.com", "imap.kakao.com"},
+            {"gmail.com", "구글(Gmail)", "smtp.gmail.com", "imap.gmail.com"},
+    };
+
+    static final String SUPPORTED = "네이버(@naver.com), 카카오(@kakao.com), 구글(@gmail.com)";
 
     // 자세한 안내문 (GitHub 의 GuideEmail.md)
     static final String GUIDE_URL = "https://github.com/GarpsuKim/gsTop/blob/main/WifiScanAndroid/GuideEmail.md";
 
     // 앱 비밀번호 안내 (1150·1160 화면 공용). 링크는 눌러서 바로 열림 (화면에서 Linkify)
-    static final String HELP = "보내는 계정: " + SUPPORTED + " 만 가능\n"
-            + "이메일 등록을 위한 자세한 설명 : " + GUIDE_URL + "\n"
-            + "앱 비밀번호 (2단계 인증을 먼저 켜야 함): https://myaccount.google.com/apppasswords";
+    static final String HELP = "보내는 계정: " + SUPPORTED + " 중 하나 (사용자 등록 1075 에서 등록)\n"
+            + "이메일 등록을 위한 자세한 설명 : " + GUIDE_URL;
 
     private EmailSender() {
     }
 
-    // 보내는 주소의 도메인으로 SMTP 서버 결정. 구글(Gmail)이 아니면 null
+    // 주소의 메일 종류 {도메인, 이름, SMTP 서버, IMAP 서버}. 지원하지 않는 메일이면 null
+    static String[] provider(String addr) {
+        if (addr == null || addr.indexOf('@') < 0) {
+            return null;
+        }
+        String domain = addr.substring(addr.indexOf('@') + 1).trim().toLowerCase(Locale.US);
+        if (domain.equals("googlemail.com")) {
+            domain = "gmail.com";
+        }
+        for (String[] prov : PROVIDERS) {
+            if (prov[0].equals(domain)) {
+                return prov;
+            }
+        }
+        return null;
+    }
+
+    // 보내는 주소의 도메인으로 SMTP 서버 결정. 지원하지 않는 메일이면 null
     static String smtpHost(String from) {
-        String domain = from.substring(from.indexOf('@') + 1).trim().toLowerCase(Locale.US);
-        return domain.equals("gmail.com") || domain.equals("googlemail.com") ? "smtp.gmail.com" : null;
+        String[] prov = provider(from);
+        return prov == null ? null : prov[2];
+    }
+
+    // 받는(IMAP) 서버: 이메일 위치 요청 감시용. 지원하지 않는 메일이면 null
+    static String imapHost(String addr) {
+        String[] prov = provider(addr);
+        return prov == null ? null : prov[3];
+    }
+
+    // 화면 표시용 메일 이름 ("네이버" 등). 모르면 "이메일"
+    static String providerName(String addr) {
+        String[] prov = provider(addr);
+        return prov == null ? "이메일" : prov[1];
+    }
+
+    // 1075 화면: 고른 메일(도메인)에 맞는 준비 안내 (링크는 눌러서 바로 열림)
+    static String setupTip(String domain) {
+        switch (domain) {
+            case "naver.com":
+                return "네이버 준비: ① 네이버 메일 → 환경설정 → POP3/IMAP 설정 → IMAP/SMTP 사용 '사용함' → 저장\n"
+                        + "② 2단계 인증을 쓰면 '애플리케이션 비밀번호'를 만들어 위 칸에 입력"
+                        + " (2단계 인증을 안 쓰면 네이버 로그인 비밀번호)\n"
+                        + "   https://nid.naver.com → 보안설정 → 2단계 인증 → 애플리케이션 비밀번호 관리";
+            case "kakao.com":
+                return "카카오 준비: ① 카카오메일 → 환경설정 → IMAP/SMTP → 사용함 → 저장\n"
+                        + "② 2단계 인증을 쓰면 '앱 비밀번호'를 만들어 위 칸에 입력"
+                        + " (2단계 인증을 안 쓰면 카카오계정 비밀번호)\n"
+                        + "   https://accounts.kakao.com → 계정 보안 → 2단계 인증 / 앱 비밀번호";
+            default:
+                return "구글 준비: 2단계 인증을 켠 뒤 '앱 비밀번호'(16자리)를 만들어 위 칸에 입력\n"
+                        + "   https://myaccount.google.com/apppasswords";
+        }
+    }
+
+    // 로그인 실패 때 메일별 확인할 점
+    static String loginHint(String addr) {
+        String[] prov = provider(addr);
+        if (prov == null || prov[0].equals("gmail.com")) {
+            return "2단계 인증을 켜고 만든 앱 비밀번호(16자리)인지 확인하세요";
+        }
+        return prov[1] + " 메일 환경설정에서 IMAP/SMTP 사용을 켰는지, 앱 비밀번호(2단계 인증을 켠 경우)인지 확인하세요";
     }
 
     // 성공하면 null, 실패하면 오류 내용
@@ -53,7 +117,7 @@ final class EmailSender {
     static String send(String from, String appPassword, String toCsv, String subject, String body,
                        String attachName, byte[] attachData) {
         from = from.trim();
-        String pass = appPassword.replace(" ", ""); // 구글은 4자리씩 띄어 보여 줌
+        String pass = appPassword.replace(" ", ""); // 구글은 4자리씩 띄어 보여 줌 (네이버·카카오 앱 비밀번호에도 공백 없음)
         List<String> to = new ArrayList<>();
         for (String addr : toCsv.split("[,;\\s]+")) {
             if (!addr.isEmpty()) {
@@ -93,7 +157,8 @@ final class EmailSender {
             cmd(out, b64(pass));
             String resp = reply(in);
             if (!resp.startsWith("235")) {
-                return "로그인 실패 - 이메일 주소/앱 비밀번호를 확인하세요 (" + firstLine(resp) + ")";
+                return "로그인 실패 - 이메일 주소/앱 비밀번호를 확인하세요. " + loginHint(from)
+                        + " (" + firstLine(resp) + ")";
             }
             cmd(out, "MAIL FROM:<" + from + ">");
             expect(in, 250, "보내는 주소");

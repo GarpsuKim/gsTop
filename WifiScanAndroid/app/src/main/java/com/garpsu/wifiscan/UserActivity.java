@@ -71,7 +71,9 @@ public class UserActivity extends Activity {
 
     private SharedPreferences up;
     private EditText name, phone, device, mail, pass, code, token, pcIp, pcPort, pcKey, blood, disease, meds, memo;
-    private static final String mailDomain = "gmail.com"; // 발신 이메일은 구글(Gmail)만 (@ 뒤 고정)
+    private String mailDomain = "gmail.com"; // 발신 이메일 @ 뒤 (리스트 박스: 네이버·카카오·구글)
+    private Button domainBtn; // [@gmail.com ▼] 메일 고르기 (화면 1078)
+    private TextView provNote; // 고른 메일에 맞는 준비 안내 (앱 비밀번호·SMTP/IMAP 켜기)
     private TextView mailStatus, tgStatus, tsStatus, pcStatus;
     private Button sendBtn; // [인증 메일 보내기]: 인증되면 비활성, 아니면 빨간 글씨 + (필수)
     private LinearLayout afterSend; // [인증 메일 보내기] 아래 항목들 (인증되면 숨김)
@@ -106,8 +108,8 @@ public class UserActivity extends Activity {
         device = edit(root, "기기 이름",
                 up.getString("device", Build.MANUFACTURER + " " + Build.MODEL), InputType.TYPE_CLASS_TEXT);
 
-        // ---------- 2) 발신 이메일: 구글(Gmail)만, @gmail.com 고정 ----------
-        // 제목 줄: "■ 발신 이메일 (Gmail)" + 오른쪽 끝 [변경] (인증 완료된 경우에만 보임)
+        // ---------- 2) 발신 이메일: 아이디 + [@naver.com / @kakao.com / @gmail.com ▼] ----------
+        // 제목 줄: "■ 발신 이메일" + 오른쪽 끝 [변경] (인증 완료된 경우에만 보임)
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(android.view.Gravity.BOTTOM);
@@ -116,7 +118,7 @@ public class UserActivity extends Activity {
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleRow.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        section(titleBox, "■ 발신 이메일 (Gmail)");
+        section(titleBox, "■ 발신 이메일");
         changeBtn = new Button(this);
         changeBtn.setText("변경");
         changeBtn.setTextSize(13);
@@ -124,6 +126,10 @@ public class UserActivity extends Activity {
         titleRow.addView(changeBtn);
         String saved = up.getString("mail", em.getString("from", ""));
         int at = saved.indexOf('@');
+        String[] savedProv = EmailSender.provider(saved);
+        mailDomain = savedProv != null ? savedProv[0] : "gmail.com"; // 저장된 메일 종류 (없으면 구글)
+        // 자세한 등록 안내 (GitHub 링크, 누르면 브라우저로 열림): '발신 이메일' 과 아이디 칸 사이
+        root.addView(note("이메일 등록을 위한 자세한 설명 (네이버·카카오·구글) : " + EmailSender.GUIDE_URL));
         LinearLayout mr = row(root);
         mail = new EditText(this); // @ 앞 아이디만 입력
         mail.setSingleLine(true);
@@ -131,13 +137,18 @@ public class UserActivity extends Activity {
         mail.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         mail.setText(at >= 0 ? saved.substring(0, at) : saved);
         mr.addView(mail, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        final TextView domainText = new TextView(this);
-        domainText.setText("@" + mailDomain);
-        domainText.setTextSize(16);
-        mr.addView(domainText);
+        // @ 뒤: 리스트 박스 (기기 테마에 따라 Spinner 글자가 안 보이는 문제가 있어 [버튼 ▼] + 고르기 팝업 1078)
+        domainBtn = new Button(this);
+        domainBtn.setAllCaps(false);
+        domainBtn.setTextSize(15);
+        domainBtn.setText("@" + mailDomain + " ▼");
+        mr.addView(domainBtn);
         gap(root, 14); // 줄 간격 (가독성)
         pass = edit(root, "앱 비밀번호", up.getString("mailPass", em.getString("pass", "")),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        // 고른 메일에 맞는 준비 안내 (메일을 바꾸면 내용도 바뀜, 인증되면 숨김)
+        provNote = note("");
+        root.addView(provNote);
         gap(root, 18);
         // [인증 메일 보내기] (가로 전체)
         sendBtn = new Button(this);
@@ -164,6 +175,8 @@ public class UserActivity extends Activity {
                     + " 메일로 보내집니다. 그 6자리 숫자를 다음 칸에 입력하여야만 이메일 인증이 완료됩니다.");
         };
         updateNote.run();
+        // [@메일 ▼]: 고르기 팝업(1078) -> 고르면 @ 뒤·설명·인증 상태를 다시 표시 (메일이 바뀌면 다시 인증해야 함)
+        domainBtn.setOnClickListener(view -> pickDomain(updateNote));
         mail.addTextChangedListener(new android.text.TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence text, int start, int count, int after) {
@@ -188,8 +201,6 @@ public class UserActivity extends Activity {
         r1.addView(code, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         button(r1, "확인", view -> verifyCode());
         gap(afterSend, 14);
-        afterSend.addView(note("이메일 등록을 위한 자세한 설명 : " + EmailSender.GUIDE_URL)); // 누르면 브라우저로 열림
-        gap(afterSend, 6);
         mailStatus = note("");
         afterSend.addView(mailStatus);
         showMailStatus();
@@ -337,6 +348,34 @@ public class UserActivity extends Activity {
         return id.isEmpty() ? "" : id + "@" + mailDomain;
     }
 
+    // [@메일 ▼]: 네이버·카카오·구글 중 고르기 (화면 1078). 고르면 afterPick 실행 (인증 메일 설명 갱신)
+    private void pickDomain(final Runnable afterPick) {
+        final String[] items = new String[EmailSender.PROVIDERS.length];
+        int cur = 0;
+        for (int i = 0; i < items.length; i++) {
+            items[i] = "@" + EmailSender.PROVIDERS[i][0] + "  (" + EmailSender.PROVIDERS[i][1] + ")";
+            if (EmailSender.PROVIDERS[i][0].equals(mailDomain)) {
+                cur = i;
+            }
+        }
+        ScreenId.tag(new AlertDialog.Builder(this)
+                .setTitle("발신 이메일 종류")
+                .setSingleChoiceItems(items, cur, (dialog, which) -> {
+                    dialog.dismiss();
+                    String picked = EmailSender.PROVIDERS[which][0];
+                    if (picked.equals(mailDomain)) {
+                        return;
+                    }
+                    mailDomain = picked;
+                    domainBtn.setText("@" + mailDomain + " ▼");
+                    AppLog.add(this, "설정", "발신 이메일 종류 -> @" + mailDomain);
+                    afterPick.run();
+                    showMailStatus(); // 주소가 바뀌면 인증 표시·버튼도 다시 (다시 인증 필요)
+                })
+                .setNegativeButton("취소", null)
+                .show(), "1078");
+    }
+
     // ---------- 발신 이메일 검증 ----------
 
     private void showMailStatus() {
@@ -362,7 +401,11 @@ public class UserActivity extends Activity {
         if (changeBtn != null) {
             changeBtn.setVisibility(ok ? View.VISIBLE : View.GONE);
         }
-    }
+        // 고른 메일의 준비 안내: 인증 전에만
+        if (provNote != null) {
+            provNote.setText(EmailSender.setupTip(mailDomain));
+            provNote.setVisibility(ok ? View.GONE : View.VISIBLE);
+        }    }
 
     // [변경]: 확인 후 기존 인증을 모두 폐기하고 처음부터 다시 인증 (화면 1077)
     private void confirmReverify() {

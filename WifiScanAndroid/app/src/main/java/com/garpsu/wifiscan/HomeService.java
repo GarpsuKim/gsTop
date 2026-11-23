@@ -82,7 +82,7 @@ public class HomeService extends Service {
     static final String ACTION_MAIL_NO = "com.garpsu.wifiscan.MAIL_NO";   // 이메일 위치 요청: 회신 안 함 (No)
     static final String ACTION_MAIL_RESCAN = "com.garpsu.wifiscan.MAIL_RESCAN"; // 앱 시작: 받은편지함 요청 메일 다시 찾기
 
-    // 앱을 켤 때: Gmail 에 다시 접속해 받은편지함에 남아 있는 위치 요청 메일을 찾아 회신·삭제
+    // 앱을 켤 때: 메일 서버에 다시 접속해 받은편지함에 남아 있는 위치 요청 메일을 찾아 회신·삭제
     static void mailRescan(Context ctx) {
         if (!mailRemoteOn(ctx)) {
             return;
@@ -227,7 +227,7 @@ public class HomeService extends Service {
                 || mailRemoteOn(ctx);
     }
 
-    // 이메일 위치 요청 감시를 할지: 사용자 등록(1075) Gmail 인증 완료 + 보호자 이메일(1100)이 있으면 항상 감시.
+    // 이메일 위치 요청 감시를 할지: 사용자 등록(1075) 발신 이메일 인증 완료 + 보호자 이메일(1100)이 있으면 항상 감시.
     // (1050 체크박스 "mailRemote" 는 감시 여부가 아니라 '자동 회신 / 물어보고 회신' 선택)
     static boolean mailRemoteOn(Context ctx) {
         SharedPreferences user = ctx.getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
@@ -1053,7 +1053,7 @@ public class HomeService extends Service {
         }).start());
     }
 
-    // ---------- 1-5) 이메일 원격 위치 요청: 보호자가 사용자 Gmail 로 제목 "#where" 메일 -> 이메일로 회신 ----------
+    // ---------- 1-5) 이메일 원격 위치 요청: 보호자가 사용자 이메일로 제목 "#where" 메일 -> 이메일로 회신 ----------
 
     private volatile boolean mailRunning;
     private Thread mailThread;
@@ -1094,13 +1094,13 @@ public class HomeService extends Service {
         return emails;
     }
 
-    // 작업 스레드: Gmail 에 접속해 새 메일을 기다림. 끊기면 1분 후 다시 접속
+    // 작업 스레드: 메일 서버에 접속해 새 메일을 기다림. 끊기면 1분 후 다시 접속
     private void mailLoop() {
         final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
         while (mailRunning) {
             MailWatcher watcher = new MailWatcher();
             mailWatcher = watcher;
-            user.edit().putString("mailRemoteState", "Gmail 접속 중...").apply();
+            user.edit().putString("mailRemoteState", "메일 서버 접속 중...").apply();
             String err = watcher.watch(user.getString("mail", ""), user.getString("mailPass", ""), user, new MailWatcher.Callback() {
                 @Override
                 public boolean running() {

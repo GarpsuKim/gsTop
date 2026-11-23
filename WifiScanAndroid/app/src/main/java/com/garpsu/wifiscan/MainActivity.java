@@ -522,7 +522,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         glp.topMargin = dpx(18);
         form.addView(sendLog, glp);
-        menuNote(form, "앱이 한 일(보내기 결과·홈/외출 판정·위치 요청·오류 등) 기록 파일을 본인 Gmail(첨부)·"
+        menuNote(form, "앱이 한 일(보내기 결과·홈/외출 판정·위치 요청·오류 등) 기록 파일을 본인 이메일(첨부)·"
                 + "텔레그램 받는 사람·카톡(나와의 채팅 등 고르기)으로 보내고, 이메일·텔레그램으로 보내지면 폰의 기록은 지웁니다. "
                 + "지금 기록 크기: " + (AppLog.size(this) / 1024 + 1) + " KB");
 
@@ -569,7 +569,7 @@ public class MainActivity extends Activity {
         showTagged(menu, "1085");
     }
 
-    // [로그 보내기]: 로그 파일을 ① 본인 Gmail(첨부) ② 텔레그램 받는 사람(파일) ③ 카톡(공유 화면 - 나와의 채팅 등)으로.
+    // [로그 보내기]: 로그 파일을 ① 본인 이메일(첨부) ② 텔레그램 받는 사람(파일) ③ 카톡(공유 화면 - 나와의 채팅 등)으로.
     // 이메일·텔레그램 중 하나라도 성공하면 폰의 로그 삭제 (카톡은 사용자가 [전송]을 눌러야 해서 성공 여부를 알 수 없음)
     private void sendLogMail() {
         final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
@@ -2940,7 +2940,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // 본인 발신 Gmail(사용자 등록 1075)이 없으면 경고 팝업(화면 1145)을 띄우고 true
+    // 본인 발신 이메일(사용자 등록 1075)이 없으면 경고 팝업(화면 1145)을 띄우고 true
     private boolean noUserMail(String why) {
         SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
         if (!user.getString("mail", "").trim().isEmpty() && !user.getString("mailPass", "").trim().isEmpty()) {
@@ -2948,7 +2948,7 @@ public class MainActivity extends Activity {
         }
         ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("⚠️ 발신 이메일 미등록")
-                .setMessage(why + " 먼저 본인 Gmail 과 앱 비밀번호를 등록해야 합니다.\n\n"
+                .setMessage(why + " 먼저 본인 발신 이메일(네이버·카카오·Gmail)과 앱 비밀번호를 등록해야 합니다.\n\n"
                         + "(1) 홈 공유기 등록 → [사용자 등록] 에서 등록하고 검증하세요.")
                 .setPositiveButton("사용자 등록 열기", (dialog, which) -> startActivity(new Intent(this, UserActivity.class)))
                 .setNegativeButton("닫기", null)
@@ -3243,7 +3243,7 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    // [테스트] = 테스트 문구 메일, [지금 위치 확인] = 제목 "#where" 메일 (내 Gmail -> 피보호자 이메일)
+    // [테스트] = 테스트 문구 메일, [지금 위치 확인] = 제목 "#where" 메일 (내 발신 이메일 -> 피보호자 이메일)
     private void wardMail(WardCard card, final boolean locate) {
         if (noUserMail(locate ? "위치를 물어보려면" : "테스트 메일을 보내려면")) {
             return;
@@ -3272,7 +3272,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             String err = EmailSender.send(from, pass, to, subject, body);
             runOnUiThread(() -> Toast.makeText(this, err != null ? "보내기 실패: " + err
-                    : locate ? "위치 요청을 보냈습니다. 잠시 후 Gmail 받은편지함에서 회신을 확인하세요."
+                    : locate ? "위치 요청을 보냈습니다. 잠시 후 받은편지함에서 회신을 확인하세요."
                     : "테스트 메일을 보냈습니다. (" + to + ")", Toast.LENGTH_LONG).show());
         }).start();
     }
@@ -3380,14 +3380,14 @@ public class MainActivity extends Activity {
                 .show(), "가족 전체 조회".equals(name) ? "1260" : "1270");
     }
 
-    // ■ 원격 위치 요청 (이메일): 보호자가 사용자 Gmail 로 제목 "#where" 메일 -> 이 폰이 위치를 이메일로 회신
+    // ■ 원격 위치 요청 (이메일): 보호자가 사용자 이메일로 제목 "#where" 메일 -> 이 폰이 위치를 이메일로 회신
     private void buildMailRemote(LinearLayout body) {
         final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
         sectionTitle(body, "■ 원격 위치 요청 (이메일)");
-        smallNote(body, "보호자가 이 사용자의 Gmail 로 제목 \"#where\" (대소문자 무관) 메일을 보내면, 이 폰이 현재 위치를 이메일로 회신합니다.\n"
+        smallNote(body, "보호자가 이 사용자의 발신 이메일로 제목 \"#where\" (대소문자 무관) 메일을 보내면, 이 폰이 현재 위치를 이메일로 회신합니다.\n"
                 + "☑ 체크: 바로 자동 회신 (이 폰을 만질 필요 없음)\n"
                 + "☐ 체크 안 함: \"보호자 ○○님으로부터 위치 질문을 받았습니다. 회신할까요?\" 를 물어보고 Yes 일 때만 회신\n"
-                + "※ 사용자 등록(1075)의 Gmail 인증과, 보호자 등록(1100)에 보호자 이메일이 있어야 요청을 받습니다.\n"
+                + "※ 사용자 등록(1075)의 발신 이메일 인증과, 보호자 등록(1100)에 보호자 이메일이 있어야 요청을 받습니다.\n"
                 + "※ 앱을 켤 때 받은편지함에 남아 있는 요청 메일도 찾아 처리합니다. 처리한 요청 메일은 삭제(휴지통)합니다.");
         final CheckBox on = new CheckBox(this);
         on.setText("이메일 위치 요청에 자동으로 회신응답");
@@ -3399,7 +3399,7 @@ public class MainActivity extends Activity {
             if (on.isChecked()) {
                 if (!user.getBoolean("mailVerified", false) || user.getString("mailPass", "").isEmpty()) {
                     on.setChecked(false);
-                    Toast.makeText(this, "사용자 등록에서 발신 이메일(Gmail) 인증을 먼저 해 주세요.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "사용자 등록에서 발신 이메일 인증을 먼저 해 주세요.", Toast.LENGTH_LONG).show();
                     startActivity(new Intent(this, UserActivity.class));
                     return;
                 }
@@ -3434,28 +3434,28 @@ public class MainActivity extends Activity {
         mailRemoteInfo = smallNote(body, "");
         mailRemoteInfo.setTextColor(Color.DKGRAY);
         mailRemoteInfo.setTextSize(13);
-        msgStyleButtonFor(body, "지금 확인 (Gmail 접속·최근 메일 판단 보기)", view -> diagnoseMailRemote());
+        msgStyleButtonFor(body, "지금 확인 (메일 접속·최근 메일 판단 보기)", view -> diagnoseMailRemote());
 
         smallNote(body, "보호자가 하는 방법:\n"
                 + " 1. 아무 메일 앱(Gmail, 네이버 메일 …)을 엽니다.\n"
-                + " 2. 받는 사람 = 이 사용자의 Gmail, 제목 = #where (대소문자 무관, 내용은 비워도 됨)\n"
+                + " 2. 받는 사람 = 이 사용자의 발신 이메일, 제목 = #where (대소문자 무관, 내용은 비워도 됨)\n"
                 + " 3. 보내면 잠시 뒤 주소·지도 링크가 담긴 회신 메일이 옵니다. (보통 1분 안)\n"
                 + "   (보호자 폰에도 집에왔어요가 있으면 (5) 보호자 전용 모드의 [지금 위치 확인]으로 보낼 수 있습니다)\n\n"
                 + "※ 이 폰의 배터리 설정을 '제한 없음'으로 해야 화면이 꺼져 있을 때도 빨리 회신합니다.");
     }
 
-    // [지금 확인]: Gmail 에 접속해 최근 메일 5통을 앱이 어떻게 판단하는지 팝업(화면 1055)으로 보여 줌
+    // [지금 확인]: 메일 서버에 접속해 최근 메일 5통을 앱이 어떻게 판단하는지 팝업(화면 1055)으로 보여 줌
     private void diagnoseMailRemote() {
         final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
         if (user.getString("mail", "").isEmpty() || user.getString("mailPass", "").isEmpty()) {
-            Toast.makeText(this, "사용자 등록에서 발신 이메일(Gmail)을 먼저 등록하세요.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "사용자 등록에서 발신 이메일을 먼저 등록하세요.", Toast.LENGTH_LONG).show();
             return;
         }
-        Toast.makeText(this, "Gmail 에 접속하는 중...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "메일 서버에 접속하는 중...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             String rep = MailWatcher.diagnose(user.getString("mail", ""), user.getString("mailPass", ""),
                     user.getLong("mailUid", 0), HomeService.guardianEmails(this));
-            String head = "감시: " + (HomeService.mailRemoteOn(this) ? "켜짐" : "꺼짐 (Gmail 인증·보호자 이메일 필요)")
+            String head = "감시: " + (HomeService.mailRemoteOn(this) ? "켜짐" : "꺼짐 (발신 이메일 인증·보호자 이메일 필요)")
                     + " / 회신: " + (user.getBoolean("mailRemote", false) ? "자동" : "물어보고")
                     + "\n감시 상태: " + user.getString("mailRemoteState", "아직 접속한 적 없음 (서비스가 안 돌고 있을 수 있음)")
                     + "\n\n";
@@ -3491,7 +3491,7 @@ public class MainActivity extends Activity {
             SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
             long time = user.getLong("mailRemoteTime", 0);
             String err = user.getString("mailRemoteErr", "");
-            boolean on = HomeService.mailRemoteOn(this); // Gmail 인증 + 보호자 이메일 있으면 감시 중
+            boolean on = HomeService.mailRemoteOn(this); // 발신 이메일 인증 + 보호자 이메일 있으면 감시 중
             mailRemoteInfo.setText((on ? "상태: " + user.getString("mailRemoteState", "아직 접속 안 함") + "\n" : "")
                     + (time == 0 ? "아직 요청을 받은 적이 없습니다."
                     : "마지막 요청: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(time))
@@ -4429,7 +4429,7 @@ public class MainActivity extends Activity {
         if (noUserMail("일반 이메일을 보내려면")) {
             return;
         }
-        // 보내는 계정 = 사용자 등록(1075)의 Gmail·앱 비밀번호 (이 팝업에서는 입력하지 않음)
+        // 보내는 계정 = 사용자 등록(1075)의 발신 이메일·앱 비밀번호 (이 팝업에서는 입력하지 않음)
         final String fr = user.getString("mail", "").trim();
         final String pw = user.getString("mailPass", "").replace(" ", "");
         final SharedPreferences sp = getSharedPreferences(pref, MODE_PRIVATE);

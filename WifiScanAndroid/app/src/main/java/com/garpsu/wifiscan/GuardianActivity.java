@@ -229,7 +229,7 @@ public class GuardianActivity extends Activity {
         renumber();
     }
 
-    // ---------- 보호자에게 안내: 이메일(사용자 Gmail 로 자동 발송) + 문자(문자 앱을 열어 수동 [전송]) ----------
+    // ---------- 보호자에게 안내: 이메일(사용자 이메일로 자동 발송) + 문자(문자 앱을 열어 수동 [전송]) ----------
 
     private String guardianName(Card card) {
         String nm = card.name.getText().toString().trim();
@@ -276,10 +276,10 @@ public class GuardianActivity extends Activity {
                     + "앞으로 위치 요청에 회신하지 않습니다.";
         }
 
-        // 이메일: 사용자 등록(1075)의 Gmail 로 자동 발송 (결과는 알림 메시지로)
+        // 이메일: 사용자 등록(1075)의 발신 이메일로 자동 발송 (결과는 알림 메시지로)
         if (mailOk) {
             if (from.isEmpty() || pass.isEmpty()) {
-                Toast.makeText(this, "사용자 등록에 발신 Gmail 이 없어 이메일은 보내지 못했습니다.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "사용자 등록에 발신 이메일이 없어 이메일은 보내지 못했습니다.", Toast.LENGTH_LONG).show();
             } else {
                 final android.content.Context app = getApplicationContext();
                 new Thread(() -> {

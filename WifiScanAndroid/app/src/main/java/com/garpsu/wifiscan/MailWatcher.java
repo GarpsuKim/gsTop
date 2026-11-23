@@ -24,7 +24,8 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 /**
- * 이메일 원격 위치 요청: 사용자 Gmail 받은편지함(IMAP, SSL 993)에 접속해 새 메일을 기다린다 (IMAP IDLE).
+ * 이메일 원격 위치 요청: 사용자 메일(네이버·카카오·Gmail) 받은편지함(IMAP, SSL 993)에 접속해 새 메일을 기다린다
+ * (IMAP IDLE. 서버가 IDLE 을 지원하지 않으면 1분마다 다시 확인).
  * 제목에 "#where"(영어 고정, 대소문자 무관)가 있는 새 메일이 오면 Callback.onRequest 로 알려 줌.
  * - 앱 비밀번호(사용자 등록 1075)로 로그인. 권한 필요 없음 (인터넷만)
  * - 메일 내용은 읽지 않고 보낸 사람·제목 머리글만 봄 (BODY.PEEK: 읽음 표시 안 함)
@@ -47,7 +48,6 @@ final class MailWatcher {
         return new java.text.SimpleDateFormat("HH:mm", Locale.KOREA).format(new java.util.Date());
     }
 
-    static final String HOST = "imap.gmail.com";
     private static final Pattern LITERAL = Pattern.compile("\\{(\\d+)\\}$");
     private static final Pattern UID = Pattern.compile("UID (\\d+)");
     private static final Pattern UIDNEXT = Pattern.compile("UIDNEXT (\\d+)");
@@ -85,22 +85,32 @@ final class MailWatcher {
 
     // 접속 + 로그인 + 받은편지함 열기. 성공하면 null (uidNext[0] = 다음 UID), 실패하면 오류 내용
     private String open(String user, String pass, long[] uidNext) throws Exception {
+        // 받는 서버는 사용자 메일에 따라 (imap.naver.com / imap.kakao.com / imap.gmail.com)
+        String host = EmailSender.imapHost(user);
+        if (host == null) {
+            return "지원하지 않는 메일입니다 (" + EmailSender.SUPPORTED + " 만 가능)";
+        }
         Socket raw = new Socket();
-        raw.connect(new InetSocketAddress(HOST, 993), 15000);
-        s = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(raw, HOST, 993, true);
+        raw.connect(new InetSocketAddress(host, 993), 15000);
+        s = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(raw, host, 993, true);
         s.setSoTimeout(30000);
         s.startHandshake();
-        // 인증서가 실제 Gmail 서버의 것인지 확인 (가짜 서버에 앱 비밀번호가 넘어가지 않게)
-        if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(HOST, s.getSession())) {
-            return "서버 인증서 확인 실패 - 공용 Wi-Fi 등 네트워크를 확인하세요";
+        // 인증서가 실제 그 메일 서버의 것인지 확인 (가짜 서버에 앱 비밀번호가 넘어가지 않게)
+        if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, s.getSession())) {
+            return "서버 인증서 확인 실패 (" + host + ") - 공용 Wi-Fi 등 네트워크를 확인하세요";
         }
         in = new BufferedInputStream(s.getInputStream());
         out = s.getOutputStream();
         readLogical(); // 인사말 "* OK"
 
         List<String> resp = cmd("LOGIN " + quote(user) + " " + quote(pass));
+        if (!ok(resp) && !host.equals("imap.gmail.com") && user.indexOf('@') > 0) {
+            // 네이버·카카오: 전체 주소로 안 되면 @ 앞 아이디로 한 번 더
+            resp = cmd("LOGIN " + quote(user.substring(0, user.indexOf('@'))) + " " + quote(pass));
+        }
         if (!ok(resp)) {
-            return "로그인 실패 - 사용자 등록의 Gmail·앱 비밀번호를 확인하세요 (" + resp.get(resp.size() - 1) + ")";
+            return "로그인 실패 - 사용자 등록의 이메일·앱 비밀번호를 확인하세요. " + EmailSender.loginHint(user)
+                    + " (" + resp.get(resp.size() - 1) + ")";
         }
         resp = cmd("SELECT INBOX");
         if (!ok(resp)) {
@@ -143,10 +153,20 @@ final class MailWatcher {
 
             // 2) 새 메일이 올 때까지 대기 (IMAP IDLE). 4분마다 다시 확인
             //    (통신사 장비가 조용한 연결을 몇 분 만에 몰래 끊는 경우가 있어 짧게)
+            if (noIdle) {
+                pollWait(cb); // IDLE 이 안 되는 서버: 1분 쉬고 다시 확인
+                continue;
+            }
             String tag = nextTag();
             write(tag + " IDLE");
-            if (!readLogical().startsWith("+")) {
-                return "메일 서버가 대기(IDLE)를 지원하지 않습니다";
+            String first;
+            do {
+                first = readLogical();
+            } while (!first.startsWith("+") && !first.startsWith(tag + " "));
+            if (!first.startsWith("+")) {
+                noIdle = true; // 서버가 IDLE 을 거부함 -> 이후로는 1분마다 확인
+                pollWait(cb);
+                continue;
             }
             s.setSoTimeout(4 * 60 * 1000);
             try {
@@ -170,6 +190,24 @@ final class MailWatcher {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private boolean noIdle; // 서버가 IMAP IDLE 을 지원하지 않음 (1분마다 확인)
+
+    // IDLE 대신: 1분 기다린 뒤 NOOP (연결 유지 + 받은편지함 새로 고침). 중간에 감시가 꺼지면 바로 끝
+    private void pollWait(Callback cb) throws IOException {
+        cb.state("새 메일 대기 중 - 1분마다 확인 (마지막 확인 " + now() + ")");
+        for (int i = 0; i < 60 && cb.running(); i++) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        if (cb.running()) {
+            cmd("NOOP");
+        }
     }
 
     // FETCH 결과에서 UID 가 after 보다 큰 메일들을 검사: 위치 요청이고 받아들여지면(onRequest true) 삭제.
@@ -222,27 +260,47 @@ final class MailWatcher {
         }
     }
 
-    // 휴지통 폴더 이름 (Gmail 언어에 따라 다름: [Gmail]/Trash, [Gmail]/휴지통 …) -> LIST 의 \Trash 표시로 찾음
+    // 휴지통 폴더 이름 (메일·언어에 따라 다름: [Gmail]/Trash, [Gmail]/휴지통, Deleted Messages …)
+    // -> LIST 의 \Trash 표시로 찾고, 표시가 없는 서버(네이버·카카오 등)는 흔한 이름으로 찾음
     private String trash;
     private static final Pattern LIST = Pattern.compile("^\\* LIST \\(([^)]*)\\) (?:\"[^\"]*\"|NIL) (.+)$");
 
     private void findTrash() throws IOException {
         trash = null;
+        String byName = null;
         for (String ln : cmd("LIST \"\" \"*\"")) {
             Matcher matcher = LIST.matcher(ln);
-            if (matcher.find() && matcher.group(1).contains("\\Trash")) {
-                trash = matcher.group(2).trim();
+            if (!matcher.find()) {
+                continue;
             }
+            String folder = matcher.group(2).trim();
+            if (matcher.group(1).contains("\\Trash")) {
+                trash = folder;
+            }
+            String plain = folder.replace("\"", "").toLowerCase(Locale.US);
+            if (plain.equals("trash") || plain.equals("deleted messages") || plain.equals("deleted items")
+                    || plain.endsWith("/trash")) {
+                byName = folder;
+            }
+        }
+        if (trash == null) {
+            trash = byName;
         }
     }
 
-    // 메일 삭제: 휴지통으로 옮김 (30일 뒤 Gmail 이 완전 삭제). 안 되면 삭제 표시 + 지우기
+    // 메일 삭제: 휴지통으로 옮김 (메일 서비스가 일정 기간 뒤 완전 삭제).
+    // MOVE 가 안 되는 서버는 휴지통에 복사 후 원본 삭제, 휴지통을 못 찾으면 삭제 표시 + 지우기
     private void delete(long uid) throws IOException {
         if (trash != null && ok(cmd("UID MOVE " + uid + " " + trash))) {
             return;
         }
+        if (trash != null) {
+            cmd("UID COPY " + uid + " " + trash);
+        }
         cmd("UID STORE " + uid + " +FLAGS (\\Deleted)");
-        cmd("UID EXPUNGE " + uid);
+        if (!ok(cmd("UID EXPUNGE " + uid))) {
+            cmd("EXPUNGE"); // UID EXPUNGE 를 지원하지 않는 서버
+        }
     }
 
     // [지금 확인] 진단: 접속·로그인 결과와 받은편지함 최근 메일 5통을 앱이 어떻게 판단하는지 보여 줌 (처리는 안 함)
@@ -255,7 +313,7 @@ final class MailWatcher {
             if (err != null) {
                 return "❌ " + err;
             }
-            sb.append("✓ Gmail 접속·로그인 성공 (").append(user.trim()).append(")\n");
+            sb.append("✓ ").append(EmailSender.providerName(user)).append(" 메일 접속·로그인 성공 (").append(user.trim()).append(")\n");
             sb.append("받은편지함 다음 번호: ").append(un[0])
                     .append(" / 앱이 마지막으로 확인한 번호: ").append(lastUid == 0 ? "아직 없음" : String.valueOf(lastUid))
                     .append("\n\n최근 메일 5통:\n");
