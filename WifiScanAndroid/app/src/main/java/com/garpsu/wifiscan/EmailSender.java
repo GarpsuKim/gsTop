@@ -40,8 +40,8 @@ final class EmailSender {
 
     // 보내는 주소의 도메인으로 SMTP 서버 결정. 구글(Gmail)이 아니면 null
     static String smtpHost(String from) {
-        String d = from.substring(from.indexOf('@') + 1).trim().toLowerCase(Locale.US);
-        return d.equals("gmail.com") || d.equals("googlemail.com") ? "smtp.gmail.com" : null;
+        String domain = from.substring(from.indexOf('@') + 1).trim().toLowerCase(Locale.US);
+        return domain.equals("gmail.com") || domain.equals("googlemail.com") ? "smtp.gmail.com" : null;
     }
 
     // 성공하면 null, 실패하면 오류 내용
@@ -49,9 +49,9 @@ final class EmailSender {
         from = from.trim();
         String pass = appPassword.replace(" ", ""); // 구글은 4자리씩 띄어 보여 줌
         List<String> to = new ArrayList<>();
-        for (String s : toCsv.split("[,;\\s]+")) {
-            if (!s.isEmpty()) {
-                to.add(s);
+        for (String addr : toCsv.split("[,;\\s]+")) {
+            if (!addr.isEmpty()) {
+                to.add(addr);
             }
         }
         if (from.indexOf('@') < 1 || pass.isEmpty() || to.isEmpty()) {
@@ -62,20 +62,20 @@ final class EmailSender {
         if (host == null) {
             return "보내는 계정은 " + SUPPORTED + " 만 사용할 수 있습니다";
         }
-        SSLSocket s = null;
+        SSLSocket sock = null;
         try {
             // 일반 소켓으로 접속(시간 제한) 후 SSL 로 감싸기 (서버 이름을 넘겨 SNI 포함)
             Socket raw = new Socket();
             raw.connect(new InetSocketAddress(host, 465), 15000);
-            s = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(raw, host, 465, true);
-            s.setSoTimeout(20000);
-            s.startHandshake();
+            sock = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(raw, host, 465, true);
+            sock.setSoTimeout(20000);
+            sock.startHandshake();
             // 인증서가 실제 그 서버의 것인지 확인 (가짜 서버에 앱 비밀번호가 넘어가지 않게)
-            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, s.getSession())) {
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, sock.getSession())) {
                 return "서버 인증서 확인 실패 (" + host + ") - 공용 Wi-Fi 등 네트워크를 확인하세요";
             }
-            BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-            OutputStream out = s.getOutputStream();
+            BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream(), StandardCharsets.UTF_8));
+            OutputStream out = sock.getOutputStream();
 
             expect(in, 220, "서버 연결");
             cmd(out, "EHLO wifiscan");
@@ -85,36 +85,36 @@ final class EmailSender {
             cmd(out, b64(from));
             expect(in, 334, "로그인");
             cmd(out, b64(pass));
-            String r = reply(in);
-            if (!r.startsWith("235")) {
-                return "로그인 실패 - 이메일 주소/앱 비밀번호를 확인하세요 (" + firstLine(r) + ")";
+            String resp = reply(in);
+            if (!resp.startsWith("235")) {
+                return "로그인 실패 - 이메일 주소/앱 비밀번호를 확인하세요 (" + firstLine(resp) + ")";
             }
             cmd(out, "MAIL FROM:<" + from + ">");
             expect(in, 250, "보내는 주소");
-            for (String t : to) {
-                cmd(out, "RCPT TO:<" + t + ">");
-                r = reply(in);
-                if (!r.startsWith("250") && !r.startsWith("251")) {
-                    return "받는 주소 거부: " + t + " (" + firstLine(r) + ")";
+            for (String rcpt : to) {
+                cmd(out, "RCPT TO:<" + rcpt + ">");
+                resp = reply(in);
+                if (!resp.startsWith("250") && !resp.startsWith("251")) {
+                    return "받는 주소 거부: " + rcpt + " (" + firstLine(resp) + ")";
                 }
             }
             cmd(out, "DATA");
             expect(in, 354, "DATA");
 
-            StringBuilder m = new StringBuilder();
-            m.append("From: ").append(from).append("\r\n");
-            m.append("To: ").append(android.text.TextUtils.join(", ", to)).append("\r\n");
-            m.append("Subject: =?UTF-8?B?").append(b64(subject)).append("?=\r\n");
-            m.append("Date: ").append(new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
+            StringBuilder msg = new StringBuilder();
+            msg.append("From: ").append(from).append("\r\n");
+            msg.append("To: ").append(android.text.TextUtils.join(", ", to)).append("\r\n");
+            msg.append("Subject: =?UTF-8?B?").append(b64(subject)).append("?=\r\n");
+            msg.append("Date: ").append(new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
                     .format(new Date())).append("\r\n");
-            m.append("MIME-Version: 1.0\r\n");
-            m.append("Content-Type: text/plain; charset=UTF-8\r\n");
-            m.append("Content-Transfer-Encoding: base64\r\n\r\n");
+            msg.append("MIME-Version: 1.0\r\n");
+            msg.append("Content-Type: text/plain; charset=UTF-8\r\n");
+            msg.append("Content-Transfer-Encoding: base64\r\n\r\n");
             // 본문: base64 76자 줄바꿈 (줄이 '.' 으로 시작할 일이 없음)
             String enc = Base64.encodeToString(body.getBytes(StandardCharsets.UTF_8), Base64.DEFAULT);
-            m.append(enc.replace("\r\n", "\n").replace("\n", "\r\n"));
-            m.append("\r\n.\r\n");
-            out.write(m.toString().getBytes(StandardCharsets.UTF_8));
+            msg.append(enc.replace("\r\n", "\n").replace("\n", "\r\n"));
+            msg.append("\r\n.\r\n");
+            out.write(msg.toString().getBytes(StandardCharsets.UTF_8));
             out.flush();
             expect(in, 250, "전송");
             cmd(out, "QUIT");
@@ -126,9 +126,9 @@ final class EmailSender {
         } catch (Exception e) {
             return "연결 실패 (인터넷 확인) - " + host;
         } finally {
-            if (s != null) {
+            if (sock != null) {
                 try {
-                    s.close();
+                    sock.close();
                 } catch (Exception ignored) {
                 }
             }
@@ -136,13 +136,13 @@ final class EmailSender {
     }
 
     private static class SmtpError extends Exception {
-        SmtpError(String m) {
-            super(m);
+        SmtpError(String msg) {
+            super(msg);
         }
     }
 
-    private static String b64(String s) {
-        return Base64.encodeToString(s.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    private static String b64(String text) {
+        return Base64.encodeToString(text.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
     }
 
     private static void cmd(OutputStream out, String line) throws java.io.IOException {
@@ -164,15 +164,15 @@ final class EmailSender {
     }
 
     private static void expect(BufferedReader in, int code, String step) throws Exception {
-        String r = reply(in);
-        if (!r.startsWith(String.valueOf(code))) {
-            throw new SmtpError(step + " 실패 (" + firstLine(r) + ")");
+        String resp = reply(in);
+        if (!resp.startsWith(String.valueOf(code))) {
+            throw new SmtpError(step + " 실패 (" + firstLine(resp) + ")");
         }
     }
 
-    private static String firstLine(String r) {
-        int i = r.indexOf('\n');
-        String s = (i >= 0 ? r.substring(0, i) : r).trim();
-        return s.isEmpty() ? "응답 없음" : s;
+    private static String firstLine(String resp) {
+        int nl = resp.indexOf('\n');
+        String first = (nl >= 0 ? resp.substring(0, nl) : resp).trim();
+        return first.isEmpty() ? "응답 없음" : first;
     }
 }

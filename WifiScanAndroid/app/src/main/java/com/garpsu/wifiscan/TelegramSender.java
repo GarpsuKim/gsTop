@@ -44,60 +44,67 @@ final class TelegramSender {
      *   🚶 외출
      *   ❔ 상태 확인 불가 (이유)
      */
-    static String statusLine(Context c) {
-        android.content.SharedPreferences h = c.getSharedPreferences("home", Context.MODE_PRIVATE);
-        java.util.Set<String> routers = h.getStringSet("routers", new java.util.HashSet<String>());
+    static String statusLine(Context ctx) {
+        android.content.SharedPreferences prefs = ctx.getSharedPreferences("home", Context.MODE_PRIVATE);
+        java.util.Set<String> routers = prefs.getStringSet("routers", new java.util.HashSet<String>());
         String bssid = null;
         try {
-            bssid = HomeService.connectedBssid(c);
+            bssid = HomeService.connectedBssid(ctx);
         } catch (Exception ignored) {
         }
+        String otherLine = null; // '기타' 공유기에 연결됨 (귀가로 보지 않음, 외출 줄에 어디인지 덧붙임)
         if (bssid != null) {
-            for (String s : routers) {
-                String[] t = s.split("\\|", 2);
-                if (t[0].equals(bssid)) {
-                    String ssid = t.length > 1 && !t[1].isEmpty() ? t[1] : "<숨김>";
+            for (String entry : routers) {
+                String[] parts = entry.split("\\|", 2);
+                if (parts[0].equals(bssid)) {
+                    String ssid = parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "<숨김>";
                     // 공유기 등록 별명(1010 에서 입력)이 있으면 "홈 (우리집 거실)" 처럼 함께
-                    String alias = MainActivity.routerAlias(c, bssid);
-                    return "🏠 홈" + (alias.isEmpty() ? "" : " (" + alias + ")")
-                            + " · 공유기 " + ssid + " (" + bssid.toUpperCase(Locale.US) + ")";
+                    String alias = MainActivity.routerAlias(ctx, bssid);
+                    String where = " · 공유기 " + ssid + " (" + bssid.toUpperCase(Locale.US) + ")";
+                    if (MainActivity.routerIsHome(ctx, bssid)) {
+                        return "🏠 홈" + (alias.isEmpty() ? "" : " (" + alias + ")") + where;
+                    }
+                    otherLine = (alias.isEmpty() ? "" : " (" + alias + ")") + where;
+                    break;
                 }
             }
         }
-        if (BtHome.seenRecently(c)) {
-            String name = h.getString("btSeenName", "");
-            String mac = "";
-            for (String s : BtHome.registered(c)) {
-                String[] t = s.split("\\|", 2);
-                if (t.length > 1 && t[1].equals(name)) {
-                    mac = t[0];
-                }
-            }
-            return "🏠 홈 · 블루투스 " + name + (mac.isEmpty() ? "" : " (" + mac + ")");
+        String btName = BtHome.seenName(ctx), btMac = BtHome.seenMac(ctx);
+        String btAlias = BtHome.alias(ctx, btMac); // 블루투스 기기 별명 (1010 에서 입력)
+        String btWhere = (btAlias.isEmpty() ? "" : " (" + btAlias + ")")
+                + " · 블루투스 " + btName + (btMac.isEmpty() ? "" : " (" + btMac + ")");
+        if (BtHome.seenHome(ctx)) {
+            return "🏠 홈" + btWhere;
         }
-        boolean btReg = !BtHome.registered(c).isEmpty();
-        if (routers.isEmpty() && !btReg) {
+        if (otherLine != null) {
+            return "🚶 외출" + otherLine; // 예: 🚶 외출 (할머니댁) · 공유기 Grandma (AA:...)
+        }
+        if (BtHome.seenOther(ctx)) {
+            return "🚶 외출" + btWhere; // '기타' 블루투스 기기(회사 PC 등)가 가까이 있음
+        }
+        boolean btReg = BtHome.hasHome(ctx); // '홈'으로 체크된 블루투스 기기
+        if (!MainActivity.hasHomeRouter(ctx) && !btReg) {
             return "❔ 상태 확인 불가 (홈 공유기 미등록)";
         }
-        if (!btReg && !HomeService.locationOn(c)) {
+        if (!btReg && !HomeService.locationOn(ctx)) {
             return "❔ 상태 확인 불가 (위치 서비스 꺼짐)";
         }
         return "🚶 외출";
     }
 
     // 위치 -> 메시지 (주소 조회 포함). 첫 줄 = 지금 상태
-    static String message(Context c, Location l) {
-        return message(c, l, true);
+    static String message(Context ctx, Location loc) {
+        return message(ctx, loc, true);
     }
 
     // withStatus=false: 상태 줄 없이 (상태 줄을 맨 앞에 따로 붙이는 알림용)
-    static String message(Context c, Location l, boolean withStatus) {
+    static String message(Context ctx, Location loc, boolean withStatus) {
         String addr = null, zip = null;
-        if (l != null) {
+        if (loc != null) {
             try {
                 if (Geocoder.isPresent()) {
-                    List<Address> list = new Geocoder(c, Locale.KOREA)
-                            .getFromLocation(l.getLatitude(), l.getLongitude(), 1);
+                    List<Address> list = new Geocoder(ctx, Locale.KOREA)
+                            .getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
                     if (list != null && !list.isEmpty()) {
                         addr = list.get(0).getAddressLine(0);
                         zip = list.get(0).getPostalCode();
@@ -106,7 +113,7 @@ final class TelegramSender {
             } catch (Exception ignored) {
             }
         }
-        return format(c, l, addr, zip, withStatus);
+        return format(ctx, loc, addr, zip, withStatus);
     }
 
     /*
@@ -115,23 +122,23 @@ final class TelegramSender {
      * 서울특별시 중구 세종대로 110
      * https://maps.google.com/?q=37.566500,126.978000
      */
-    static String shortMessage(Context c, Location l) {
-        return shortMessage(c, l, true);
+    static String shortMessage(Context ctx, Location loc) {
+        return shortMessage(ctx, loc, true);
     }
 
-    static String shortMessage(Context c, Location l, boolean withStatus) {
-        String who = senderName(c);
-        StringBuilder sb = new StringBuilder(withStatus ? statusLine(c) + "\n" : "");
+    static String shortMessage(Context ctx, Location loc, boolean withStatus) {
+        String who = senderName(ctx);
+        StringBuilder sb = new StringBuilder(withStatus ? statusLine(ctx) + "\n" : "");
         sb.append("📍 ");
         sb.append(who.isEmpty() ? "" : who + " ").append("위치 ")
                 .append(new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date()));
-        if (l == null) {
+        if (loc == null) {
             return sb.append("\n위치를 확인할 수 없습니다.").toString();
         }
         try {
             if (Geocoder.isPresent()) {
-                List<Address> list = new Geocoder(c, Locale.KOREA)
-                        .getFromLocation(l.getLatitude(), l.getLongitude(), 1);
+                List<Address> list = new Geocoder(ctx, Locale.KOREA)
+                        .getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
                 if (list != null && !list.isEmpty()) {
                     // "대한민국 " 은 빼서 짧게
                     sb.append('\n').append(list.get(0).getAddressLine(0).replaceFirst("^대한민국\\s*", ""));
@@ -140,19 +147,19 @@ final class TelegramSender {
         } catch (Exception ignored) {
         }
         sb.append("\nhttps://maps.google.com/?q=")
-                .append(String.format(Locale.US, "%.6f,%.6f", l.getLatitude(), l.getLongitude()));
+                .append(String.format(Locale.US, "%.6f,%.6f", loc.getLatitude(), loc.getLongitude()));
         return sb.toString();
     }
 
     // 보내는 사람 이름 (예: 할머니). 받는 사람이 누구의 위치인지 알 수 있게 메시지 제목에 넣음
     static final String PREF_APP = "app";
 
-    static String senderName(Context c) {
-        return c.getSharedPreferences(PREF_APP, Context.MODE_PRIVATE).getString("sender", "").trim();
+    static String senderName(Context ctx) {
+        return ctx.getSharedPreferences(PREF_APP, Context.MODE_PRIVATE).getString("sender", "").trim();
     }
 
-    static void setSenderName(Context c, String name) {
-        c.getSharedPreferences(PREF_APP, Context.MODE_PRIVATE).edit().putString("sender", name.trim()).apply();
+    static void setSenderName(Context ctx, String name) {
+        ctx.getSharedPreferences(PREF_APP, Context.MODE_PRIVATE).edit().putString("sender", name.trim()).apply();
     }
 
     /*
@@ -165,16 +172,16 @@ final class TelegramSender {
      * ■ 우편번호: 04524
      * ...
      */
-    static String format(Context c, Location l, String addr, String zip) {
-        return format(c, l, addr, zip, true);
+    static String format(Context ctx, Location loc, String addr, String zip) {
+        return format(ctx, loc, addr, zip, true);
     }
 
-    static String format(Context c, Location l, String addr, String zip, boolean withStatus) {
-        StringBuilder sb = new StringBuilder(withStatus ? statusLine(c) + "\n\n" : "");
-        String who = senderName(c);
+    static String format(Context ctx, Location loc, String addr, String zip, boolean withStatus) {
+        StringBuilder sb = new StringBuilder(withStatus ? statusLine(ctx) + "\n\n" : "");
+        String who = senderName(ctx);
         sb.append("📍 ").append(who.isEmpty() ? "" : who + "의 ").append("현재 위치 (")
                 .append(new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date())).append(")");
-        if (l == null) {
+        if (loc == null) {
             sb.append("\n\n■ 위치를 확인할 수 없습니다.\n   (위치 서비스가 켜져 있는지 확인하세요)");
             return sb.toString();
         }
@@ -185,11 +192,11 @@ final class TelegramSender {
             sb.append("\n\n■ 우편번호: ").append(zip);
         }
         sb.append("\n\n■ 위도, 경도: ")
-                .append(String.format(Locale.US, "%.6f, %.6f", l.getLatitude(), l.getLongitude()))
-                .append("\n   (정확도 ").append(Math.round(l.getAccuracy())).append(" m)");
+                .append(String.format(Locale.US, "%.6f, %.6f", loc.getLatitude(), loc.getLongitude()))
+                .append("\n   (정확도 ").append(Math.round(loc.getAccuracy())).append(" m)");
         sb.append("\n\n■ 측정 시각: ")
-                .append(new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(l.getTime())));
-        sb.append("\n\n").append(mapLinks(l.getLatitude(), l.getLongitude()));
+                .append(new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(loc.getTime())));
+        sb.append("\n\n").append(mapLinks(loc.getLatitude(), loc.getLongitude()));
         return sb.toString();
     }
 
@@ -201,8 +208,8 @@ final class TelegramSender {
                 + "   네이버: " + naverUrl(lat, lng);
     }
 
-    private static String f6(double v) {
-        return String.format(Locale.US, "%.6f", v);
+    private static String f6(double value) {
+        return String.format(Locale.US, "%.6f", value);
     }
 
     private static String hereName() {
@@ -234,12 +241,12 @@ final class TelegramSender {
             if (chat.isEmpty()) {
                 continue;
             }
-            String e = sendOne(token, chat, text);
-            if (e != null) {
+            String sendErr = sendOne(token, chat, text);
+            if (sendErr != null) {
                 if (err.length() > 0) {
                     err.append(" / ");
                 }
-                err.append(chat).append(": ").append(e);
+                err.append(chat).append(": ").append(sendErr);
             }
         }
         return err.length() == 0 ? null : err.toString();
@@ -265,10 +272,10 @@ final class TelegramSender {
                 return null;
             }
             String res = read(con.getErrorStream());
-            int i = res.indexOf("\"description\":\"");
-            if (i >= 0) {
-                int j = res.indexOf('"', i + 15);
-                return j > 0 ? res.substring(i + 15, j) : res;
+            int start = res.indexOf("\"description\":\"");
+            if (start >= 0) {
+                int end = res.indexOf('"', start + 15);
+                return end > 0 ? res.substring(start + 15, end) : res;
             }
             return "HTTP " + code;
         } catch (Exception e) {
@@ -302,16 +309,16 @@ final class TelegramSender {
             java.util.Set<String> seen = new java.util.HashSet<>();
             org.json.JSONArray arr = root.getJSONArray("result");
             for (int i = arr.length() - 1; i >= 0; i--) { // 최근 것부터
-                org.json.JSONObject u = arr.getJSONObject(i);
-                java.util.Iterator<String> keys = u.keys();
+                org.json.JSONObject update = arr.getJSONObject(i);
+                java.util.Iterator<String> keys = update.keys();
                 while (keys.hasNext()) {
-                    org.json.JSONObject o = u.optJSONObject(keys.next());
-                    if (o == null) {
+                    org.json.JSONObject chatObj = update.optJSONObject(keys.next());
+                    if (chatObj == null) {
                         continue;
                     }
-                    org.json.JSONObject chat = o.optJSONObject("chat");
-                    if (chat == null && o.optJSONObject("message") != null) {
-                        chat = o.optJSONObject("message").optJSONObject("chat"); // 버튼 응답 등
+                    org.json.JSONObject chat = chatObj.optJSONObject("chat");
+                    if (chat == null && chatObj.optJSONObject("message") != null) {
+                        chat = chatObj.optJSONObject("message").optJSONObject("chat"); // 버튼 응답 등
                     }
                     if (chat == null || !chat.has("id")) {
                         continue;
@@ -349,12 +356,12 @@ final class TelegramSender {
                 err[0] = root.optString("description", "HTTP " + code);
                 return null;
             }
-            String u = root.getJSONObject("result").optString("username");
-            if (u.isEmpty()) {
+            String username = root.getJSONObject("result").optString("username");
+            if (username.isEmpty()) {
                 err[0] = "봇 아이디를 알 수 없습니다";
                 return null;
             }
-            return u;
+            return username;
         } catch (org.json.JSONException e) {
             err[0] = "응답을 해석할 수 없습니다 (봇 토큰 확인)";
         } catch (Exception e) {
@@ -436,14 +443,14 @@ final class TelegramSender {
         if (txt == null) {
             return null;
         }
-        java.util.regex.Matcher m = java.util.regex.Pattern
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
                 .compile("\\d{6,}:[A-Za-z0-9_-]{30,}").matcher(txt);
-        return m.find() ? m.group() : null;
+        return matcher.find() ? matcher.group() : null;
     }
 
     // 받는 사람 이름 저장/조회 (채팅 ID -> "홍길동 · 개인")
-    static void saveName(Context c, String id, String label) {
-        android.content.SharedPreferences sp = c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+    static void saveName(Context ctx, String id, String label) {
+        android.content.SharedPreferences sp = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE);
         java.util.Set<String> set = new java.util.HashSet<>(sp.getStringSet("names", new java.util.HashSet<String>()));
         java.util.Iterator<String> it = set.iterator();
         while (it.hasNext()) {
@@ -456,34 +463,34 @@ final class TelegramSender {
     }
 
     // 이름을 알면 이름, 모르면 "ID 123..."
-    static String nameOrId(Context c, String id) {
-        String n = nameOf(c, id);
-        return n == null ? "ID " + id : n;
+    static String nameOrId(Context ctx, String id) {
+        String name = nameOf(ctx, id);
+        return name == null ? "ID " + id : name;
     }
 
-    static String nameOf(Context c, String id) {
-        for (String s : c.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+    static String nameOf(Context ctx, String id) {
+        for (String entry : ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
                 .getStringSet("names", new java.util.HashSet<String>())) {
-            if (s.startsWith(id + "|")) {
-                return s.substring(id.length() + 1);
+            if (entry.startsWith(id + "|")) {
+                return entry.substring(id.length() + 1);
             }
         }
         return null;
     }
 
     // 예: "홍길동 (@hong) · 개인", "우리가족 · 단톡방"
-    static String chatLabel(org.json.JSONObject c) {
-        String type = c.optString("type");
+    static String chatLabel(org.json.JSONObject chat) {
+        String type = chat.optString("type");
         String name;
         if ("private".equals(type)) {
-            name = (c.optString("first_name") + " " + c.optString("last_name")).trim();
+            name = (chat.optString("first_name") + " " + chat.optString("last_name")).trim();
         } else {
-            name = c.optString("title");
+            name = chat.optString("title");
         }
         if (name.isEmpty()) {
             name = "(이름 없음)";
         }
-        String user = c.optString("username");
+        String user = chat.optString("username");
         if (!user.isEmpty()) {
             name += " (@" + user + ")";
         }

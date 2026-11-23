@@ -120,7 +120,7 @@ public class UserActivity extends Activity {
         changeBtn = new Button(this);
         changeBtn.setText("변경");
         changeBtn.setTextSize(13);
-        changeBtn.setOnClickListener(v -> confirmReverify());
+        changeBtn.setOnClickListener(view -> confirmReverify());
         titleRow.addView(changeBtn);
         String saved = up.getString("mail", em.getString("from", ""));
         int at = saved.indexOf('@');
@@ -144,7 +144,7 @@ public class UserActivity extends Activity {
         sendBtn.setText("인증 메일 보내기");
         sendBtn.setTextSize(14);
         sendBtn.setAllCaps(false);
-        sendBtn.setOnClickListener(v -> sendCode());
+        sendBtn.setOnClickListener(view -> sendCode());
         root.addView(sendBtn, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // 버튼 아래 항목 묶음: 이미 인증되어 있으면 통째로 숨김
@@ -159,22 +159,22 @@ public class UserActivity extends Activity {
         sendNote.setLineSpacing(0, 1.3f); // 설명문 줄 사이 넓게
         afterSend.addView(sendNote);
         final Runnable updateNote = () -> {
-            String m = fullMail();
-            sendNote.setText("이 버튼을 누르면 6자리 숫자가 " + (m.isEmpty() ? "xxxxxx@" + mailDomain : m)
+            String fullAddr = fullMail();
+            sendNote.setText("이 버튼을 누르면 6자리 숫자가 " + (fullAddr.isEmpty() ? "xxxxxx@" + mailDomain : fullAddr)
                     + " 메일로 보내집니다. 그 6자리 숫자를 다음 칸에 입력하여야만 이메일 인증이 완료됩니다.");
         };
         updateNote.run();
         mail.addTextChangedListener(new android.text.TextWatcher() {
             @Override
-            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {
             }
 
             @Override
-            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
             }
 
             @Override
-            public void afterTextChanged(android.text.Editable s) {
+            public void afterTextChanged(android.text.Editable text) {
                 updateNote.run();
                 showMailStatus(); // 아이디가 바뀌면 인증 상태·버튼도 다시 표시
             }
@@ -186,7 +186,7 @@ public class UserActivity extends Activity {
         code.setHint("인증번호 6자리");
         code.setInputType(InputType.TYPE_CLASS_NUMBER);
         r1.addView(code, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        button(r1, "확인", v -> verifyCode());
+        button(r1, "확인", view -> verifyCode());
         gap(afterSend, 14);
         afterSend.addView(note("이메일 등록을 위한 자세한 설명 : " + EmailSender.GUIDE_URL)); // 누르면 브라우저로 열림
         gap(afterSend, 6);
@@ -212,9 +212,9 @@ public class UserActivity extends Activity {
         section(root, "■ 텔레그램");
         token = edit(root, "봇 토큰 123456789:AAH...", tg.getString("token", ""), InputType.TYPE_CLASS_TEXT);
         LinearLayout r2 = row(root);
-        button(r2, "붙여넣기", v -> pasteToken());
-        button(r2, "확인", v -> checkToken());
-        button(r2, "설정 도우미", v -> {
+        button(r2, "붙여넣기", view -> pasteToken());
+        button(r2, "확인", view -> checkToken());
+        button(r2, "설정 도우미", view -> {
             save();
             startActivity(new Intent(this, TelegramSetupActivity.class));
         });
@@ -228,16 +228,16 @@ public class UserActivity extends Activity {
         tsStatus = note("");
         root.addView(tsStatus);
         LinearLayout r3 = row(root);
-        button(r3, "다시 찾기", v -> showTsStatus());
-        button(r3, "Tailscale 앱 열기", v -> openTailscale());
+        button(r3, "다시 찾기", view -> showTsStatus());
+        button(r3, "Tailscale 앱 열기", view -> openTailscale());
         showTsStatus();
         pcIp = edit(root, "PC 서버 IP", up.getString("pcIp", ""), InputType.TYPE_CLASS_TEXT);
         pcPort = edit(root, "PC 서버 포트", up.getString("pcPort", ""), InputType.TYPE_CLASS_NUMBER);
         pcKey = edit(root, "접속 키", up.getString("pcKey", ""), InputType.TYPE_CLASS_TEXT);
         LinearLayout r4 = row(root);
-        button(r4, "접속 키 만들기", v -> pcKey.setText(randomKey(24)));
-        button(r4, "접속 키 복사", v -> copy(pcKey.getText().toString()));
-        button(r4, "연결 테스트", v -> testPc());
+        button(r4, "접속 키 만들기", view -> pcKey.setText(randomKey(24)));
+        button(r4, "접속 키 복사", view -> copy(pcKey.getText().toString()));
+        button(r4, "연결 테스트", view -> testPc());
         pcStatus = note("");
         root.addView(pcStatus);
 
@@ -257,13 +257,13 @@ public class UserActivity extends Activity {
         divider(root);
         section(root, "■ 설정 백업·복원");
         LinearLayout r5 = row(root);
-        button(r5, "설정 내보내기", v -> exportSettings());
-        button(r5, "설정 불러오기", v -> importSettings());
+        button(r5, "설정 내보내기", view -> exportSettings());
+        button(r5, "설정 불러오기", view -> importSettings());
 
         Button close = new Button(this);
         close.setText("저장하고 닫기");
         close.setTypeface(null, Typeface.BOLD);
-        close.setOnClickListener(v -> finish()); // onPause 에서 저장
+        close.setOnClickListener(view -> finish()); // onPause 에서 저장
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = 40;
@@ -280,9 +280,9 @@ public class UserActivity extends Activity {
         super.onResume();
         if (token != null) {
             // 설정 도우미에서 토큰이 바뀌었을 수 있음
-            String t = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).getString("token", "");
-            if (!t.isEmpty() && !t.equals(token.getText().toString().trim())) {
-                token.setText(t);
+            String tok = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).getString("token", "");
+            if (!tok.isEmpty() && !tok.equals(token.getText().toString().trim())) {
+                token.setText(tok);
             }
             showTgStatus(null);
         }
@@ -298,8 +298,8 @@ public class UserActivity extends Activity {
 
     private void save() {
         TelegramSender.setSenderName(this, name.getText().toString());
-        String m = fullMail();
-        String p = pass.getText().toString().replace(" ", "");
+        String fullAddr = fullMail();
+        String pw = pass.getText().toString().replace(" ", "");
         SharedPreferences.Editor ed = up.edit()
                 .putString("phone", phone.getText().toString().trim())
                 .putString("device", device.getText().toString().trim())
@@ -311,14 +311,14 @@ public class UserActivity extends Activity {
                 .putString("meds", meds.getText().toString().trim())
                 .putString("memo", memo.getText().toString().trim())
                 .putBoolean("medSos", medSos.isChecked());
-        if (!m.equals(up.getString("mail", "")) || !p.equals(up.getString("mailPass", ""))) {
+        if (!fullAddr.equals(up.getString("mail", "")) || !pw.equals(up.getString("mailPass", ""))) {
             ed.putBoolean("mailVerified", false); // 주소나 비밀번호가 바뀌면 다시 검증
         }
-        ed.putString("mail", m).putString("mailPass", p).apply();
-        if (!m.isEmpty()) {
+        ed.putString("mail", fullAddr).putString("mailPass", pw).apply();
+        if (!fullAddr.isEmpty()) {
             // 일반 이메일(1150)·카톡 이메일(1160)의 보내는 계정으로 사용
             for (String pref : new String[]{HomeService.PREF_EMAIL, HomeService.PREF_KMAIL}) {
-                getSharedPreferences(pref, MODE_PRIVATE).edit().putString("from", m).putString("pass", p).apply();
+                getSharedPreferences(pref, MODE_PRIVATE).edit().putString("from", fullAddr).putString("pass", pw).apply();
             }
         }
         String tk = token.getText().toString().trim();
@@ -343,8 +343,8 @@ public class UserActivity extends Activity {
         boolean ok = up.getBoolean("mailVerified", false)
                 && !fullMail().isEmpty() && fullMail().equals(up.getString("mail", ""));
         if (mailStatus != null) {
-            long t = up.getLong("mailVerifiedAt", 0);
-            mailStatus.setText(ok ? "✓ 검증됨 (" + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t)) + ")"
+            long time = up.getLong("mailVerifiedAt", 0);
+            mailStatus.setText(ok ? "✓ 검증됨 (" + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(time)) + ")"
                     : "아직 검증하지 않았습니다.");
             mailStatus.setTextColor(ok ? 0xFF2E7D32 : Color.DKGRAY);
         }
@@ -369,7 +369,7 @@ public class UserActivity extends Activity {
         ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("발신 이메일 변경")
                 .setMessage("변경 또는 재인증합니까?")
-                .setPositiveButton("Yes", (d, w) -> {
+                .setPositiveButton("Yes", (dialog, which) -> {
                     up.edit().putBoolean("mailVerified", false).remove("mailVerifiedAt").commit();
                     HomeService.refresh(this);
                     pendingCode = null;
@@ -384,28 +384,28 @@ public class UserActivity extends Activity {
     }
 
     private void sendCode() {
-        final String m = fullMail();
-        final String p = pass.getText().toString().replace(" ", "");
-        if (!Patterns.EMAIL_ADDRESS.matcher(m).matches() || p.isEmpty()) {
+        final String fullAddr = fullMail();
+        final String pw = pass.getText().toString().replace(" ", "");
+        if (!Patterns.EMAIL_ADDRESS.matcher(fullAddr).matches() || pw.isEmpty()) {
             Toast.makeText(this, "보내는 이메일과 앱 비밀번호를 입력하세요.", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (EmailSender.smtpHost(m) == null) {
+        if (EmailSender.smtpHost(fullAddr) == null) {
             Toast.makeText(this, "보내는 계정은 " + EmailSender.SUPPORTED + " 만 사용할 수 있습니다.",
                     Toast.LENGTH_LONG).show();
             return;
         }
-        final String c = String.format(Locale.US, "%06d", new SecureRandom().nextInt(1000000));
+        final String otp = String.format(Locale.US, "%06d", new SecureRandom().nextInt(1000000));
         mailStatus.setText("인증 메일 보내는 중...");
         mailStatus.setTextColor(Color.DKGRAY);
         new Thread(() -> {
-            String err = EmailSender.send(m, p, m, "[집에왔어요] 이메일 인증번호",
-                    "인증번호: " + c + "\n\n앱의 [사용자 등록] 화면에 10분 안에 입력하세요.");
+            String err = EmailSender.send(fullAddr, pw, fullAddr, "[집에왔어요] 이메일 인증번호",
+                    "인증번호: " + otp + "\n\n앱의 [사용자 등록] 화면에 10분 안에 입력하세요.");
             runOnUiThread(() -> {
                 if (err == null) {
-                    pendingCode = c;
+                    pendingCode = otp;
                     codeTime = System.currentTimeMillis();
-                    mailStatus.setText("인증번호를 " + m + " 로 보냈습니다. 메일함을 확인하고 입력하세요.");
+                    mailStatus.setText("인증번호를 " + fullAddr + " 로 보냈습니다. 메일함을 확인하고 입력하세요.");
                 } else {
                     mailStatus.setText("✗ 보내기 실패: " + err);
                     mailStatus.setTextColor(0xFFC62828);
@@ -415,12 +415,12 @@ public class UserActivity extends Activity {
     }
 
     private void verifyCode() {
-        String c = code.getText().toString().trim();
+        String entered = code.getText().toString().trim();
         if (pendingCode == null || System.currentTimeMillis() - codeTime > 10 * 60 * 1000) {
             Toast.makeText(this, "먼저 [인증 메일 보내기]를 누르세요. (인증번호는 10분간 유효)", Toast.LENGTH_LONG).show();
             return;
         }
-        if (!pendingCode.equals(c)) {
+        if (!pendingCode.equals(entered)) {
             Toast.makeText(this, "인증번호가 맞지 않습니다.", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -440,12 +440,12 @@ public class UserActivity extends Activity {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = cm.getPrimaryClip();
             CharSequence txt = clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(this) : null;
-            String t = TelegramSender.extractToken(txt);
-            if (t == null) {
+            String tok = TelegramSender.extractToken(txt);
+            if (tok == null) {
                 Toast.makeText(this, "복사된 내용에서 봇 토큰을 찾지 못했습니다.", Toast.LENGTH_SHORT).show();
                 return;
             }
-            token.setText(t);
+            token.setText(tok);
             checkToken();
         } catch (Exception e) {
             Toast.makeText(this, "붙여넣기 실패", Toast.LENGTH_SHORT).show();
@@ -473,9 +473,9 @@ public class UserActivity extends Activity {
 
     private void showTgStatus(String head) {
         String chats = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).getString("chats", "").trim();
-        int n = chats.isEmpty() ? 0 : chats.split("[,\\s]+").length;
-        tgStatus.setText((head == null ? "" : head + "\n") + "받는 사람 " + n + "명 등록"
-                + (n == 0 ? " — [설정 도우미]로 초대하세요." : ""));
+        int count = chats.isEmpty() ? 0 : chats.split("[,\\s]+").length;
+        tgStatus.setText((head == null ? "" : head + "\n") + "받는 사람 " + count + "명 등록"
+                + (count == 0 ? " — [설정 도우미]로 초대하세요." : ""));
         tgStatus.setTextColor(head != null && head.startsWith("✗") ? 0xFFC62828 : Color.DKGRAY);
     }
 
@@ -488,11 +488,11 @@ public class UserActivity extends Activity {
                 if (!ni.isUp()) {
                     continue;
                 }
-                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
-                    if (a instanceof Inet4Address) {
-                        byte[] b = a.getAddress();
-                        if ((b[0] & 0xff) == 100 && (b[1] & 0xC0) == 64) {
-                            return a.getHostAddress();
+                for (InetAddress addr : Collections.list(ni.getInetAddresses())) {
+                    if (addr instanceof Inet4Address) {
+                        byte[] bytes = addr.getAddress();
+                        if ((bytes[0] & 0xff) == 100 && (bytes[1] & 0xC0) == 64) {
+                            return addr.getHostAddress();
                         }
                     }
                 }
@@ -511,9 +511,9 @@ public class UserActivity extends Activity {
     }
 
     private void openTailscale() {
-        Intent i = getPackageManager().getLaunchIntentForPackage(TS_PKG);
+        Intent intent = getPackageManager().getLaunchIntentForPackage(TS_PKG);
         try {
-            startActivity(i != null ? i
+            startActivity(intent != null ? intent
                     : new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + TS_PKG)));
         } catch (Exception e) {
             Toast.makeText(this, "열 수 없습니다.", Toast.LENGTH_SHORT).show();
@@ -538,14 +538,14 @@ public class UserActivity extends Activity {
         pcStatus.setTextColor(Color.DKGRAY);
         new Thread(() -> {
             long t0 = System.currentTimeMillis();
-            String r;
-            try (Socket s = new Socket()) {
-                s.connect(new InetSocketAddress(ip, pt), 4000);
-                r = "✓ 연결됨 (" + (System.currentTimeMillis() - t0) + " ms)";
+            String result;
+            try (Socket sock = new Socket()) {
+                sock.connect(new InetSocketAddress(ip, pt), 4000);
+                result = "✓ 연결됨 (" + (System.currentTimeMillis() - t0) + " ms)";
             } catch (Exception e) {
-                r = "✗ 연결 실패 — PC 서버가 켜져 있는지, Tailscale 이 양쪽에서 켜져 있는지 확인하세요.";
+                result = "✗ 연결 실패 — PC 서버가 켜져 있는지, Tailscale 이 양쪽에서 켜져 있는지 확인하세요.";
             }
-            final String res = r;
+            final String res = result;
             runOnUiThread(() -> {
                 pcStatus.setText(res);
                 pcStatus.setTextColor(res.startsWith("✓") ? 0xFF2E7D32 : 0xFFC62828);
@@ -553,35 +553,35 @@ public class UserActivity extends Activity {
         }).start();
     }
 
-    private static String randomKey(int n) {
+    private static String randomKey(int len) {
         String abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-        SecureRandom r = new SecureRandom();
+        SecureRandom rnd = new SecureRandom();
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < n; i++) {
-            sb.append(abc.charAt(r.nextInt(abc.length())));
+        for (int i = 0; i < len; i++) {
+            sb.append(abc.charAt(rnd.nextInt(abc.length())));
         }
         return sb.toString();
     }
 
-    private void copy(String s) {
-        ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("key", s));
+    private void copy(String text) {
+        ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("key", text));
         Toast.makeText(this, "복사했습니다.", Toast.LENGTH_SHORT).show();
     }
 
     // ---------- 긴급 의료 정보 (SOS 메시지에 첨부) ----------
 
-    static String medicalText(Context c) {
-        SharedPreferences u = c.getSharedPreferences(PREF_USER, MODE_PRIVATE);
-        if (!u.getBoolean("medSos", true)) {
+    static String medicalText(Context ctx) {
+        SharedPreferences user = ctx.getSharedPreferences(PREF_USER, MODE_PRIVATE);
+        if (!user.getBoolean("medSos", true)) {
             return "";
         }
         StringBuilder sb = new StringBuilder();
         String[][] items = {{"혈액형", "blood"}, {"지병", "disease"}, {"복용 약", "meds"}, {"메모", "memo"},
                 {"본인 연락처", "phone"}};
         for (String[] it : items) {
-            String v = u.getString(it[1], "").trim();
-            if (!v.isEmpty()) {
-                sb.append("\n■ ").append(it[0]).append(": ").append(v);
+            String value = user.getString(it[1], "").trim();
+            if (!value.isEmpty()) {
+                sb.append("\n■ ").append(it[0]).append(": ").append(value);
             }
         }
         return sb.length() == 0 ? "" : "\n\n🩺 긴급 의료 정보" + sb;
@@ -592,18 +592,18 @@ public class UserActivity extends Activity {
     private void exportSettings() {
         save();
         String day = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date());
-        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("application/json")
                 .putExtra(Intent.EXTRA_TITLE, "집에왔어요_설정_" + day + ".json");
-        startActivityForResult(i, REQ_EXPORT);
+        startActivityForResult(intent, REQ_EXPORT);
     }
 
     private void importSettings() {
-        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*");
-        startActivityForResult(i, REQ_IMPORT);
+        startActivityForResult(intent, REQ_IMPORT);
     }
 
     @Override
@@ -638,7 +638,7 @@ public class UserActivity extends Activity {
                         .setTitle("설정 불러오기")
                         .setMessage("지금 설정을 모두 지우고 백업 파일(" + when + ")의 설정으로 바꿉니다.\n"
                                 + "되돌릴 수 없습니다. 계속할까요?")
-                        .setPositiveButton("불러오기", (d, w) -> applyImport())
+                        .setPositiveButton("불러오기", (dialog, which) -> applyImport())
                         .setNegativeButton("취소", null)
                         .show(), "1076");
             } catch (Exception e) {
@@ -654,33 +654,33 @@ public class UserActivity extends Activity {
         root.put("format", 1);
         root.put("time", new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.KOREA).format(new Date()));
         JSONObject prefs = new JSONObject();
-        for (String p : ALL_PREFS) {
-            JSONObject o = new JSONObject();
-            for (Map.Entry<String, ?> e : getSharedPreferences(p, MODE_PRIVATE).getAll().entrySet()) {
-                Object v = e.getValue();
-                JSONObject t = new JSONObject();
-                if (v instanceof String) {
-                    t.put("t", "s").put("v", v);
-                } else if (v instanceof Boolean) {
-                    t.put("t", "b").put("v", v);
-                } else if (v instanceof Integer) {
-                    t.put("t", "i").put("v", v);
-                } else if (v instanceof Long) {
-                    t.put("t", "l").put("v", v);
-                } else if (v instanceof Float) {
-                    t.put("t", "f").put("v", (double) (Float) v);
-                } else if (v instanceof Set) {
-                    JSONArray a = new JSONArray();
-                    for (Object x : (Set<?>) v) {
-                        a.put(String.valueOf(x));
+        for (String prefName : ALL_PREFS) {
+            JSONObject obj = new JSONObject();
+            for (Map.Entry<String, ?> entry : getSharedPreferences(prefName, MODE_PRIVATE).getAll().entrySet()) {
+                Object value = entry.getValue();
+                JSONObject item = new JSONObject();
+                if (value instanceof String) {
+                    item.put("t", "s").put("v", value);
+                } else if (value instanceof Boolean) {
+                    item.put("t", "b").put("v", value);
+                } else if (value instanceof Integer) {
+                    item.put("t", "i").put("v", value);
+                } else if (value instanceof Long) {
+                    item.put("t", "l").put("v", value);
+                } else if (value instanceof Float) {
+                    item.put("t", "f").put("v", (double) (Float) value);
+                } else if (value instanceof Set) {
+                    JSONArray arr = new JSONArray();
+                    for (Object elem : (Set<?>) value) {
+                        arr.put(String.valueOf(elem));
                     }
-                    t.put("t", "set").put("v", a);
+                    item.put("t", "set").put("v", arr);
                 } else {
                     continue;
                 }
-                o.put(e.getKey(), t);
+                obj.put(entry.getKey(), item);
             }
-            prefs.put(p, o);
+            prefs.put(prefName, obj);
         }
         root.put("prefs", prefs);
         return root;
@@ -690,37 +690,37 @@ public class UserActivity extends Activity {
         try {
             JSONObject prefs = new JSONObject(pendingImport).getJSONObject("prefs");
             HomeService.stopAll(this); // 예약·서비스 정리 후 새 설정으로 다시 시작
-            for (String p : ALL_PREFS) {
-                SharedPreferences.Editor ed = getSharedPreferences(p, MODE_PRIVATE).edit().clear();
-                JSONObject o = prefs.optJSONObject(p);
-                if (o != null) {
-                    Iterator<String> keys = o.keys();
+            for (String prefName : ALL_PREFS) {
+                SharedPreferences.Editor ed = getSharedPreferences(prefName, MODE_PRIVATE).edit().clear();
+                JSONObject obj = prefs.optJSONObject(prefName);
+                if (obj != null) {
+                    Iterator<String> keys = obj.keys();
                     while (keys.hasNext()) {
-                        String k = keys.next();
-                        JSONObject t = o.getJSONObject(k);
-                        switch (t.getString("t")) {
+                        String key = keys.next();
+                        JSONObject item = obj.getJSONObject(key);
+                        switch (item.getString("t")) {
                             case "s":
-                                ed.putString(k, t.getString("v"));
+                                ed.putString(key, item.getString("v"));
                                 break;
                             case "b":
-                                ed.putBoolean(k, t.getBoolean("v"));
+                                ed.putBoolean(key, item.getBoolean("v"));
                                 break;
                             case "i":
-                                ed.putInt(k, t.getInt("v"));
+                                ed.putInt(key, item.getInt("v"));
                                 break;
                             case "l":
-                                ed.putLong(k, t.getLong("v"));
+                                ed.putLong(key, item.getLong("v"));
                                 break;
                             case "f":
-                                ed.putFloat(k, (float) t.getDouble("v"));
+                                ed.putFloat(key, (float) item.getDouble("v"));
                                 break;
                             case "set":
                                 Set<String> set = new HashSet<>();
-                                JSONArray a = t.getJSONArray("v");
-                                for (int i = 0; i < a.length(); i++) {
-                                    set.add(a.getString(i));
+                                JSONArray arr = item.getJSONArray("v");
+                                for (int i = 0; i < arr.length(); i++) {
+                                    set.add(arr.getString(i));
                                 }
-                                ed.putStringSet(k, set);
+                                ed.putStringSet(key, set);
                                 break;
                             default:
                                 break;
@@ -730,9 +730,9 @@ public class UserActivity extends Activity {
                 ed.commit();
             }
             // 다음 송신 시각은 새로 계산되도록 비움
-            for (String p : new String[]{TelegramSender.PREF, HomeService.PREF_KAKAO, HomeService.PREF_EMAIL,
+            for (String prefName : new String[]{TelegramSender.PREF, HomeService.PREF_KAKAO, HomeService.PREF_EMAIL,
                     HomeService.PREF_KMAIL, HomeService.PREF_SMS, HomeService.PREF_SMSAUTO, HomeService.PREF_SELF}) {
-                getSharedPreferences(p, MODE_PRIVATE).edit().putLong("next", 0).commit();
+                getSharedPreferences(prefName, MODE_PRIVATE).edit().putLong("next", 0).commit();
             }
             pendingImport = null;
             Toast.makeText(this, "설정을 불러왔습니다. 앱을 다시 시작합니다.", Toast.LENGTH_LONG).show();
@@ -750,76 +750,76 @@ public class UserActivity extends Activity {
 
     // ---------- 화면 도우미 ----------
 
-    private void section(LinearLayout root, String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(17);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setTextColor(0xFF1976D2);
-        t.setPadding(0, 44, 0, 6);
-        root.addView(t);
+    private void section(LinearLayout root, String title) {
+        TextView tv = new TextView(this);
+        tv.setText(title);
+        tv.setTextSize(17);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(0xFF1976D2);
+        tv.setPadding(0, 44, 0, 6);
+        root.addView(tv);
     }
 
-    private TextView note(String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(13);
-        t.setTextColor(Color.DKGRAY);
-        t.setPadding(0, 4, 0, 4);
-        t.setAutoLinkMask(android.text.util.Linkify.WEB_URLS);
-        t.setText(s);
-        return t;
+    private TextView note(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(13);
+        tv.setTextColor(Color.DKGRAY);
+        tv.setPadding(0, 4, 0, 4);
+        tv.setAutoLinkMask(android.text.util.Linkify.WEB_URLS);
+        tv.setText(text);
+        return tv;
     }
 
     private EditText edit(LinearLayout root, String hint, String value, int type) {
-        TextView l = new TextView(this);
-        l.setText(hint);
-        l.setTextSize(12);
-        l.setTextColor(Color.GRAY);
-        l.setPadding(0, 10, 0, 0);
-        root.addView(l);
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setInputType(type);
-        e.setText(value);
-        root.addView(e);
-        return e;
+        TextView caption = new TextView(this);
+        caption.setText(hint);
+        caption.setTextSize(12);
+        caption.setTextColor(Color.GRAY);
+        caption.setPadding(0, 10, 0, 0);
+        root.addView(caption);
+        EditText edit = new EditText(this);
+        edit.setSingleLine(true);
+        edit.setInputType(type);
+        edit.setText(value);
+        root.addView(edit);
+        return edit;
     }
 
     // 영역 사이 굵은 구분선 (위아래 넉넉한 공간)
     private void divider(LinearLayout root) {
         float dn = getResources().getDisplayMetrics().density;
-        View v = new View(this);
-        v.setBackgroundColor(0xFF424242);
+        View view = new View(this);
+        view.setBackgroundColor(0xFF424242);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * dn));
         lp.topMargin = (int) (36 * dn);
         lp.bottomMargin = (int) (8 * dn);
-        root.addView(v, lp);
+        root.addView(view, lp);
     }
 
     // 세로 빈 공간 (dp)
     private void gap(LinearLayout root, int dp) {
-        View v = new View(this);
-        root.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+        View view = new View(this);
+        root.addView(view, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 (int) (dp * getResources().getDisplayMetrics().density)));
     }
 
     private LinearLayout row(LinearLayout root) {
-        LinearLayout r = new LinearLayout(this);
-        r.setOrientation(LinearLayout.HORIZONTAL);
-        r.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        root.addView(r);
-        return r;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        root.addView(box);
+        return box;
     }
 
-    private Button button(LinearLayout row, String label, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(12);
-        b.setAllCaps(false);
-        b.setOnClickListener(l);
-        row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        return b;
+    private Button button(LinearLayout row, String label, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(label);
+        btn.setTextSize(12);
+        btn.setAllCaps(false);
+        btn.setOnClickListener(listener);
+        row.addView(btn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return btn;
     }
 }

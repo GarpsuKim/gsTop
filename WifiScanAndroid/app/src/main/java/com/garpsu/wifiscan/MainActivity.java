@@ -84,14 +84,14 @@ public class MainActivity extends Activity {
     private EditText contactTarget;             // 고른 번호를 넣을 칸
     private boolean contactWithName;            // true: "이름 번호"로 넣기 (보호자), false: 번호만 (문자)
     private EditText contactNameTarget;         // (6) 피보호자 카드: 번호 칸을 바꾸고, 이름 칸이 비었으면 이름도 채움
-    private LinearLayout msgBox; // (4) 위치 보내기 탭: 정해진 시각 위치 보내기 버튼 묶음
+    private LinearLayout msgBox; // (3) 위치 보내기 탭: 정해진 시각 위치 보내기 버튼 묶음
     private static final int MODE_NONE = 0, MODE_WIFI = 1, MODE_LOC = 3, MODE_LAN = 4;
 
     private WifiManager wm;
     private LocationManager lm;
     private TextView text, status, statusNote; // text: 가장 최근에 검색을 시작한 탭의 결과 화면
     private LinearLayout wifiRows; // 공유기 체크박스 목록 (탭1)
-    private static final int TABS = 6; // (1) 홈 공유기 등록 (2) 현재 위치 (3) 알림 설정 (4) 위치 보내기 (5) 응답 모드 (6) 보호자 전용 모드  ※ 기기 목록 탭은 삭제(Play 스토어 정책)
+    private static final int TABS = 6; // 화면 탭: (1) 공유기 (2) 알림 설정 (3) 위치 보내기 (4) 응답 모드 (5) 보호자 전용 모드. 내부 자리 1번(옛 현재 위치)은 숨김 -> 1020 팝업
     private final TextView[] texts = new TextView[TABS];
     private final Button[] startBtns = new Button[TABS]; // (4) 탭에는 [검색시작]이 없음 (null)
     private final Button[] tabBtns = new Button[TABS];
@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
-        public void onReceive(Context c, Intent i) {
+        public void onReceive(Context ctx, Intent intent) {
             if (mode == MODE_WIFI) {
                 showWifiResults();
             }
@@ -165,9 +165,9 @@ public class MainActivity extends Activity {
             }
             fusedCb = new com.google.android.gms.location.LocationCallback() {
                 @Override
-                public void onLocationResult(com.google.android.gms.location.LocationResult r) {
-                    for (Location l : r.getLocations()) {
-                        locListener.onLocationChanged(l);
+                public void onLocationResult(com.google.android.gms.location.LocationResult result) {
+                    for (Location loc : result.getLocations()) {
+                        locListener.onLocationChanged(loc);
                     }
                 }
             };
@@ -206,21 +206,21 @@ public class MainActivity extends Activity {
         Button reset = new Button(this);
         reset.setText("초기화");
         reset.setTextColor(0xFFC62828);
-        reset.setOnClickListener(v -> confirmReset());
+        reset.setOnClickListener(view -> confirmReset());
 
         bgCheck = new CheckBox(this); // 백그라운드 귀가 감지 켜기/끄기 (앱을 닫아도 상단 알림으로 표시)
         bgCheck.setText("백그라운드 실행");
         bgCheck.setTextSize(15);
         bgCheck.setTypeface(null, Typeface.BOLD);
         bgCheck.setChecked(HomeService.homeOn(this));
-        bgCheck.setOnClickListener(v -> setBackground(bgCheck.isChecked()));
+        bgCheck.setOnClickListener(view -> setBackground(bgCheck.isChecked()));
         LinearLayout center = new LinearLayout(this);
         center.setGravity(Gravity.CENTER);
         center.addView(bgCheck);
 
         Button exit = new Button(this);
         exit.setText("종료");
-        exit.setOnClickListener(v -> finish());
+        exit.setOnClickListener(view -> finish());
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -245,15 +245,15 @@ public class MainActivity extends Activity {
         statusNote.setPadding(0, 0, 0, 20);
 
         // 탭 4개: 홈 공유기 등록 / 기기 목록 / 현재 위치 / 알림 설정
-        final String[] names = {"(1) 홈 공유기 등록", "(2) 현재 위치", "(3) 알림 설정", "(4) 위치 보내기", "(5) 응답 모드",
-                "(6) 보호자 전용 모드"};
+        final String[] names = {"(1) 공유기", "현재 위치(숨김)", "(2) 알림 설정", "(3) 위치 보내기", "(4) 응답 모드",
+                "(5) 보호자 전용 모드"};
         final Runnable[] starts = {this::wifiScan, this::location, null, null, null, null};
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         for (int i = 0; i < TABS; i++) {
             final int idx = i;
-            tabBtns[i] = addButton(tabs, names[i], v -> selectTab(idx));
+            tabBtns[i] = addButton(tabs, names[i], view -> selectTab(idx));
             tabBtns[i].setTextSize(10); // 탭 6개라 글자를 작게
         }
         // (2) 현재 위치(1020)는 탭 메뉴에서 떼어 앱 시작 팝업으로 독립. 다른 탭 번호가 밀리지 않게 자리만 남기고 숨김
@@ -285,7 +285,7 @@ public class MainActivity extends Activity {
         locBtn.setAllCaps(false);
         locBtn.setGravity(Gravity.CENTER);
         locBtn.setPadding(10, 10, 10, 10);
-        locBtn.setOnClickListener(v -> showLocPopup());
+        locBtn.setOnClickListener(view -> showLocPopup());
         LinearLayout.LayoutParams locLp = new LinearLayout.LayoutParams(sosSize, sosSize);
         locLp.setMargins(16, 8, 0, 8);
         statusRow.addView(locBtn, locLp);
@@ -298,16 +298,16 @@ public class MainActivity extends Activity {
         root.addView(tabs, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 탭마다: [검색시작/재검색] 버튼(탭1만 [저장] 추가) + 결과 화면. (3) 알림 설정 탭은 설정 화면만
+        // 탭마다: [검색시작/재검색] 버튼(탭1만 [저장] 추가) + 결과 화면. (2) 알림 설정 탭은 설정 화면만
         for (int i = 0; i < TABS; i++) {
             final int idx = i;
             LinearLayout actions = new LinearLayout(this);
             actions.setOrientation(LinearLayout.HORIZONTAL);
             // 1010 의 [재검색] 은 영역 3 맨 위로 옮김, (2) 현재 위치(1020)는 탭에서 떼어 팝업으로 (showLocPopup)
             if (i == 0) {
-                addButton(actions, "등록 확인", v -> showRegistered());
-                addButton(actions, "나의 보호자", v -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
-                addButton(actions, "사용자 등록", v -> startActivity(new Intent(this, UserActivity.class))); // 화면 1075
+                addButton(actions, "등록 확인", view -> showRegistered());
+                addButton(actions, "나의 보호자", view -> showSosSettings()); // 보호자 전화번호 (SOS·바로 걸기)
+                addButton(actions, "사용자 등록", view -> startActivity(new Intent(this, UserActivity.class))); // 화면 1075
             }
 
             texts[i] = new TextView(this);
@@ -318,13 +318,13 @@ public class MainActivity extends Activity {
             LinearLayout body = new LinearLayout(this);
             body.setOrientation(LinearLayout.VERTICAL);
             if (i == 2) {
-                buildAlarmTab(body); // (3) 알림 설정: 귀가·외출 순간 알림
+                buildAlarmTab(body); // (2) 알림 설정: 귀가·외출 순간 알림
             } else if (i == 3) {
-                buildSendTab(body);  // (4) 위치 보내기: 정해진 시각 위치 보내기
+                buildSendTab(body);  // (3) 위치 보내기: 정해진 시각 위치 보내기
             } else if (i == 4) {
-                buildGuardianTab(body); // (5) 응답 모드: 원격 위치 요청에 회신
+                buildGuardianTab(body); // (4) 응답 모드: 원격 위치 요청에 회신
             } else if (i == 5) {
-                buildWardTab(body);     // (6) 보호자 전용 모드: 피보호자 관리 (화면 1058)
+                buildWardTab(body);     // (5) 보호자 전용 모드: 피보호자 관리 (화면 1058)
             }
             if (i == 0) {
                 // (백그라운드 귀가 감지 체크는 화면 맨 위 가운데 [백그라운드 실행]으로 옮김)
@@ -341,7 +341,7 @@ public class MainActivity extends Activity {
                 // 영역 3 맨 위: [재검색] (공유기 검색, 예전 상단 [검색시작])
                 LinearLayout scanRow = new LinearLayout(this);
                 scanRow.setPadding(30, 0, 30, 0);
-                startBtns[0] = addButton(scanRow, "재검색", v -> wifiScan());
+                startBtns[0] = addButton(scanRow, "재검색", view -> wifiScan());
                 body.addView(scanRow);
             }
             if (i < 2) { // (3)·(4) 탭은 결과 글자 화면 없음
@@ -351,7 +351,7 @@ public class MainActivity extends Activity {
                 wifiRows = new LinearLayout(this);
                 wifiRows.setOrientation(LinearLayout.VERTICAL);
                 body.addView(wifiRows);
-                body.addView(registerRow(v -> saveRouters())); // 영역 3(검색 결과) 오른쪽 아래 [등록]
+                body.addView(registerRow(view -> saveRouters())); // 영역 3(검색 결과) 오른쪽 아래 [등록]
             }
             ScrollView scroll = new ScrollView(this);
             scroll.addView(body);
@@ -421,9 +421,9 @@ public class MainActivity extends Activity {
     }
 
     // 시각 선택 같은 팝업: 띄우고 나서 화면 번호 붙이기 (Dialog.show() 는 값을 돌려주지 않아서 따로 둠)
-    private static void showTagged(android.app.Dialog d, String id) {
-        d.show();
-        ScreenId.tag(d, id);
+    private static void showTagged(android.app.Dialog dialog, String id) {
+        dialog.show();
+        ScreenId.tag(dialog, id);
     }
 
     // ---------- [초기화]: 모든 설정 삭제 -> 처음 상태 ----------
@@ -441,15 +441,15 @@ public class MainActivity extends Activity {
                         + " · 위치 보내기 설정 (받는 사람, 텔레그램 봇 토큰, 이메일 앱 비밀번호 등)\n"
                         + " · 보내는 사람 별명, 기기 목록 기록\n\n"
                         + "되돌릴 수 없습니다. 계속할까요?")
-                .setPositiveButton("초기화", (d, w) -> resetAll())
+                .setPositiveButton("초기화", (dialog, which) -> resetAll())
                 .setNegativeButton("취소", null)
                 .show(), "1110");
     }
 
     private void resetAll() {
         HomeService.stopAll(this); // 백그라운드 서비스·예약 알람·알림 모두 정리
-        for (String p : ALL_PREFS) {
-            getSharedPreferences(p, MODE_PRIVATE).edit().clear().commit(); // 화면 다시 그리기 전에 확실히 저장
+        for (String prefName : ALL_PREFS) {
+            getSharedPreferences(prefName, MODE_PRIVATE).edit().clear().commit(); // 화면 다시 그리기 전에 확실히 저장
         }
         // 기본값: 귀가·외출 알림의 보낼 곳은 '본인 폰'만 체크 (나머지 값은 각 화면의 기본값 사용)
         getSharedPreferences(HomeService.PREF_EVENT, MODE_PRIVATE).edit().putBoolean("ch_self", true).commit();
@@ -491,7 +491,7 @@ public class MainActivity extends Activity {
                         + "\"홈\" 또는 \"외출\" 상태를 확인합니다.\n\n"
                         + "어린이, 노약자, 치매어르신 들의 안심 귀가 확인에 유용합니다.")
                 .setPositiveButton("확인", null)
-                .setOnDismissListener(d -> ensurePermission())
+                .setOnDismissListener(dialog -> ensurePermission())
                 .show(), "1080");
     }
 
@@ -504,16 +504,16 @@ public class MainActivity extends Activity {
         }
     }
 
-    private Button addButton(LinearLayout row, String label, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(13);
-        b.setMinWidth(0);
-        b.setMinimumWidth(0);
-        b.setPadding(4, 0, 4, 0);
-        b.setOnClickListener(l);
-        row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        return b;
+    private Button addButton(LinearLayout row, String label, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(label);
+        btn.setTextSize(13);
+        btn.setMinWidth(0);
+        btn.setMinimumWidth(0);
+        btn.setPadding(4, 0, 4, 0);
+        btn.setOnClickListener(listener);
+        row.addView(btn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return btn;
     }
 
     @Override
@@ -646,7 +646,7 @@ public class MainActivity extends Activity {
             return;
         }
         List<ScanResult> list = new ArrayList<>(wm.getScanResults());
-        Collections.sort(list, (a, b) -> b.level - a.level);
+        Collections.sort(list, (left, right) -> right.level - left.level);
 
         // 재스캔 결과가 도착해도 사용자가 바꾼 체크 상태를 유지
         Map<String, Boolean> cur = new HashMap<>();
@@ -660,19 +660,19 @@ public class MainActivity extends Activity {
         Map<String, List<ScanResult>> groups = new LinkedHashMap<>();
         seenLevel.clear();
         String connSsid = null;
-        for (ScanResult r : list) {
-            String ssid = ssidOf(r);
-            String bssid = r.BSSID.toLowerCase(Locale.US);
-            seenLevel.put(bssid, r.level);
+        for (ScanResult scan : list) {
+            String ssid = ssidOf(scan);
+            String bssid = scan.BSSID.toLowerCase(Locale.US);
+            seenLevel.put(bssid, scan.level);
             if (bssid.equals(conn)) {
                 connSsid = ssid;
             }
-            List<ScanResult> g = groups.get(ssid);
-            if (g == null) {
-                g = new ArrayList<>();
-                groups.put(ssid, g);
+            List<ScanResult> group = groups.get(ssid);
+            if (group == null) {
+                group = new ArrayList<>();
+                groups.put(ssid, group);
             }
-            g.add(r);
+            group.add(scan);
         }
         wifiScanned = true;
         List<String> order = new ArrayList<>(groups.keySet());
@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
                 : "\n체크한 공유기를 [저장]으로 등록하세요.\n(이름을 체크하면 같은 이름의 공유기가 모두 체크됩니다)"));
 
         for (String ssid : order) {
-            List<ScanResult> g = groups.get(ssid);
+            List<ScanResult> group = groups.get(ssid);
             boolean connGroup = ssid.equals(connSsid);
 
             LinearLayout box = new LinearLayout(this);
@@ -701,39 +701,39 @@ public class MainActivity extends Activity {
 
             // 그룹 머리: ■ 이름 (n개) 📶 연결됨
             final CheckBox head = new CheckBox(this);
-            SpannableStringBuilder h = new SpannableStringBuilder();
-            append(h, "■ ", C_MARK, true);
-            append(h, ssid, 0, true);
-            if (g.size() > 1) {
-                append(h, "  (" + g.size() + "개)", C_GRAY, false);
+            SpannableStringBuilder headText = new SpannableStringBuilder();
+            append(headText, "■ ", C_MARK, true);
+            append(headText, ssid, 0, true);
+            if (group.size() > 1) {
+                append(headText, "  (" + group.size() + "개)", C_GRAY, false);
             }
             if (connGroup) {
-                append(h, "  📶 연결됨", C_GOOD, true);
+                append(headText, "  📶 연결됨", C_GOOD, true);
             }
-            head.setText(h);
+            head.setText(headText);
             head.setTextSize(17);
             box.addView(head);
 
             final List<CheckBox> kids = new ArrayList<>();
-            for (ScanResult r : g) {
-                String bssid = r.BSSID.toLowerCase(Locale.US);
+            for (ScanResult scan : group) {
+                String bssid = scan.BSSID.toLowerCase(Locale.US);
                 boolean isConn = bssid.equals(conn);
                 CheckBox cb = new CheckBox(this);
                 cb.setTag(new String[]{bssid, ssid});
                 cb.setChecked(cur.containsKey(bssid) ? cur.get(bssid) : saved.containsKey(bssid));
 
-                SpannableStringBuilder s = new SpannableStringBuilder();
-                append(s, bssid, 0, false);
+                SpannableStringBuilder sb = new SpannableStringBuilder();
+                append(sb, bssid, 0, false);
                 if (isConn) {
-                    append(s, "  📶 연결됨", C_GOOD, true);
+                    append(sb, "  📶 연결됨", C_GOOD, true);
                 }
-                s.append('\n');
-                appendBars(s, r.level);
-                s.append(" ").append(String.valueOf(r.level)).append(" dBm  ")
-                        .append(band(r.frequency)).append("  ").append(security(r.capabilities));
-                cb.setText(s);
+                sb.append('\n');
+                appendBars(sb, scan.level);
+                sb.append(" ").append(String.valueOf(scan.level)).append(" dBm  ")
+                        .append(band(scan.frequency)).append("  ").append(security(scan.capabilities));
+                cb.setText(sb);
                 cb.setTextSize(14);
-                cb.setOnCheckedChangeListener((b, c) -> head.setChecked(allChecked(kids)));
+                cb.setOnCheckedChangeListener((button, isChecked) -> head.setChecked(allChecked(kids)));
 
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -743,10 +743,10 @@ public class MainActivity extends Activity {
                 apChecks.add(cb);
             }
             head.setChecked(allChecked(kids));
-            head.setOnClickListener(v -> {
-                boolean c = head.isChecked();
-                for (CheckBox k : kids) {
-                    k.setChecked(c);
+            head.setOnClickListener(view -> {
+                boolean all = head.isChecked();
+                for (CheckBox kid : kids) {
+                    kid.setChecked(all);
                 }
             });
             wifiRows.addView(box);
@@ -754,22 +754,22 @@ public class MainActivity extends Activity {
         renderSaved();
     }
 
-    private static String ssidOf(ScanResult r) {
-        return (r.SSID == null || r.SSID.isEmpty()) ? "<숨김>" : r.SSID;
+    private static String ssidOf(ScanResult scan) {
+        return (scan.SSID == null || scan.SSID.isEmpty()) ? "<숨김>" : scan.SSID;
     }
 
     private static boolean allChecked(List<CheckBox> list) {
-        for (CheckBox c : list) {
-            if (!c.isChecked()) {
+        for (CheckBox check : list) {
+            if (!check.isChecked()) {
                 return false;
             }
         }
         return !list.isEmpty();
     }
 
-    private static void append(SpannableStringBuilder sb, String s, int color, boolean bold) {
+    private static void append(SpannableStringBuilder sb, String piece, int color, boolean bold) {
         int st = sb.length();
-        sb.append(s);
+        sb.append(piece);
         if (color != 0) {
             sb.setSpan(new ForegroundColorSpan(color), st, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
@@ -780,12 +780,12 @@ public class MainActivity extends Activity {
 
     // 신호 세기 막대 ▂▄▆█ (강: 초록, 중: 주황, 약: 빨강) + 강/중/약 글자
     private static void appendBars(SpannableStringBuilder sb, int level) {
-        int n = level >= -55 ? 4 : level >= -67 ? 3 : level >= -78 ? 2 : 1;
-        int color = n >= 3 ? C_GOOD : n == 2 ? C_MID : C_BAD;
+        int barCount = level >= -55 ? 4 : level >= -67 ? 3 : level >= -78 ? 2 : 1;
+        int color = barCount >= 3 ? C_GOOD : barCount == 2 ? C_MID : C_BAD;
         String bars = "▂▄▆█";
-        append(sb, bars.substring(0, n), color, true);
-        append(sb, bars.substring(n), 0xFFDDDDDD, true);
-        append(sb, n >= 3 ? " 강" : n == 2 ? " 중" : " 약", color, true);
+        append(sb, bars.substring(0, barCount), color, true);
+        append(sb, bars.substring(barCount), 0xFFDDDDDD, true);
+        append(sb, barCount >= 3 ? " 강" : barCount == 2 ? " 중" : " 약", color, true);
     }
 
     // 지금 연결된 공유기의 BSSID (없거나 알 수 없으면 null)
@@ -793,11 +793,11 @@ public class MainActivity extends Activity {
         if (!hasPermission() || !wm.isWifiEnabled()) {
             return null;
         }
-        String b = wm.getConnectionInfo().getBSSID();
-        if (b == null || b.equals("02:00:00:00:00:00")) {
+        String bssid = wm.getConnectionInfo().getBSSID();
+        if (bssid == null || bssid.equals("02:00:00:00:00:00")) {
             return null; // 위치 서비스가 꺼져 있으면 가짜 값이 옴
         }
-        return b.toLowerCase(Locale.US);
+        return bssid.toLowerCase(Locale.US);
     }
 
     // 지금 연결된 공유기 이름(SSID). 모르면 null
@@ -805,14 +805,14 @@ public class MainActivity extends Activity {
         if (!hasPermission() || !wm.isWifiEnabled()) {
             return null;
         }
-        String s = wm.getConnectionInfo().getSSID();
-        if (s == null || s.equals("<unknown ssid>") || s.isEmpty()) {
+        String ssid = wm.getConnectionInfo().getSSID();
+        if (ssid == null || ssid.equals("<unknown ssid>") || ssid.isEmpty()) {
             return null;
         }
-        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
-            s = s.substring(1, s.length() - 1);
+        if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) {
+            ssid = ssid.substring(1, ssid.length() - 1);
         }
-        return s.isEmpty() ? null : s;
+        return ssid.isEmpty() ? null : ssid;
     }
 
     // 화면 1020 첫 줄: "공유기: 이름, MAC, 등록 별명" (별명이 없으면 '.....', 별명은 1010 에서 입력)
@@ -835,56 +835,56 @@ public class MainActivity extends Activity {
         savedChecks.clear();
         Map<String, String> saved = loadRouters();
 
-        TextView h = new TextView(this);
-        h.setText("저장된 공유기 (" + saved.size() + "개)");
-        h.setTextSize(16);
-        h.setTypeface(null, Typeface.BOLD);
-        h.setPadding(40, 30, 40, 10);
-        savedBox.addView(h);
+        TextView header = new TextView(this);
+        header.setText("저장된 공유기 (" + saved.size() + "개)");
+        header.setTextSize(16);
+        header.setTypeface(null, Typeface.BOLD);
+        header.setPadding(40, 30, 40, 10);
+        savedBox.addView(header);
 
         // 영역 1 안내문
         TextView guide = new TextView(this);
-        guide.setText("사용자 폰이 이 목록에서 체크된 공유기들 중 하나에 연결되면, [홈]으로 판단합니다");
+        guide.setText("사용자 폰이 이 목록에서 ◉ 홈 으로 체크된 공유기에 연결되면 [홈]으로 판단합니다. ◉ 기타 공유기(학교·회사 등)는 별명만 표시하고 귀가로 보지 않습니다");
         guide.setTextSize(13);
         guide.setTextColor(Color.DKGRAY);
         guide.setPadding(40, 0, 40, 10);
         savedBox.addView(guide);
 
         if (saved.isEmpty()) {
-            TextView e = new TextView(this);
-            e.setText("없음 — 아래 검색 결과에서 체크 후 [저장]을 누르세요.");
-            e.setTextColor(C_GRAY);
-            e.setPadding(40, 0, 40, 10);
-            savedBox.addView(e);
+            TextView empty = new TextView(this);
+            empty.setText("없음 — 아래 검색 결과에서 체크 후 [저장]을 누르세요.");
+            empty.setTextColor(C_GRAY);
+            empty.setPadding(40, 0, 40, 10);
+            savedBox.addView(empty);
         }
 
         List<Map.Entry<String, String>> items = new ArrayList<>(saved.entrySet());
-        Collections.sort(items, (a, b) -> {
-            int c = a.getValue().compareTo(b.getValue());
-            return c != 0 ? c : a.getKey().compareTo(b.getKey());
+        Collections.sort(items, (left, right) -> {
+            int cmp = left.getValue().compareTo(right.getValue());
+            return cmp != 0 ? cmp : left.getKey().compareTo(right.getKey());
         });
         for (Map.Entry<String, String> it : items) {
             final String bssid = it.getKey();
             String ssid = it.getValue().isEmpty() ? "<숨김>" : it.getValue();
 
-            SpannableStringBuilder s = new SpannableStringBuilder();
-            append(s, "■ ", C_MARK, true);
-            append(s, ssid, 0, true);
-            s.append("\n").append(bssid).append("\n");
+            SpannableStringBuilder sb = new SpannableStringBuilder();
+            append(sb, "■ ", C_MARK, true);
+            append(sb, ssid, 0, true);
+            sb.append("\n").append(bssid).append("\n");
             Integer lv = seenLevel.get(bssid);
             if (bssid.equals(conn)) {
-                append(s, "📶 연결됨  ", C_GOOD, true);
+                append(sb, "📶 연결됨  ", C_GOOD, true);
             }
             if (lv != null) {
-                appendBars(s, lv);
-                s.append(" ").append(String.valueOf(lv)).append(" dBm");
+                appendBars(sb, lv);
+                sb.append(" ").append(String.valueOf(lv)).append(" dBm");
             } else if (!bssid.equals(conn)) {
-                append(s, wifiScanned ? "주변에 없음" : "검색 전", C_GRAY, false);
+                append(sb, wifiScanned ? "주변에 없음" : "검색 전", C_GRAY, false);
             }
 
             // 체크 = 계속 등록, 체크 해제 후 이 영역의 [등록] = 등록에서 빼기
-            CheckBox cb = new CheckBox(this);
-            cb.setText(s);
+            final CheckBox cb = new CheckBox(this);
+            cb.setText(sb);
             cb.setTextSize(14);
             cb.setChecked(true);
             cb.setTag(bssid);
@@ -900,57 +900,151 @@ public class MainActivity extends Activity {
             row.addView(cb, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             savedBox.addView(row);
 
+            // 공유기 종류: (●) 홈 / ( ) 기타 - 둘 중 하나는 반드시 체크, 고르면 바로 저장 (기존 공유기는 '기타')
+            final RadioGroup kindGroup = new RadioGroup(this);
+            kindGroup.setOrientation(RadioGroup.HORIZONTAL);
+            kindGroup.setPadding(110, 0, 40, 0);
+            if (bssid.equals(conn)) {
+                kindGroup.setBackgroundColor(0x1A2E7D32);
+            }
+            RadioButton rbHome = new RadioButton(this);
+            rbHome.setText("홈");
+            rbHome.setTextSize(14);
+            rbHome.setId(View.generateViewId());
+            RadioButton rbOther = new RadioButton(this);
+            rbOther.setText("기타");
+            rbOther.setTextSize(14);
+            rbOther.setId(View.generateViewId());
+            kindGroup.addView(rbHome);
+            RadioGroup.LayoutParams gap = new RadioGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            gap.leftMargin = dpx(24);
+            kindGroup.addView(rbOther, gap);
+            kindGroup.check(routerIsHome(this, bssid) ? rbHome.getId() : rbOther.getId());
+            final int homeId = rbHome.getId();
+            kindGroup.setOnCheckedChangeListener((group, id) -> {
+                setRouterHome(MainActivity.this, bssid, id == homeId);
+                HomeService.refresh(MainActivity.this); // 귀가 판정 다시
+                checkHome();
+            });
+            savedBox.addView(kindGroup);
+
             // 공유기 등록 별명 (예: 우리집 거실). 글자를 바꾸면 바로 저장
-            LinearLayout aliasRow = new LinearLayout(this);
-            aliasRow.setOrientation(LinearLayout.HORIZONTAL);
-            aliasRow.setGravity(Gravity.CENTER_VERTICAL);
-            aliasRow.setPadding(110, 0, 40, 10); // 체크박스 글자 시작 위치에 맞춤
+            final LinearLayout aliasRow = aliasRow(routerAlias(this, bssid), value -> setRouterAlias(MainActivity.this, bssid, value), cb);
             if (bssid.equals(conn)) {
                 aliasRow.setBackgroundColor(0x1A2E7D32);
             }
-            TextView al = new TextView(this);
-            al.setText("별명 ");
-            al.setTextSize(14);
-            al.setTypeface(null, Typeface.BOLD);
-            aliasRow.addView(al);
-            EditText alias = new EditText(this);
-            alias.setSingleLine(true);
-            alias.setTextSize(14);
-            alias.setHint("예: 우리집 거실");
-            alias.setText(routerAlias(this, bssid));
-            alias.addTextChangedListener(new android.text.TextWatcher() {
-                @Override
-                public void beforeTextChanged(CharSequence s, int a, int b, int c) {
-                }
-
-                @Override
-                public void onTextChanged(CharSequence s, int a, int b, int c) {
-                }
-
-                @Override
-                public void afterTextChanged(android.text.Editable e) {
-                    setRouterAlias(MainActivity.this, bssid, e.toString());
-                }
-            });
-            aliasRow.addView(alias, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             savedBox.addView(aliasRow);
+            // 체크를 푼(등록에서 뺄) 공유기는 라디오·별명 칸을 숨김. 다시 체크하면 바로 나타남
+            cb.setOnCheckedChangeListener((button, isChecked) -> {
+                kindGroup.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                aliasRow.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                ((Runnable) aliasRow.getTag()).run();
+            });
         }
         if (!items.isEmpty()) {
-            savedBox.addView(registerRow(v -> commitSaved())); // 영역 1 오른쪽 아래 [등록]
+            savedBox.addView(registerRow(view -> commitSaved())); // 영역 1 오른쪽 아래 [등록]
         }
         // (아래 영역과의 구분은 굵은 구분선 thickDivider)
     }
 
     private final List<CheckBox> savedChecks = new ArrayList<>(); // 영역 1: 저장된 공유기 체크박스
 
+    interface TextSaver {
+        void save(String value);
+    }
+
+    // "별명 [______]" 한 줄 (공유기·블루투스 공용). 글자를 바꾸면 바로 saver 로 저장
+    // 비어 있으면: 진한 빨간 칸 + 흰 글씨 "별명을 입력하세요", 입력하면 평소 모양
+    private LinearLayout aliasRow(String value, final TextSaver saver) {
+        return aliasRow(value, saver, null);
+    }
+
+    // needWhen: 이 체크박스가 체크됐을 때만 빈 별명을 빨간색으로 (null 이면 항상).
+    // 체크를 바꾸면 다시 칠하도록 row 의 tag 에 칠하기(Runnable)를 넣어 둠
+    private LinearLayout aliasRow(String value, final TextSaver saver, final CheckBox needWhen) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(110, 0, 40, 10); // 체크박스 글자 시작 위치에 맞춤
+        TextView al = new TextView(this);
+        al.setText("별명 ");
+        al.setTextSize(14);
+        al.setTypeface(null, Typeface.BOLD);
+        row.addView(al);
+        final EditText alias = new EditText(this);
+        alias.setSingleLine(true);
+        alias.setTextSize(14);
+        alias.setHint("별명을 입력하세요");
+        alias.setText(value);
+        final android.graphics.drawable.Drawable normalBg = alias.getBackground(); // 평소 입력칸 모양
+        final int padL = alias.getPaddingLeft(), padT = alias.getPaddingTop(),
+                padR = alias.getPaddingRight(), padB = alias.getPaddingBottom();
+        final Runnable paint = () -> {
+            boolean needed = needWhen == null || needWhen.isChecked(); // 체크 안 한 기기는 별명 없어도 됨
+            if (needed && alias.getText().toString().trim().isEmpty()) {
+                alias.setBackgroundColor(0xFFB71C1C);
+                alias.setHintTextColor(Color.WHITE);
+                alias.setTextColor(Color.WHITE);
+                alias.setPadding(dpx(10), dpx(8), dpx(10), dpx(8));
+            } else {
+                alias.setBackground(normalBg);
+                alias.setTextColor(Color.BLACK);
+                alias.setHintTextColor(Color.GRAY);
+                alias.setPadding(padL, padT, padR, padB);
+            }
+        };
+        paint.run();
+        row.setTag(paint);
+        alias.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence chars, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence chars, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable editable) {
+                saver.save(editable.toString());
+                paint.run();
+            }
+        });
+        row.addView(alias, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return row;
+    }
+
     // 공유기 등록 별명: "home" 설정의 "alias_<MAC 소문자>"
-    static String routerAlias(Context c, String bssid) {
-        return c.getSharedPreferences("home", MODE_PRIVATE)
+    static String routerAlias(Context ctx, String bssid) {
+        return ctx.getSharedPreferences("home", MODE_PRIVATE)
                 .getString("alias_" + bssid.toLowerCase(Locale.US), "");
     }
 
-    static void setRouterAlias(Context c, String bssid, String alias) {
-        c.getSharedPreferences("home", MODE_PRIVATE).edit()
+    // 공유기 종류: "home" 설정의 "kind_<MAC 소문자>" = "home"(홈) / "other"(기타). 값이 없으면(기존 공유기) 기타
+    static boolean routerIsHome(Context ctx, String bssid) {
+        return "home".equals(ctx.getSharedPreferences("home", MODE_PRIVATE)
+                .getString("kind_" + bssid.toLowerCase(Locale.US), "other"));
+    }
+
+    // 저장된 공유기 중 '홈'으로 체크된 것이 하나라도 있나 ('기타'만 있으면 집을 판정할 수 없음)
+    static boolean hasHomeRouter(Context ctx) {
+        for (String entry : ctx.getSharedPreferences("home", MODE_PRIVATE)
+                .getStringSet("routers", new HashSet<String>())) {
+            if (routerIsHome(ctx, entry.split("\\|", 2)[0])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static void setRouterHome(Context ctx, String bssid, boolean home) {
+        ctx.getSharedPreferences("home", MODE_PRIVATE).edit()
+                .putString("kind_" + bssid.toLowerCase(Locale.US), home ? "home" : "other").apply();
+    }
+
+    static void setRouterAlias(Context ctx, String bssid, String alias) {
+        ctx.getSharedPreferences("home", MODE_PRIVATE).edit()
                 .putString("alias_" + bssid.toLowerCase(Locale.US), alias.trim()).apply();
     }
 
@@ -976,92 +1070,99 @@ public class MainActivity extends Activity {
     }
 
     // 영역마다 오른쪽 아래 [저장] 버튼 한 줄
-    private LinearLayout registerRow(View.OnClickListener l) {
-        LinearLayout r = new LinearLayout(this);
-        r.setOrientation(LinearLayout.HORIZONTAL);
-        r.setGravity(Gravity.END);
-        r.setPadding(20, 6, 30, 0);
-        Button b = new Button(this);
-        b.setText("저장");
-        b.setTextSize(14);
-        b.setTypeface(null, Typeface.BOLD);
-        b.setOnClickListener(l);
-        r.addView(b);
-        return r;
+    private LinearLayout registerRow(View.OnClickListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.END);
+        row.setPadding(20, 6, 30, 0);
+        Button btn = new Button(this);
+        btn.setText("저장");
+        btn.setTextSize(14);
+        btn.setTypeface(null, Typeface.BOLD);
+        btn.setOnClickListener(listener);
+        row.addView(btn);
+        return row;
     }
 
     // 화면 1010 영역 사이 굵은 구분선 (위아래로 넓은 공간)
     private View thickDivider() {
-        View v = new View(this);
-        v.setBackgroundColor(0xFF424242);
-        return v;
+        View view = new View(this);
+        view.setBackgroundColor(0xFF424242);
+        return view;
     }
 
     private LinearLayout.LayoutParams thickDividerLp() {
-        float d = getResources().getDisplayMetrics().density;
+        float density = getResources().getDisplayMetrics().density;
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * d)); // 굵기 4dp
-        lp.topMargin = (int) (28 * d);    // 위 공간
-        lp.bottomMargin = (int) (28 * d); // 아래 공간
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * density)); // 굵기 4dp
+        lp.topMargin = (int) (28 * density);    // 위 공간
+        lp.bottomMargin = (int) (28 * density); // 아래 공간
         return lp;
     }
 
     // [등록 확인]: 등록된 홈 공유기와 홈 PC 블루투스만 모아서 보여 줌
     private void showRegistered() {
         String conn = connectedBssid();
-        SpannableStringBuilder s = new SpannableStringBuilder();
+        SpannableStringBuilder sb = new SpannableStringBuilder();
 
         Map<String, String> routers = loadRouters();
-        append(s, "■ 홈 공유기 (" + routers.size() + "개)\n", C_MARK, true);
+        append(sb, "■ 홈 공유기 (" + routers.size() + "개)\n", C_MARK, true);
         if (routers.isEmpty()) {
-            append(s, "  없음 — [재검색] 후 체크하고 [저장]을 누르세요.\n", C_GRAY, false);
+            append(sb, "  없음 — [재검색] 후 체크하고 [저장]을 누르세요.\n", C_GRAY, false);
         }
         List<Map.Entry<String, String>> items = new ArrayList<>(routers.entrySet());
-        Collections.sort(items, (a, b) -> a.getValue().compareTo(b.getValue()));
+        Collections.sort(items, (left, right) -> left.getValue().compareTo(right.getValue()));
         for (Map.Entry<String, String> it : items) {
             String bssid = it.getKey();
-            append(s, "  " + (it.getValue().isEmpty() ? "<숨김>" : it.getValue()), 0, true);
+            append(sb, "  " + (it.getValue().isEmpty() ? "<숨김>" : it.getValue()), 0, true);
             String alias = routerAlias(this, bssid); // 공유기 등록 별명 (1010 에서 입력)
             if (!alias.isEmpty()) {
-                append(s, " (" + alias + ")", C_MARK, true);
+                append(sb, " (" + alias + ")", C_MARK, true);
             }
-            append(s, "   " + bssid, C_GRAY, false);
+            boolean rh = routerIsHome(this, bssid);
+            append(sb, rh ? " [홈]" : " [기타]", rh ? C_GOOD : C_MARK, true);
+            append(sb, "   " + bssid, C_GRAY, false);
             Integer lv = seenLevel.get(bssid);
             if (bssid.equals(conn)) {
-                append(s, "  📶 연결됨", C_GOOD, true);
+                append(sb, "  📶 연결됨", C_GOOD, true);
             } else if (lv != null) {
-                append(s, "  주변에 있음 " + lv + " dBm", C_MID, false);
+                append(sb, "  주변에 있음 " + lv + " dBm", C_MID, false);
             }
-            s.append('\n');
+            sb.append('\n');
         }
 
         Set<String> bts = BtHome.registered(this);
-        s.append('\n');
-        append(s, "■ 홈 PC 블루투스 (" + bts.size() + "개)\n", C_MARK, true);
+        sb.append('\n');
+        append(sb, "■ 홈 PC 블루투스 (" + bts.size() + "개)\n", C_MARK, true);
         if (bts.isEmpty()) {
-            append(s, "  없음 — 아래 '홈 PC 블루투스'에서 페어링된 PC를 체크하세요.\n", C_GRAY, false);
+            append(sb, "  없음 — 아래 '홈 PC 블루투스'에서 페어링된 PC를 체크하세요.\n", C_GRAY, false);
         }
         SharedPreferences hp = getSharedPreferences("home", MODE_PRIVATE);
         long seen = hp.getLong("btSeenAt", 0);
         String seenName = hp.getString("btSeenName", "");
-        for (String b : bts) {
-            String[] t = b.split("\\|", 2);
-            String name = t.length > 1 ? t[1] : t[0];
-            append(s, "  " + name, 0, true);
-            append(s, "   " + t[0], C_GRAY, false);
+        for (String entry : bts) {
+            String[] parts = entry.split("\\|", 2);
+            String name = parts.length > 1 ? parts[1] : parts[0];
+            append(sb, "  " + name, 0, true);
+            String ba = BtHome.alias(this, parts[0]);
+            if (!ba.isEmpty()) {
+                append(sb, " (" + ba + ")", C_MARK, true);
+            }
+            append(sb, BtHome.isHome(this, parts[0]) ? " [홈]" : " [기타]", BtHome.isHome(this, parts[0]) ? C_GOOD : C_MARK, true);
+            append(sb, "   " + parts[0], C_GRAY, false);
             if (name.equals(seenName) && seen > 0) {
-                append(s, "  마지막 확인 " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(seen)),
+                append(sb, "  마지막 확인 " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(seen)),
                         BtHome.seenRecently(this) ? C_GOOD : C_GRAY, false);
             }
-            s.append('\n');
+            sb.append('\n');
         }
 
-        s.append('\n');
+        sb.append('\n');
         boolean home = statusHome;
-        append(s, "지금 상태: " + (home ? "홈" : "외출"), home ? C_GOOD : C_BAD, true);
+        append(sb, "지금 상태: " + (home ? "홈" : "외출"), home ? C_GOOD : C_BAD, true);
 
         TextView tv = new TextView(this);
-        tv.setText(s);
+        tv.setText(sb);
         tv.setTextSize(14);
         tv.setPadding(50, 30, 50, 10);
         tv.setTextIsSelectable(true);
@@ -1076,24 +1177,24 @@ public class MainActivity extends Activity {
 
     // ---------- 홈 PC 블루투스 (페어링된 PC가 가까이 있으면 '집') ----------
 
-    private TextView btNote(String s, int color) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(13);
-        t.setTextColor(color);
-        t.setPadding(40, 4, 40, 4);
-        btBox.addView(t);
-        return t;
+    private TextView btNote(String msg, int color) {
+        TextView tv = new TextView(this);
+        tv.setText(msg);
+        tv.setTextSize(13);
+        tv.setTextColor(color);
+        tv.setPadding(40, 4, 40, 4);
+        btBox.addView(tv);
+        return tv;
     }
 
-    private Button btButton(LinearLayout row, String label, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(12);
-        b.setAllCaps(false);
-        b.setOnClickListener(l);
-        row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        return b;
+    private Button btButton(LinearLayout row, String label, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(label);
+        btn.setTextSize(12);
+        btn.setAllCaps(false);
+        btn.setOnClickListener(listener);
+        row.addView(btn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return btn;
     }
 
     private void renderBt() {
@@ -1102,14 +1203,15 @@ public class MainActivity extends Activity {
         }
         btBox.removeAllViews();
         btChecks.clear();
-        TextView h = new TextView(this);
-        h.setText("홈 PC 블루투스 (" + BtHome.registered(this).size() + "개 등록)");
-        h.setTextSize(16);
-        h.setTypeface(null, Typeface.BOLD);
-        h.setPadding(40, 30, 40, 6);
-        btBox.addView(h);
+        TextView header = new TextView(this);
+        header.setText("홈 PC 블루투스 (" + BtHome.registered(this).size() + "개 등록)");
+        header.setTextSize(16);
+        header.setTypeface(null, Typeface.BOLD);
+        header.setPadding(40, 30, 40, 6);
+        btBox.addView(header);
         btNote("폰과 PC를 미리 페어링한 뒤 아래에서 PC를 체크하고 [저장]을 누르세요.\n"
-                + "PC가 가까이 있으면 Wi-Fi가 꺼져 있어도 홈으로 판정합니다. (PC 블루투스가 켜져 있어야 함)",
+                + "◉ 홈 으로 체크한 기기가 가까이 있으면 Wi-Fi가 꺼져 있어도 홈으로 판정합니다. (PC 블루투스가 켜져 있어야 함)\n"
+                + "◉ 기타 기기(회사 PC·차 등)는 가까이 있어도 귀가로 보지 않고 이름만 표시합니다.",
                 Color.GRAY);
 
         LinearLayout row = new LinearLayout(this);
@@ -1119,7 +1221,7 @@ public class MainActivity extends Activity {
         if (BtHome.adapter(this) == null) {
             btNote("이 폰에는 블루투스가 없습니다.", 0xFFC62828);
         } else if (!BtHome.hasPerm(this)) {
-            btButton(row, "블루투스 기기 불러오기 (권한 허용)", v -> requestPermissions(
+            btButton(row, "블루투스 기기 불러오기 (권한 허용)", view -> requestPermissions(
                     new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQ_BT));
         } else {
             if (!BtHome.enabled(this)) {
@@ -1130,40 +1232,81 @@ public class MainActivity extends Activity {
             if (list.isEmpty()) {
                 btNote("페어링된 기기가 없습니다. [블루투스 설정]에서 PC와 먼저 페어링하세요.", Color.DKGRAY);
             }
-            for (final String[] d : list) {
+            for (final String[] dev : list) {
                 boolean on = false;
-                for (String s : reg) {
-                    if (s.startsWith(d[0] + "|")) {
+                for (String entry : reg) {
+                    if (entry.startsWith(dev[0] + "|")) {
                         on = true;
                     }
                 }
                 final CheckBox cb = new CheckBox(this);
-                SpannableStringBuilder s = new SpannableStringBuilder();
-                append(s, "■ ", C_MARK, true);
-                append(s, d[1], 0, true);
-                append(s, "\n" + d[0], C_GRAY, false);
-                cb.setText(s);
+                SpannableStringBuilder sb = new SpannableStringBuilder();
+                append(sb, "■ ", C_MARK, true);
+                append(sb, dev[1], 0, true);
+                append(sb, "\n" + dev[0], C_GRAY, false);
+                cb.setText(sb);
                 cb.setTextSize(14);
                 cb.setChecked(on);
-                cb.setTag(d); // {MAC, 이름}. 체크만 바꾸고, 이 영역의 [등록]을 눌러야 저장
+                cb.setTag(dev); // {MAC, 이름}. 체크만 바꾸고, 이 영역의 [등록]을 눌러야 저장
                 btChecks.add(cb);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 lp.leftMargin = 40;
                 btBox.addView(cb, lp);
+
+                // 기기 종류: (●) 홈 / ( ) 기타 - 반드시 하나, 고르면 바로 저장 (기존 기기는 '기타')
+                // 기타 기기(회사 PC, 차 등)는 가까이 있어도 귀가로 보지 않음
+                final RadioGroup kind = new RadioGroup(this);
+                kind.setOrientation(RadioGroup.HORIZONTAL);
+                kind.setPadding(110, 0, 40, 6);
+                RadioButton kh = new RadioButton(this);
+                kh.setText("홈");
+                kh.setTextSize(14);
+                kh.setId(View.generateViewId());
+                RadioButton ko = new RadioButton(this);
+                ko.setText("기타");
+                ko.setTextSize(14);
+                ko.setId(View.generateViewId());
+                kind.addView(kh);
+                RadioGroup.LayoutParams kgap = new RadioGroup.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                kgap.leftMargin = dpx(24);
+                kind.addView(ko, kgap);
+                kind.check(BtHome.isHome(this, dev[0]) ? kh.getId() : ko.getId());
+                final int khId = kh.getId();
+                kind.setOnCheckedChangeListener((group, id) -> {
+                    BtHome.setHome(MainActivity.this, dev[0], id == khId);
+                    HomeService.refresh(MainActivity.this); // 귀가 판정 다시
+                    checkHome();
+                });
+                btBox.addView(kind);
+                // 블루투스 기기 별명 (예: 거실 PC). 글자를 바꾸면 바로 저장
+                // 체크(저장할 기기)한 경우만 빈 별명을 빨간색으로, 체크를 바꾸면 바로 다시 칠함
+                final LinearLayout btAlias = aliasRow(BtHome.alias(this, dev[0]),
+                        value -> BtHome.setAlias(MainActivity.this, dev[0], value), cb);
+                // 체크 안 한(저장하지 않을) 기기는 라디오·별명 칸을 숨김. 체크하면 바로 나타남
+                final int shown = cb.isChecked() ? View.VISIBLE : View.GONE;
+                kind.setVisibility(shown);
+                btAlias.setVisibility(shown);
+                cb.setOnCheckedChangeListener((button, isChecked) -> {
+                    kind.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                    btAlias.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                    ((Runnable) btAlias.getTag()).run();
+                });
+                btBox.addView(btAlias);
             }
-            btButton(row, "블루투스 설정 (페어링)", v -> {
+            btButton(row, "블루투스 설정 (페어링)", view -> {
                 try {
                     startActivity(new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS));
                 } catch (Exception e) {
                     Toast.makeText(this, "블루투스 설정을 열 수 없습니다.", Toast.LENGTH_SHORT).show();
                 }
             });
-            btButton(row, "지금 확인", v -> checkBtNow());
+            btButton(row, "지금 확인", view -> checkBtNow());
         }
         btBox.addView(row);
         if (!btChecks.isEmpty()) {
-            btBox.addView(registerRow(v -> commitBt())); // 영역 2 오른쪽 아래 [등록]
+            btBox.addView(registerRow(view -> commitBt())); // 영역 2 오른쪽 아래 [등록]
         }
         // (아래 검색 결과 영역과의 구분은 굵은 구분선 thickDivider)
     }
@@ -1175,8 +1318,8 @@ public class MainActivity extends Activity {
         Set<String> set = new HashSet<>();
         for (CheckBox cb : btChecks) {
             if (cb.isChecked()) {
-                String[] d = (String[]) cb.getTag();
-                set.add(d[0] + "|" + d[1]);
+                String[] dev = (String[]) cb.getTag();
+                set.add(dev[0] + "|" + dev[1]);
             }
         }
         BtHome.save(this, set);
@@ -1198,11 +1341,12 @@ public class MainActivity extends Activity {
         }
         Toast.makeText(this, "홈 PC를 찾는 중... (몇 초 걸립니다)", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            final String name = BtHome.findAny(this);
+            final String[] found = BtHome.findAny(this);
             runOnUiThread(() -> {
-                if (name != null) {
-                    BtHome.markSeen(this, name);
-                    Toast.makeText(this, "✓ 홈 PC를 찾았습니다: " + name, Toast.LENGTH_LONG).show();
+                if (found != null) {
+                    BtHome.markSeen(this, found[0], found[1]);
+                    Toast.makeText(this, (BtHome.isHome(this, found[0]) ? "✓ 홈 기기를 찾았습니다: "
+                            : "✓ 기타 기기를 찾았습니다 (집으로 보지 않음): ") + found[1], Toast.LENGTH_LONG).show();
                     HomeService.refresh(this);
                 } else {
                     Toast.makeText(this, "✗ 홈 PC를 찾지 못했습니다.\nPC 블루투스가 켜져 있는지, 가까이 있는지 확인하세요.",
@@ -1227,17 +1371,17 @@ public class MainActivity extends Activity {
         checkHome();
     }
 
-    private static String band(int f) {
-        if (f >= 2400 && f < 2500) {
-            return "2.4GHz ch" + (f == 2484 ? 14 : (f - 2407) / 5);
+    private static String band(int freq) {
+        if (freq >= 2400 && freq < 2500) {
+            return "2.4GHz ch" + (freq == 2484 ? 14 : (freq - 2407) / 5);
         }
-        if (f >= 4900 && f < 5900) {
-            return "5GHz ch" + (f - 5000) / 5;
+        if (freq >= 4900 && freq < 5900) {
+            return "5GHz ch" + (freq - 5000) / 5;
         }
-        if (f >= 5925) {
-            return "6GHz ch" + (f - 5950) / 5;
+        if (freq >= 5925) {
+            return "6GHz ch" + (freq - 5950) / 5;
         }
-        return f + "MHz";
+        return freq + "MHz";
     }
 
     private static String security(String cap) {
@@ -1256,9 +1400,9 @@ public class MainActivity extends Activity {
         Map<String, String> map = new HashMap<>();
         Set<String> set = getSharedPreferences("home", MODE_PRIVATE)
                 .getStringSet("routers", new HashSet<String>());
-        for (String s : set) {
-            String[] t = s.split("\\|", 2);
-            map.put(t[0], t.length > 1 ? t[1] : "");
+        for (String entry : set) {
+            String[] parts = entry.split("\\|", 2);
+            map.put(parts[0], parts.length > 1 ? parts[1] : "");
         }
         return map;
     }
@@ -1271,11 +1415,11 @@ public class MainActivity extends Activity {
         }
         Map<String, String> saved = loadRouters();
         for (CheckBox cb : apChecks) {
-            String[] t = (String[]) cb.getTag();
+            String[] parts = (String[]) cb.getTag();
             if (cb.isChecked()) {
-                saved.put(t[0], t[1]);
+                saved.put(parts[0], parts[1]);
             } else {
-                saved.remove(t[0]);
+                saved.remove(parts[0]);
             }
         }
         writeRouters(saved);
@@ -1286,8 +1430,8 @@ public class MainActivity extends Activity {
 
     private void writeRouters(Map<String, String> saved) {
         Set<String> set = new HashSet<>();
-        for (Map.Entry<String, String> e : saved.entrySet()) {
-            set.add(e.getKey() + "|" + e.getValue());
+        for (Map.Entry<String, String> entry : saved.entrySet()) {
+            set.add(entry.getKey() + "|" + entry.getValue());
         }
         getSharedPreferences("home", MODE_PRIVATE).edit().putStringSet("routers", set).apply();
     }
@@ -1295,30 +1439,53 @@ public class MainActivity extends Activity {
     // 지금 연결된 공유기가 저장된 공유기(BSSID)인지 검사 -> 항상 홈 또는 외출 표시
     private void checkHome() {
         Map<String, String> saved = loadRouters();
-        boolean btReg = !BtHome.registered(this).isEmpty();
+        boolean btReg = BtHome.hasHome(this); // '홈'으로 체크된 블루투스 기기
         boolean home = false;
         String note = "";
+        String alias = ""; // 연결된 홈 공유기의 등록 별명 (있으면 '홈' 대신 표시)
+        boolean other = false; // 연결된 공유기 종류가 '기타' (1010 라디오) -> 별명만 표시
         if (saved.isEmpty() && !btReg) {
             note = "(저장된 공유기가 없습니다)";
         } else if (!hasPermission() && !btReg) {
             note = "(위치 권한이 필요합니다)";
         } else {
             String cur = hasPermission() ? connectedBssid() : null;
-            home = cur != null && saved.containsKey(cur);
+            if (cur != null && saved.containsKey(cur)) {
+                alias = routerAlias(this, cur);
+                other = !routerIsHome(this, cur);
+                home = !other; // '기타' 공유기는 귀가(집)로 보지 않음
+            }
+            if (!hasHomeRouter(this) && !btReg) {
+                note = "('홈'으로 체크된 공유기·블루투스가 없습니다)";
+            }
         }
-        // 공유기로 '집'이 아니어도, 최근 3분 안에 홈 PC 블루투스를 찾았으면 '집'
-        if (!home && BtHome.seenRecently(this)) {
+        // 공유기로 '집'이 아니어도, 최근 3분 안에 '홈' 블루투스 기기를 찾았으면 '집'
+        if (!home && BtHome.seenHome(this)) {
             home = true;
-            note = "(홈 PC 블루투스 확인됨: "
-                    + getSharedPreferences("home", MODE_PRIVATE).getString("btSeenName", "") + ")";
+            other = false;
+            alias = BtHome.alias(this, BtHome.seenMac(this)); // 별명이 있으면 별명, 없으면 "홈"
+            note = "(홈 PC 블루투스 확인됨: " + BtHome.seenName(this) + ")";
+        } else if (!home && !other && BtHome.seenOther(this)) {
+            // '기타' 블루투스 기기(회사 PC 등)가 가까이 있음: 집 아님, 그 기기 이름만 파란색으로
+            other = true;
+            alias = BtHome.label(this, BtHome.seenMac(this), BtHome.seenName(this)); // 별명, 없으면 기기 이름
+            note = "(기타 블루투스 기기 가까이 있음)";
         }
         // 연결된 공유기가 바뀌었으면 저장 목록의 '연결됨' 표시 갱신
         if (!savedConn.equals(String.valueOf(connectedBssid()))) {
             renderSaved();
         }
         statusHome = home;
-        status.setText(home ? "홈" : "외출"); // 메인 화면 표시는 한국말 (HomeBack -> 홈, NotHome -> 외출)
-        status.setTextColor(home ? Color.rgb(46, 125, 50) : Color.rgb(198, 40, 40));
+        // 메인 화면 표시: 연결된 홈 공유기에 등록 별명이 있으면 그 별명(예: 우리집 거실), 없으면 홈 / 외출
+        //  '기타' 공유기(학교·회사 등)는 '홈' 없이 별명만 (별명이 없으면 "기타"), 파란색
+        String label = other ? (alias.isEmpty() ? "기타" : alias)
+                : home ? (alias.isEmpty() ? "홈" : alias) : "외출";
+        status.setText(label);
+        // 별명이 길면 글자를 줄여 양옆 버튼 사이에 들어가게
+        int len = label.length();
+        status.setTextSize(len <= 3 ? 40 : len <= 5 ? 32 : len <= 8 ? 24 : 18);
+        status.setTextColor(other ? Color.rgb(21, 101, 192) // 기타: 파랑
+                : home ? Color.rgb(46, 125, 50) : Color.rgb(198, 40, 40)); // 홈: 초록, 외출: 빨강
         statusNote.setText(note);
         statusNote.setVisibility(note.isEmpty() ? View.GONE : View.VISIBLE);
     }
@@ -1343,11 +1510,11 @@ public class MainActivity extends Activity {
         // DhcpInfo 값은 리틀엔디언이므로 뒤집어서 사용
         final int my = Integer.reverseBytes(di.ipAddress);
         final int gw = Integer.reverseBytes(di.gateway);
-        int m = Integer.reverseBytes(di.netmask);
-        if (m == 0 || Integer.bitCount(m) < 24) {
-            m = 0xffffff00; // 너무 큰 대역은 /24로 제한
+        int maskInt = Integer.reverseBytes(di.netmask);
+        if (maskInt == 0 || Integer.bitCount(maskInt) < 24) {
+            maskInt = 0xffffff00; // 너무 큰 대역은 /24로 제한
         }
-        final int mask = m;
+        final int mask = maskInt;
         final int base = my & mask;
         final int last = base | ~mask; // 브로드캐스트 주소
         final String net = toIp(base) + "/" + Integer.bitCount(mask);
@@ -1361,12 +1528,12 @@ public class MainActivity extends Activity {
                 // 1) 응답하는 기기 찾기
                 List<Integer> nums = new ArrayList<>();
                 List<Future<Boolean>> fs = new ArrayList<>();
-                for (int a = base + 1; a < last; a++) {
-                    if (a == my) {
+                for (int host = base + 1; host < last; host++) {
+                    if (host == my) {
                         continue;
                     }
-                    final String ip = toIp(a);
-                    nums.add(a);
+                    final String ip = toIp(host);
+                    nums.add(host);
                     fs.add(ex.submit(() -> alive(ip)));
                 }
                 Map<Integer, Dev> devs = new HashMap<>();
@@ -1384,70 +1551,70 @@ public class MainActivity extends Activity {
                 // 2) 이름(역방향 DNS), MAC(ARP 테이블)
                 Map<String, String> arp = readArp();
                 Map<Integer, Future<String>> names = new HashMap<>();
-                for (Dev d : devs.values()) {
-                    final String ip = d.ip;
-                    names.put(d.num, ex.submit(() -> hostName(ip)));
+                for (Dev dev : devs.values()) {
+                    final String ip = dev.ip;
+                    names.put(dev.num, ex.submit(() -> hostName(ip)));
                 }
-                for (Dev d : devs.values()) {
+                for (Dev dev : devs.values()) {
                     try {
-                        d.name = names.get(d.num).get();
+                        dev.name = names.get(dev.num).get();
                     } catch (Exception ignored) {
                     }
-                    String mac = arp.get(d.ip);
+                    String mac = arp.get(dev.ip);
                     if (mac != null) {
-                        d.mac = mac;
+                        dev.mac = mac;
                     }
                 }
 
                 // 3) 예전에 발견했지만 지금 응답 없는 기기는 OFF(빨강)로 표시
-                for (String s : seen) {
-                    String[] t = s.split("\\|", -1);
-                    if (t.length < 3) {
+                for (String entry : seen) {
+                    String[] parts = entry.split("\\|", -1);
+                    if (parts.length < 3) {
                         continue;
                     }
-                    int n = ipToInt(t[0]);
-                    if (n == 0 || (n & mask) != base) {
+                    int ipNum = ipToInt(parts[0]);
+                    if (ipNum == 0 || (ipNum & mask) != base) {
                         continue;
                     }
-                    Dev d = devs.get(n);
-                    if (d == null) {
-                        d = addDev(devs, n, false);
+                    Dev dev = devs.get(ipNum);
+                    if (dev == null) {
+                        dev = addDev(devs, ipNum, false);
                     }
-                    if (d.name.isEmpty()) {
-                        d.name = t[1];
+                    if (dev.name.isEmpty()) {
+                        dev.name = parts[1];
                     }
-                    if (d.mac.isEmpty()) {
-                        d.mac = t[2];
+                    if (dev.mac.isEmpty()) {
+                        dev.mac = parts[2];
                     }
                 }
                 Set<String> save = new HashSet<>();
-                for (Dev d : devs.values()) {
-                    save.add(d.ip + "|" + d.name + "|" + d.mac);
+                for (Dev dev : devs.values()) {
+                    save.add(dev.ip + "|" + dev.name + "|" + dev.mac);
                 }
                 sp.edit().putStringSet("seen", save).apply();
 
                 // 4) 표시 (IP 내림차순)
                 List<Dev> list = new ArrayList<>(devs.values());
-                Collections.sort(list, (x, y) -> Integer.compare(y.num, x.num));
+                Collections.sort(list, (left, right) -> Integer.compare(right.num, left.num));
                 int on = 0;
                 StringBuilder sb = new StringBuilder();
-                for (Dev d : list) {
-                    if (d.on) {
+                for (Dev dev : list) {
+                    if (dev.on) {
                         on++;
                     }
-                    sb.append(d.on ? "🟢 " : "🔴 ").append(d.ip);
-                    if (d.num == gw) {
+                    sb.append(dev.on ? "🟢 " : "🔴 ").append(dev.ip);
+                    if (dev.num == gw) {
                         sb.append(" (공유기)");
                     }
-                    if (d.num == my) {
+                    if (dev.num == my) {
                         sb.append(" (내 폰)");
                     }
-                    if (!d.name.isEmpty()) {
-                        sb.append("  ").append(d.name);
+                    if (!dev.name.isEmpty()) {
+                        sb.append("  ").append(dev.name);
                     }
                     sb.append('\n');
-                    if (!d.mac.isEmpty()) {
-                        sb.append("      ").append(d.mac).append('\n');
+                    if (!dev.mac.isEmpty()) {
+                        sb.append("      ").append(dev.mac).append('\n');
                     }
                 }
                 String head = "[ " + net + " ]  " + list.size() + " item(s)  🟢 " + on
@@ -1461,30 +1628,30 @@ public class MainActivity extends Activity {
     }
 
     private static Dev addDev(Map<Integer, Dev> devs, int num, boolean on) {
-        Dev d = devs.get(num);
-        if (d == null) {
-            d = new Dev();
-            d.num = num;
-            d.ip = toIp(num);
-            devs.put(num, d);
+        Dev dev = devs.get(num);
+        if (dev == null) {
+            dev = new Dev();
+            dev.num = num;
+            dev.ip = toIp(num);
+            devs.put(num, dev);
         }
-        d.on = d.on || on;
-        return d;
+        dev.on = dev.on || on;
+        return dev;
     }
 
     // 화면 갱신 (다른 버튼으로 화면이 바뀐 뒤에는 무시)
-    private void show(final int id, final String s) {
+    private void show(final int id, final String msg) {
         runOnUiThread(() -> {
             if (id == scanId) {
-                text.setText(s);
+                text.setText(msg);
             }
         });
     }
 
     private static boolean alive(String ip) {
-        for (int p : PROBE) {
-            try (Socket s = new Socket()) {
-                s.connect(new InetSocketAddress(ip, p), 300);
+        for (int port : PROBE) {
+            try (Socket sock = new Socket()) {
+                sock.connect(new InetSocketAddress(ip, port), 300);
                 return true;
             } catch (SocketTimeoutException e) {
                 // 응답 없음 -> 다음 포트 시도
@@ -1501,8 +1668,8 @@ public class MainActivity extends Activity {
 
     private static String hostName(String ip) {
         try {
-            String h = InetAddress.getByName(ip).getCanonicalHostName();
-            return h.equals(ip) ? "" : h;
+            String host = InetAddress.getByName(ip).getCanonicalHostName();
+            return host.equals(ip) ? "" : host;
         } catch (Exception e) {
             return "";
         }
@@ -1515,9 +1682,9 @@ public class MainActivity extends Activity {
             br.readLine();
             String line;
             while ((line = br.readLine()) != null) {
-                String[] t = line.trim().split("\\s+");
-                if (t.length >= 4 && !t[3].equals("00:00:00:00:00:00")) {
-                    map.put(t[0], t[3].toUpperCase(Locale.US));
+                String[] parts = line.trim().split("\\s+");
+                if (parts.length >= 4 && !parts[3].equals("00:00:00:00:00:00")) {
+                    map.put(parts[0], parts[3].toUpperCase(Locale.US));
                 }
             }
         } catch (Exception ignored) {
@@ -1525,24 +1692,24 @@ public class MainActivity extends Activity {
         return map;
     }
 
-    private static String toIp(int a) {
-        return ((a >>> 24) & 0xff) + "." + ((a >> 16) & 0xff) + "." + ((a >> 8) & 0xff) + "." + (a & 0xff);
+    private static String toIp(int ipNum) {
+        return ((ipNum >>> 24) & 0xff) + "." + ((ipNum >> 16) & 0xff) + "." + ((ipNum >> 8) & 0xff) + "." + (ipNum & 0xff);
     }
 
     private static int ipToInt(String ip) {
-        String[] o = ip.split("\\.");
-        if (o.length != 4) {
+        String[] parts = ip.split("\\.");
+        if (parts.length != 4) {
             return 0;
         }
-        int r = 0;
+        int value = 0;
         try {
-            for (String x : o) {
-                r = (r << 8) | (Integer.parseInt(x) & 0xff);
+            for (String octet : parts) {
+                value = (value << 8) | (Integer.parseInt(octet) & 0xff);
             }
         } catch (NumberFormatException e) {
             return 0;
         }
-        return r;
+        return value;
     }
 
     // ---------- 현재 위치 팝업 (화면 1020) ----------
@@ -1551,34 +1718,34 @@ public class MainActivity extends Activity {
 
     private android.app.Dialog locDlg;
 
-    private int dpx(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    private int dpx(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     // 타원 버튼 (입체: 오른쪽 아래 그림자 + 위가 밝은 파랑 그라데이션 + 위쪽 광택, 흰 굵은 글자)
     // 색: 가장 흔한 버튼 색인 파랑 (Material Blue 계열)
-    private Button ovalButton(String label, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(16);
-        b.setTypeface(null, Typeface.BOLD);
-        b.setTextColor(Color.WHITE);
-        b.setShadowLayer(2f, 0f, 1.5f, 0x80000000); // 글자도 살짝 그림자
-        b.setAllCaps(false);
-        b.setMinWidth(0);
-        b.setMinimumWidth(0);
-        b.setMinHeight(0);
-        b.setMinimumHeight(0);
-        b.setGravity(Gravity.CENTER);
+    private Button ovalButton(String label, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(label);
+        btn.setTextSize(16);
+        btn.setTypeface(null, Typeface.BOLD);
+        btn.setTextColor(Color.WHITE);
+        btn.setShadowLayer(2f, 0f, 1.5f, 0x80000000); // 글자도 살짝 그림자
+        btn.setAllCaps(false);
+        btn.setMinWidth(0);
+        btn.setMinimumWidth(0);
+        btn.setMinHeight(0);
+        btn.setMinimumHeight(0);
+        btn.setGravity(Gravity.CENTER);
         int sh = dpx(3);
-        b.setPadding(0, 0, sh, sh); // 글자를 그림자 뺀 타원 가운데에
+        btn.setPadding(0, 0, sh, sh); // 글자를 그림자 뺀 타원 가운데에
         android.graphics.drawable.StateListDrawable st = new android.graphics.drawable.StateListDrawable();
         st.addState(new int[]{android.R.attr.state_pressed}, ovalBevel(true));
         st.addState(new int[]{}, ovalBevel(false));
-        b.setBackground(st);
-        b.setStateListAnimator(null); // 기본 그림자 대신 직접 그린 그림자 사용
-        b.setOnClickListener(l);
-        return b;
+        btn.setBackground(st);
+        btn.setStateListAnimator(null); // 기본 그림자 대신 직접 그린 그림자 사용
+        btn.setOnClickListener(listener);
+        return btn;
     }
 
     // 타원 버튼 배경. pressed: 그림자 쪽으로 눌려 들어간 모양 (더 진한 파랑, 그림자 없음)
@@ -1607,27 +1774,27 @@ public class MainActivity extends Activity {
     }
 
     private android.graphics.drawable.GradientDrawable rounded(int color, int radiusDp) {
-        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
-        g.setColor(color);
-        g.setCornerRadius(dpx(radiusDp));
-        return g;
+        android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(dpx(radiusDp));
+        return shape;
     }
 
     // 1020 카드 배경: 겹친 그림 5장으로 입체 테두리
     //  1) 오른쪽 아래로 비낀 흐린 그림자  2) 진한 남색 테두리
     //  3) 흰색 (위·왼쪽 밝은 경사면)  4) 회색 (아래·오른쪽 어두운 경사면)  5) 약한 회색 바탕 (위가 조금 밝은 그라데이션)
     private android.graphics.drawable.Drawable bevelCard() {
-        int sh = 6, edge = 2, bevel = 3, r = 18;
+        int sh = 6, edge = 2, bevel = 3, radius = 18;
         android.graphics.drawable.GradientDrawable face = new android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xFFF5F5F5, 0xFFE8E8E8});
-        face.setCornerRadius(dpx(r - edge - bevel));
+        face.setCornerRadius(dpx(radius - edge - bevel));
         android.graphics.drawable.LayerDrawable ld = new android.graphics.drawable.LayerDrawable(
                 new android.graphics.drawable.Drawable[]{
-                        rounded(0x40000000, r),            // 1) 그림자
-                        rounded(0xFF0B2533, r),            // 2) 진한 테두리
-                        rounded(0xFFFFFFFF, r - edge),     // 3) 밝은 경사면
-                        rounded(0xFFA9A9A9, r - edge),     // 4) 어두운 경사면
+                        rounded(0x40000000, radius),            // 1) 그림자
+                        rounded(0xFF0B2533, radius),            // 2) 진한 테두리
+                        rounded(0xFFFFFFFF, radius - edge),     // 3) 밝은 경사면
+                        rounded(0xFFA9A9A9, radius - edge),     // 4) 어두운 경사면
                         face});                            // 5) 바탕
         ld.setLayerInset(0, dpx(sh), dpx(sh), 0, 0);
         ld.setLayerInset(1, 0, 0, dpx(sh), dpx(sh));
@@ -1654,7 +1821,7 @@ public class MainActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        Button again = ovalButton("재검색", v -> location());
+        Button again = ovalButton("재검색", view -> location());
         top.addView(again, new LinearLayout.LayoutParams(ow, oh));
         TextView title = new TextView(this);
         title.setText("현재 위치");
@@ -1669,7 +1836,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, oh, 1f);
         tlp.setMargins(dpx(8), 0, dpx(8), 0);
         top.addView(title, tlp);
-        top.addView(ovalButton("닫기", v -> locDlg.dismiss()), new LinearLayout.LayoutParams(ow, oh));
+        top.addView(ovalButton("닫기", view -> locDlg.dismiss()), new LinearLayout.LayoutParams(ow, oh));
         card.addView(top, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -1692,7 +1859,7 @@ public class MainActivity extends Activity {
         bottom.setOrientation(LinearLayout.HORIZONTAL);
         bottom.setGravity(Gravity.CENTER);
         String[] labels = {"복사", "즉시\n공유"};
-        View.OnClickListener[] acts = {v -> copyLocation(), v -> shareLocation()};
+        View.OnClickListener[] acts = {view -> copyLocation(), view -> shareLocation()};
         for (int k = 0; k < labels.length; k++) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dpx(96), oh);
             lp.setMargins(dpx(20), 0, dpx(20), 0);
@@ -1712,13 +1879,13 @@ public class MainActivity extends Activity {
         locDlg = new android.app.Dialog(this);
         locDlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         locDlg.setContentView(card);
-        android.view.Window w = locDlg.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        android.view.Window window = locDlg.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
             android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-            w.setLayout((int) (dm.widthPixels * 0.92), (int) (dm.heightPixels * 0.80));
+            window.setLayout((int) (dm.widthPixels * 0.92), (int) (dm.heightPixels * 0.80));
         }
-        locDlg.setOnDismissListener(d -> {
+        locDlg.setOnDismissListener(dialog -> {
             if (mode == MODE_LOC) {
                 mode = MODE_NONE;
                 scanId++;
@@ -1761,16 +1928,16 @@ public class MainActivity extends Activity {
 
         Location best = null;
         boolean any = false;
-        for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-            if (!lm.isProviderEnabled(p)) {
+        for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+            if (!lm.isProviderEnabled(provider)) {
                 continue;
             }
             any = true;
-            Location l = lm.getLastKnownLocation(p);
-            if (l != null && (best == null || l.getTime() > best.getTime())) {
-                best = l;
+            Location loc = lm.getLastKnownLocation(provider);
+            if (loc != null && (best == null || loc.getTime() > best.getTime())) {
+                best = loc;
             }
-            lm.requestLocationUpdates(p, 1000, 0, locListener);
+            lm.requestLocationUpdates(provider, 1000, 0, locListener);
         }
         if (startFused()) { // 구글 통합 위치도 함께 (더 정확한 값이 오면 그걸로 바뀜)
             any = true;
@@ -1790,22 +1957,26 @@ public class MainActivity extends Activity {
 
     private Location lastLoc;     // 화면에 표시 중인 위치 (지도/복사/공유에 사용)
 
-    private void showLocation(Location l, boolean cached) {
-        lastLoc = l;
-        boolean fresh = geoLoc != null && geoLoc.distanceTo(l) < 100;
+    private void showLocation(Location loc, boolean cached) {
+        lastLoc = loc;
+        boolean fresh = geoLoc != null && geoLoc.distanceTo(loc) < 100;
         // 첫 줄 "[ 현재 위치 ]" 는 제거 (팝업 제목이 '현재 위치'). 마지막 영역: 지도 링크 3개 (누르면 열림)
         SpannableStringBuilder sb = new SpannableStringBuilder();
         if (cached) {
             sb.append("(마지막 위치, 갱신 중...)\n\n");
         }
-        sb.append(routerLine() + "\n");
-        sb.append("위도: " + String.format(Locale.US, "%.6f", l.getLatitude()) + "\n"
-                + "경도: " + String.format(Locale.US, "%.6f", l.getLongitude()) + "\n"
-                + "정확도: " + Math.round(l.getAccuracy()) + " m\n"
-                + "제공: " + l.getProvider() + "\n"
-                + "시각: " + new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(l.getTime()))
+        sb.append(routerLine() + "\n\n");
+        // 공유기 줄과 위도 줄 사이 넉넉한 빈 공간 (빈 줄 1개 + 그 줄을 크게)
+        int gap = sb.length() - 1;
+        sb.setSpan(new android.text.style.RelativeSizeSpan(1.6f), gap, gap + 1,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.append("위도: " + String.format(Locale.US, "%.6f", loc.getLatitude()) + "\n"
+                + "경도: " + String.format(Locale.US, "%.6f", loc.getLongitude()) + "\n"
+                + "정확도: " + Math.round(loc.getAccuracy()) + " m\n"
+                + "제공: " + loc.getProvider() + "\n"
+                + "시각: " + new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(loc.getTime()))
                 + "\n\n" + (fresh ? geoText : "주소: 조회 중...") + "\n\n");
-        double la = l.getLatitude(), lo = l.getLongitude();
+        double la = loc.getLatitude(), lo = loc.getLongitude();
         String ll = String.format(Locale.US, "%.6f,%.6f", la, lo);
         String lat = String.format(Locale.US, "%.6f", la), lng = String.format(Locale.US, "%.6f", lo);
         String here = Uri.encode("현재 위치");
@@ -1840,7 +2011,7 @@ public class MainActivity extends Activity {
                 "https://play.google.com/store/apps/details?id=com.mapswithme.maps.pro");
         text.setText(sb);
         if (!fresh && !geoBusy) {
-            lookupAddress(l);
+            lookupAddress(loc);
         }
     }
 
@@ -1848,15 +2019,15 @@ public class MainActivity extends Activity {
     private void mapLink(SpannableStringBuilder sb, String label, final String pkg, final String appUri,
                          final String webUrl) {
         sb.append("▶ ");
-        int s = sb.length();
+        int start = sb.length();
         sb.append(label);
         sb.setSpan(new android.text.style.ClickableSpan() {
             @Override
-            public void onClick(View v) {
+            public void onClick(View view) {
                 openMapApp(pkg, appUri, webUrl);
             }
-        }, s, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        sb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), s, sb.length(),
+        }, start, sb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), start, sb.length(),
                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
@@ -1872,9 +2043,9 @@ public class MainActivity extends Activity {
 
     // pkgs: 패키지 이름 하나 또는 "새이름|옛이름" (앱이 이름을 바꾼 경우). 설치된 첫 번째를 돌려줌, 없으면 null
     private String installedPkg(String pkgs) {
-        for (String p : pkgs.split("\\|")) {
-            if (installed(p)) {
-                return p;
+        for (String pkg : pkgs.split("\\|")) {
+            if (installed(pkg)) {
+                return pkg;
             }
         }
         return null;
@@ -1887,11 +2058,11 @@ public class MainActivity extends Activity {
         if (pkg != null && lastLoc != null) {
             String ll = String.format(Locale.US, "%.6f,%.6f", lastLoc.getLatitude(), lastLoc.getLongitude());
             String geo = "geo:" + ll + "?q=" + ll + "(" + Uri.encode("현재 위치") + ")";
-            for (String u : new String[]{appUri, geo}) {
-                if (u == null) {
+            for (String link : new String[]{appUri, geo}) {
+                if (link == null) {
                     continue;
                 }
-                Intent app = new Intent(Intent.ACTION_VIEW, Uri.parse(u));
+                Intent app = new Intent(Intent.ACTION_VIEW, Uri.parse(link));
                 app.setPackage(pkg); // 브라우저나 다른 지도 앱이 아니라 바로 그 앱으로
                 try {
                     startActivity(app);
@@ -1915,35 +2086,35 @@ public class MainActivity extends Activity {
     }
 
     // 위도/경도 -> 주소, 우편번호 (인터넷 필요)
-    private void lookupAddress(final Location l) {
+    private void lookupAddress(final Location loc) {
         geoBusy = true;
         final int id = scanId;
         new Thread(() -> {
-            String r;
+            String result;
             try {
                 if (!Geocoder.isPresent()) {
-                    r = "주소: 이 기기는 주소 변환을 지원하지 않습니다.";
+                    result = "주소: 이 기기는 주소 변환을 지원하지 않습니다.";
                 } else {
                     List<Address> list = new Geocoder(this, Locale.KOREA)
-                            .getFromLocation(l.getLatitude(), l.getLongitude(), 1);
+                            .getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
                     if (list == null || list.isEmpty()) {
-                        r = "주소: 찾을 수 없습니다.";
+                        result = "주소: 찾을 수 없습니다.";
                     } else {
-                        Address a = list.get(0);
-                        String zip = a.getPostalCode() == null ? "(없음)" : a.getPostalCode();
-                        r = "주소: " + a.getAddressLine(0) + "\n우편번호: " + zip;
+                        Address addr = list.get(0);
+                        String zip = addr.getPostalCode() == null ? "(없음)" : addr.getPostalCode();
+                        result = "주소: " + addr.getAddressLine(0) + "\n우편번호: " + zip;
                     }
                 }
             } catch (Exception e) {
-                r = "주소: 조회 실패 (인터넷 연결을 확인하세요)";
+                result = "주소: 조회 실패 (인터넷 연결을 확인하세요)";
             }
-            final String res = r;
+            final String res = result;
             runOnUiThread(() -> {
                 geoBusy = false;
-                geoLoc = l;
+                geoLoc = loc;
                 geoText = res;
                 if (mode == MODE_LOC && id == scanId) {
-                    showLocation(l, false);
+                    showLocation(loc, false);
                 }
             });
         }).start();
@@ -1998,32 +2169,32 @@ public class MainActivity extends Activity {
     }
 
     // [메시지 공유] 버튼 공통 모양: 작은 글자, 왼쪽 정렬 (줄마다 글자 시작 위치가 같게)
-    private Button msgStyleButton(View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setTextSize(12);
-        b.setAllCaps(false);
-        b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        b.setPadding(24, 18, 12, 18); // 위아래 여백은 남겨 누르기 쉽게
-        b.setMinHeight(0);
-        b.setMinimumHeight(0);
-        b.setOnClickListener(l);
-        return b;
+    private Button msgStyleButton(View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setTextSize(12);
+        btn.setAllCaps(false);
+        btn.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        btn.setPadding(24, 18, 12, 18); // 위아래 여백은 남겨 누르기 쉽게
+        btn.setMinHeight(0);
+        btn.setMinimumHeight(0);
+        btn.setOnClickListener(listener);
+        return btn;
     }
 
     // 버튼 글자: 이름 + " · " + 설정값(빨간색). values 가 null 이면 이름만
-    private static void setJobText(Button b, String name, String values) {
-        SpannableStringBuilder s = new SpannableStringBuilder(name);
+    private static void setJobText(Button btn, String name, String values) {
+        SpannableStringBuilder sb = new SpannableStringBuilder(name);
         if (values != null && !values.isEmpty()) {
-            s.append(" · ");
-            int st = s.length();
-            s.append(values);
-            s.setSpan(new ForegroundColorSpan(0xFFC62828), st, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.append(" · ");
+            int st = sb.length();
+            sb.append(values);
+            sb.setSpan(new ForegroundColorSpan(0xFFC62828), st, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
-        b.setText(s);
+        btn.setText(sb);
     }
 
     // 한 줄 = [체크박스] + [버튼]. 체크박스가 없는 줄(별명)은 같은 폭의 빈자리를 둬서 버튼 왼쪽 끝을 맞춤
-    private LinearLayout msgLine(CheckBox cb, Button b) {
+    private LinearLayout msgLine(CheckBox cb, Button btn) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -2032,17 +2203,17 @@ public class MainActivity extends Activity {
             cb.setVisibility(View.INVISIBLE); // 자리만 차지
         }
         row.addView(cb);
-        row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(btn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         msgBox.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return row;
     }
 
     // [메시지 공유] 아래 체크박스 없는 버튼 (보내는 사람 별명)
-    private Button msgButton(View.OnClickListener l) {
-        Button b = msgStyleButton(l);
-        msgLine(null, b);
-        return b;
+    private Button msgButton(View.OnClickListener listener) {
+        Button btn = msgStyleButton(listener);
+        msgLine(null, btn);
+        return btn;
     }
 
     // ---------- [메시지 공유] 각 줄: 체크박스(켜기/끄기) + 버튼(설정) ----------
@@ -2051,11 +2222,11 @@ public class MainActivity extends Activity {
 
     private Button msgRow(final String pref) {
         final CheckBox cb = new CheckBox(this);
-        cb.setOnClickListener(v -> toggleJob(pref, cb)); // 사용자가 누를 때만 (코드로 바꿀 때는 반응 안 함)
-        Button b = msgStyleButton(v -> openJobSettings(pref));
-        msgLine(cb, b);
+        cb.setOnClickListener(view -> toggleJob(pref, cb)); // 사용자가 누를 때만 (코드로 바꿀 때는 반응 안 함)
+        Button btn = msgStyleButton(view -> openJobSettings(pref));
+        msgLine(cb, btn);
         jobChecks.put(pref, cb);
-        return b;
+        return btn;
     }
 
     // 모든 줄의 체크·글자를 저장된 설정에 맞춤
@@ -2182,8 +2353,8 @@ public class MainActivity extends Activity {
         final EditText times = new EditText(MainActivity.this);
         final Spinner interval = new Spinner(MainActivity.this);
 
-        ScheduleUi(LinearLayout f, SharedPreferences sp) {
-            label(f, "보내는 시각");
+        ScheduleUi(LinearLayout form, SharedPreferences sp) {
+            label(form, "보내는 시각");
             RadioGroup mode = new RadioGroup(MainActivity.this);
             rTimes.setText("지정 시각 (매일)");
             rTimes.setId(View.generateViewId());
@@ -2191,7 +2362,7 @@ public class MainActivity extends Activity {
             rInterval.setId(View.generateViewId());
             mode.addView(rTimes);
             mode.addView(rInterval);
-            f.addView(mode);
+            form.addView(mode);
 
             final LinearLayout timesRow = new LinearLayout(MainActivity.this);
             timesRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -2201,15 +2372,15 @@ public class MainActivity extends Activity {
             Button addTime = new Button(MainActivity.this);
             addTime.setText("시각 추가");
             addTime.setTextSize(13);
-            addTime.setOnClickListener(v -> showTagged(new TimePickerDialog(MainActivity.this, (tp, h, m) -> {
+            addTime.setOnClickListener(view -> showTagged(new TimePickerDialog(MainActivity.this, (tp, hour, minute) -> {
                 String cur = times.getText().toString().trim();
-                String add = String.format(Locale.US, "%02d:%02d", h, m);
-                String n = normalizeTimes(cur.isEmpty() ? add : cur + ", " + add);
-                times.setText(n == null ? cur + ", " + add : n);
+                String add = String.format(Locale.US, "%02d:%02d", hour, minute);
+                String merged = normalizeTimes(cur.isEmpty() ? add : cur + ", " + add);
+                times.setText(merged == null ? cur + ", " + add : merged);
             }, 8, 0, true), "1240"));
             timesRow.addView(times, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             timesRow.addView(addTime);
-            f.addView(timesRow);
+            form.addView(timesRow);
 
             interval.setAdapter(new ArrayAdapter<>(MainActivity.this,
                     android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
@@ -2219,9 +2390,9 @@ public class MainActivity extends Activity {
                     interval.setSelection(i);
                 }
             }
-            f.addView(interval);
+            form.addView(interval);
 
-            mode.setOnCheckedChangeListener((g, id) -> {
+            mode.setOnCheckedChangeListener((group, id) -> {
                 timesRow.setVisibility(id == rTimes.getId() ? View.VISIBLE : View.GONE);
                 interval.setVisibility(id == rInterval.getId() ? View.VISIBLE : View.GONE);
             });
@@ -2247,9 +2418,9 @@ public class MainActivity extends Activity {
         final boolean sms = HomeService.PREF_SMS.equals(pref) || auto;
         final String title = auto ? "일반 문자 (자동 · 솔라피)" : sms ? "일반 문자 (수동)" : "본인 폰 알림 (자동)";
         final SharedPreferences sp = getSharedPreferences(pref, MODE_PRIVATE);
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(60, 10, 60, 10);
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(60, 10, 60, 10);
 
         TextView info = new TextView(this);
         info.setText(auto
@@ -2262,43 +2433,43 @@ public class MainActivity extends Activity {
                 + "알림을 누르면 지도가 열리고, [공유]로 원하는 곳에 보낼 수 있습니다.");
         info.setTextColor(Color.DKGRAY);
         info.setPadding(0, 16, 0, 0);
-        f.addView(info);
+        form.addView(info);
 
         // 솔라피 (자동 문자 전용)
         final EditText apiKey = new EditText(this), apiSecret = new EditText(this), sender = new EditText(this);
         if (auto) {
             info.setAutoLinkMask(android.text.util.Linkify.WEB_URLS);
             info.setText(info.getText().toString());
-            label(f, "솔라피 API Key");
+            label(form, "솔라피 API Key");
             apiKey.setSingleLine(true);
             apiKey.setText(sp.getString("apiKey", ""));
-            f.addView(apiKey);
-            label(f, "솔라피 API Secret");
+            form.addView(apiKey);
+            label(form, "솔라피 API Secret");
             apiSecret.setSingleLine(true);
             apiSecret.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
             apiSecret.setText(sp.getString("apiSecret", ""));
-            f.addView(apiSecret);
-            label(f, "발신번호 (솔라피에 등록한 번호)");
+            form.addView(apiSecret);
+            label(form, "발신번호 (솔라피에 등록한 번호)");
             sender.setSingleLine(true);
             sender.setInputType(InputType.TYPE_CLASS_PHONE);
             sender.setHint("예: 010-1234-5678");
             sender.setText(sp.getString("from", ""));
-            f.addView(sender);
+            form.addView(sender);
         }
 
         final EditText to = new EditText(this);
         final RadioButton rShort = new RadioButton(this), rFull = new RadioButton(this);
         if (sms) {
-            label(f, "받는 사람 번호 (여러 명은 쉼표로 구분)");
+            label(form, "받는 사람 번호 (여러 명은 쉼표로 구분)");
             to.setSingleLine(true);
             to.setInputType(InputType.TYPE_CLASS_PHONE);
             to.setHint("예: 010-1234-5678, 010-9876-5432");
             to.setText(sp.getString("to", ""));
-            f.addView(to);
+            form.addView(to);
             Button pick = new Button(this);
             pick.setText("연락처에서 선택");
             pick.setTextSize(13);
-            pick.setOnClickListener(v -> {
+            pick.setOnClickListener(view -> {
                 contactTarget = to;
                 contactNameTarget = null;
                 contactWithName = false; // 문자 받는 사람 칸에는 번호만
@@ -2309,10 +2480,10 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "연락처를 열 수 없습니다.", Toast.LENGTH_SHORT).show();
                 }
             });
-            f.addView(pick, new LinearLayout.LayoutParams(
+            form.addView(pick, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            label(f, "메시지 형식");
+            label(form, "메시지 형식");
             RadioGroup fmt = new RadioGroup(this);
             rShort.setText("짧게 (주소 + 지도 링크 1개)");
             rShort.setId(View.generateViewId());
@@ -2321,11 +2492,11 @@ public class MainActivity extends Activity {
             fmt.addView(rShort);
             fmt.addView(rFull);
             fmt.check(sp.getBoolean("short", true) ? rShort.getId() : rFull.getId());
-            f.addView(fmt);
+            form.addView(fmt);
         }
 
         // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀 (이 팝업에서는 입력하지 않음)
-        schedNote(f);
+        schedNote(form);
 
         TextView last = new TextView(this);
         long lt = sp.getLong("lastTime", 0), nx = sp.getLong("next", 0);
@@ -2335,19 +2506,19 @@ public class MainActivity extends Activity {
                 + (sp.getBoolean("on", false) && nx > 0 ? "\n다음 알림: " + df.format(new Date(nx)) : ""));
         last.setTextColor(Color.GRAY);
         last.setPadding(0, 16, 0, 0);
-        f.addView(last);
+        form.addView(last);
 
         ScrollView sv = new ScrollView(this);
-        sv.addView(f);
-        final AlertDialog d = new AlertDialog.Builder(this)
+        sv.addView(form);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setView(sv)
                 .setPositiveButton("저장", null)
                 .setNeutralButton("지금 테스트", null)
                 .setNegativeButton("취소", null)
                 .create();
-        d.setOnShowListener(x -> {
-            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.setOnShowListener(shown -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 String nums = to.getText().toString().trim();
                 boolean start = true; // 저장 = 1040 화면의 이 줄 자동 체크(켜기)
                 if (sms && !nums.isEmpty() && !validPhones(nums)) {
@@ -2392,10 +2563,10 @@ public class MainActivity extends Activity {
                 updateJobButtons();
                 Toast.makeText(this, start ? "저장했습니다. (켜져 있음 · " + HomeService.emailSchedule(sp) + ")"
                         : "저장했습니다.", Toast.LENGTH_SHORT).show();
-                d.dismiss();
+                dialog.dismiss();
             });
             // 지금 테스트: 문자 앱 열기 / 이 폰에 바로 알림
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
                 final String nums = to.getText().toString().trim();
                 if (sms && (nums.isEmpty() || !validPhones(nums))) {
                     Toast.makeText(this, "받는 사람 번호를 확인하세요.", Toast.LENGTH_SHORT).show();
@@ -2413,7 +2584,7 @@ public class MainActivity extends Activity {
                         if (auto) {
                             last.setText(err == null ? "지금 테스트: 성공 (문자를 보냈습니다)" : "지금 테스트: 실패: " + err);
                         } else if (sms) {
-                            d.dismiss();
+                            dialog.dismiss();
                             try {
                                 startActivity(HomeService.smsCompose(nums, msg));
                             } catch (Exception e) {
@@ -2427,15 +2598,15 @@ public class MainActivity extends Activity {
                 }).start();
             });
         });
-        d.show();
-        ScreenId.tag(d, auto ? "1235" : sms ? "1230" : "1140");
+        dialog.show();
+        ScreenId.tag(dialog, auto ? "1235" : sms ? "1230" : "1140");
     }
 
     // 전화번호 목록 확인 (숫자 3자리 이상씩)
-    private static boolean validPhones(String s) {
-        for (String p : s.split("[,;]+")) {
-            String digits = p.replaceAll("[^0-9]", "");
-            if (!p.trim().isEmpty() && digits.length() < 3) {
+    private static boolean validPhones(String phones) {
+        for (String one : phones.split("[,;]+")) {
+            String digits = one.replaceAll("[^0-9]", "");
+            if (!one.trim().isEmpty() && digits.length() < 3) {
                 return false;
             }
         }
@@ -2450,12 +2621,12 @@ public class MainActivity extends Activity {
                 || contactTarget == null) {
             return;
         }
-        try (android.database.Cursor c = getContentResolver().query(data.getData(),
+        try (android.database.Cursor cursor = getContentResolver().query(data.getData(),
                 new String[]{android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
                         android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME}, null, null, null)) {
-            if (c != null && c.moveToFirst()) {
-                String num = c.getString(0);
-                String name = c.getString(1);
+            if (cursor != null && cursor.moveToFirst()) {
+                String num = cursor.getString(0);
+                String name = cursor.getString(1);
                 if (contactNameTarget != null) { // (6) 피보호자 카드: 번호는 바꾸고, 이름은 비었을 때만
                     contactTarget.setText(num);
                     if (name != null && contactNameTarget.getText().toString().trim().isEmpty()) {
@@ -2485,7 +2656,7 @@ public class MainActivity extends Activity {
                 .setTitle("⚠️ 발신 이메일 미등록")
                 .setMessage(why + " 먼저 본인 Gmail 과 앱 비밀번호를 등록해야 합니다.\n\n"
                         + "(1) 홈 공유기 등록 → [사용자 등록] 에서 등록하고 검증하세요.")
-                .setPositiveButton("사용자 등록 열기", (d, w) -> startActivity(new Intent(this, UserActivity.class)))
+                .setPositiveButton("사용자 등록 열기", (dialog, which) -> startActivity(new Intent(this, UserActivity.class)))
                 .setNegativeButton("닫기", null)
                 .show(), "1145");
         return true;
@@ -2510,23 +2681,23 @@ public class MainActivity extends Activity {
                 .setTitle("📨 위치 질문")
                 .setMessage(HomeService.mailAskText(this, from) + " (Yes/No)")
                 .setCancelable(false)
-                .setPositiveButton("Yes", (d, w) -> mailAnswer(from, true))
-                .setNegativeButton("No", (d, w) -> mailAnswer(from, false))
+                .setPositiveButton("Yes", (dialog, which) -> mailAnswer(from, true))
+                .setNegativeButton("No", (dialog, which) -> mailAnswer(from, false))
                 .show(), "1057");
     }
 
     private void mailAnswer(String from, boolean yes) {
-        Intent i = new Intent(this, HomeService.class)
+        Intent intent = new Intent(this, HomeService.class)
                 .setAction(yes ? HomeService.ACTION_MAIL_YES : HomeService.ACTION_MAIL_NO).putExtra("to", from);
         if (Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(i);
+            startForegroundService(intent);
         } else {
-            startService(i);
+            startService(intent);
         }
         Toast.makeText(this, yes ? "위치를 확인해 이메일로 회신합니다." : "회신하지 않았습니다.", Toast.LENGTH_SHORT).show();
     }
 
-    // ---------- (6) 보호자 전용 모드: 보호자가 피보호자를 관리 (화면 1058) ----------
+    // ---------- (5) 보호자 전용 모드: 보호자가 피보호자를 관리 (화면 1058) ----------
     // 피보호자 목록은 설정 "ward" 의 "wards" = [{name, phone, email}, …] (JSON)
 
     private static final String PREF_WARD = "ward";
@@ -2557,11 +2728,11 @@ public class MainActivity extends Activity {
         wardList.setPadding(30, 0, 30, 0);
         body.addView(wardList);
         try {
-            org.json.JSONArray a = new org.json.JSONArray(getSharedPreferences(PREF_WARD, MODE_PRIVATE)
+            org.json.JSONArray arr = new org.json.JSONArray(getSharedPreferences(PREF_WARD, MODE_PRIVATE)
                     .getString("wards", "[]"));
-            for (int i = 0; i < a.length(); i++) {
-                org.json.JSONObject o = a.getJSONObject(i);
-                addWardCard(o.optString("name"), o.optString("phone"), o.optString("email"), o.optString("rel"));
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.getJSONObject(i);
+                addWardCard(item.optString("name"), item.optString("phone"), item.optString("email"), item.optString("rel"));
             }
         } catch (Exception ignored) {
         }
@@ -2573,13 +2744,13 @@ public class MainActivity extends Activity {
         Button add = new Button(this);
         add.setText("피보호자 추가");
         add.setTypeface(null, Typeface.BOLD);
-        add.setOnClickListener(v -> {
-            final WardCard c = addWardCard("", "", "", "");
+        add.setOnClickListener(view -> {
+            final WardCard card = addWardCard("", "", "", "");
             if (body.getParent() instanceof ScrollView) {
                 final ScrollView sv = (ScrollView) body.getParent();
                 sv.postDelayed(() -> { // 새 카드가 화면에 배치된 뒤 그 위치로
-                    sv.smoothScrollTo(0, wardList.getTop() + c.box.getTop());
-                    c.name.requestFocus();
+                    sv.smoothScrollTo(0, wardList.getTop() + card.box.getTop());
+                    card.name.requestFocus();
                 }, 150);
             }
         });
@@ -2591,23 +2762,23 @@ public class MainActivity extends Activity {
 
     // 카드 한 장:  < 피보호자 N >  이름 / 전화번호 [연락처에서 선택] / 이메일 + [테스트] [지금 위치 확인] / [등록] [삭제]
     private WardCard addWardCard(String name, String phone, String email, String relation) {
-        final WardCard c = new WardCard();
-        c.box = new LinearLayout(this);
-        c.box.setOrientation(LinearLayout.VERTICAL);
-        c.box.setPadding(30, 20, 30, 20);
-        c.box.setBackgroundColor(0x0F000000);
+        final WardCard card = new WardCard();
+        card.box = new LinearLayout(this);
+        card.box.setOrientation(LinearLayout.VERTICAL);
+        card.box.setPadding(30, 20, 30, 20);
+        card.box.setBackgroundColor(0x0F000000);
 
-        c.title = new TextView(this);
-        c.title.setTextSize(15);
-        c.title.setTypeface(null, Typeface.BOLD);
-        c.box.addView(c.title);
+        card.title = new TextView(this);
+        card.title.setTextSize(15);
+        card.title.setTypeface(null, Typeface.BOLD);
+        card.box.addView(card.title);
 
-        c.name = wardField(c.box, "이름 :", name, InputType.TYPE_CLASS_TEXT);
-        c.rel = wardRelation(c.box, relation);
-        c.phone = wardField(c.box, "전화번호 :", phone, InputType.TYPE_CLASS_PHONE);
-        Button pick = smallBtn("연락처에서 선택", v -> {
-            contactTarget = c.phone;
-            contactNameTarget = c.name;
+        card.name = wardField(card.box, "이름 :", name, InputType.TYPE_CLASS_TEXT);
+        card.rel = wardRelation(card.box, relation);
+        card.phone = wardField(card.box, "전화번호 :", phone, InputType.TYPE_CLASS_PHONE);
+        Button pick = smallBtn("연락처에서 선택", view -> {
+            contactTarget = card.phone;
+            contactNameTarget = card.name;
             contactWithName = false;
             try {
                 startActivityForResult(new Intent(Intent.ACTION_PICK,
@@ -2616,32 +2787,32 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "연락처를 열 수 없습니다.", Toast.LENGTH_SHORT).show();
             }
         });
-        ((LinearLayout) c.phone.getParent()).addView(pick);
-        c.email = wardField(c.box, "이메일 :", email,
+        ((LinearLayout) card.phone.getParent()).addView(pick);
+        card.email = wardField(card.box, "이메일 :", email,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         // 이메일 칸 오른쪽은 좁아서 두 버튼은 바로 아래 줄 오른쪽에
         LinearLayout mailBtns = new LinearLayout(this);
         mailBtns.setOrientation(LinearLayout.HORIZONTAL);
         mailBtns.setGravity(Gravity.END);
-        mailBtns.addView(smallBtn("테스트", v -> wardMail(c, false)));
-        mailBtns.addView(smallBtn("지금 위치 확인", v -> wardMail(c, true)));
-        c.box.addView(mailBtns, new LinearLayout.LayoutParams(
+        mailBtns.addView(smallBtn("테스트", view -> wardMail(card, false)));
+        mailBtns.addView(smallBtn("지금 위치 확인", view -> wardMail(card, true)));
+        card.box.addView(mailBtns, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button reg = new Button(this);
         reg.setText("등록");
-        reg.setOnClickListener(v -> saveWards(true));
+        reg.setOnClickListener(view -> saveWards(true));
         row.addView(reg, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         Button del = new Button(this);
         del.setText("삭제");
-        del.setOnClickListener(v -> ScreenId.tag(new AlertDialog.Builder(this)
+        del.setOnClickListener(view -> ScreenId.tag(new AlertDialog.Builder(this)
                 .setTitle("피보호자 삭제")
-                .setMessage(c.title.getText() + " 을(를) 삭제할까요?")
-                .setPositiveButton("삭제", (d, w) -> {
-                    wardCards.remove(c);
-                    wardList.removeView(c.box);
+                .setMessage(card.title.getText() + " 을(를) 삭제할까요?")
+                .setPositiveButton("삭제", (dialog, which) -> {
+                    wardCards.remove(card);
+                    wardList.removeView(card.box);
                     if (wardCards.isEmpty()) {
                         addWardCard("", "", "", "");
                     }
@@ -2655,15 +2826,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rlp.topMargin = 12;
-        c.box.addView(row, rlp);
+        card.box.addView(row, rlp);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = 24;
-        wardList.addView(c.box, lp);
-        wardCards.add(c);
+        wardList.addView(card.box, lp);
+        wardCards.add(card);
         renumberWards();
-        return c;
+        return card;
     }
 
     private void renumberWards() {
@@ -2677,20 +2848,20 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView l = new TextView(this);
-        l.setText(label);
-        l.setTextSize(14);
-        l.setMinWidth((int) (72 * getResources().getDisplayMetrics().density));
-        row.addView(l);
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setInputType(type);
-        e.setText(value);
-        e.setTextSize(14);
-        row.addView(e, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView caption = new TextView(this);
+        caption.setText(label);
+        caption.setTextSize(14);
+        caption.setMinWidth((int) (72 * getResources().getDisplayMetrics().density));
+        row.addView(caption);
+        EditText edit = new EditText(this);
+        edit.setSingleLine(true);
+        edit.setInputType(type);
+        edit.setText(value);
+        edit.setTextSize(14);
+        row.addView(edit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         parent.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        return e;
+        return edit;
     }
 
     // "관계 : [관계 버튼 ▼]" 한 줄. 버튼을 누르면 고르기 팝업(1102), 고르면 바로 저장
@@ -2698,69 +2869,69 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView l = new TextView(this);
-        l.setText("관계 :");
-        l.setTextSize(14);
-        l.setMinWidth((int) (72 * getResources().getDisplayMetrics().density));
-        row.addView(l);
-        Button b = GuardianActivity.relationButton(this, value, () -> saveWards(false));
-        row.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView caption = new TextView(this);
+        caption.setText("관계 :");
+        caption.setTextSize(14);
+        caption.setMinWidth((int) (72 * getResources().getDisplayMetrics().density));
+        row.addView(caption);
+        Button btn = GuardianActivity.relationButton(this, value, () -> saveWards(false));
+        row.addView(btn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         parent.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        return b;
+        return btn;
     }
 
-    private Button smallBtn(String text, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(12);
-        b.setAllCaps(false);
-        b.setOnClickListener(l);
-        return b;
+    private Button smallBtn(String text, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        btn.setTextSize(12);
+        btn.setAllCaps(false);
+        btn.setOnClickListener(listener);
+        return btn;
     }
 
     // 모든 카드를 저장. 이메일 형식이 틀리면 저장하지 않고 안내
     private boolean saveWards(boolean toast) {
-        org.json.JSONArray a = new org.json.JSONArray();
-        for (WardCard c : wardCards) {
-            String nm = c.name.getText().toString().trim();
-            String ph = c.phone.getText().toString().trim();
-            String em = c.email.getText().toString().trim();
+        org.json.JSONArray arr = new org.json.JSONArray();
+        for (WardCard card : wardCards) {
+            String nm = card.name.getText().toString().trim();
+            String ph = card.phone.getText().toString().trim();
+            String em = card.email.getText().toString().trim();
             if (!em.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(em).matches()) {
-                Toast.makeText(this, c.title.getText() + " 이메일 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, card.title.getText() + " 이메일 형식을 확인하세요.", Toast.LENGTH_SHORT).show();
                 return false;
             }
             if (nm.isEmpty() && ph.isEmpty() && em.isEmpty()) {
                 continue; // 빈 카드는 저장 안 함
             }
             try {
-                a.put(new org.json.JSONObject().put("name", nm).put("phone", ph).put("email", em)
-                        .put("rel", GuardianActivity.relationOf(c.rel)));
+                arr.put(new org.json.JSONObject().put("name", nm).put("phone", ph).put("email", em)
+                        .put("rel", GuardianActivity.relationOf(card.rel)));
             } catch (Exception ignored) {
             }
         }
-        getSharedPreferences(PREF_WARD, MODE_PRIVATE).edit().putString("wards", a.toString()).apply();
+        getSharedPreferences(PREF_WARD, MODE_PRIVATE).edit().putString("wards", arr.toString()).apply();
         if (toast) {
-            Toast.makeText(this, "등록했습니다. (피보호자 " + a.length() + "명)", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "등록했습니다. (피보호자 " + arr.length() + "명)", Toast.LENGTH_SHORT).show();
         }
         return true;
     }
 
     // [테스트] = 테스트 문구 메일, [지금 위치 확인] = 제목 "#where" 메일 (내 Gmail -> 피보호자 이메일)
-    private void wardMail(WardCard c, final boolean locate) {
+    private void wardMail(WardCard card, final boolean locate) {
         if (noUserMail(locate ? "위치를 물어보려면" : "테스트 메일을 보내려면")) {
             return;
         }
-        final String to = c.email.getText().toString().trim();
+        final String to = card.email.getText().toString().trim();
         if (!Patterns.EMAIL_ADDRESS.matcher(to).matches()) {
             Toast.makeText(this, "피보호자 이메일을 확인하세요.", Toast.LENGTH_SHORT).show();
             return;
         }
         saveWards(false);
-        SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
-        final String from = u.getString("mail", "");
-        final String pass = u.getString("mailPass", "");
-        String nm = c.name.getText().toString().trim();
+        SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        final String from = user.getString("mail", "");
+        final String pass = user.getString("mailPass", "");
+        String nm = card.name.getText().toString().trim();
         final String ward = nm.isEmpty() ? "피보호자" : nm;
         String me = TelegramSender.senderName(this);
         final String meName = me.isEmpty() ? from : me;
@@ -2780,7 +2951,7 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // ---------- (5) 응답 모드 탭 ----------
+    // ---------- (4) 응답 모드 탭 ----------
 
     private TextView remoteInfo, mailRemoteInfo;
 
@@ -2801,7 +2972,7 @@ public class MainActivity extends Activity {
         remote.setTextSize(15);
         remote.setTypeface(null, Typeface.BOLD);
         remote.setChecked(tg.getBoolean("remote", false));
-        remote.setOnClickListener(v -> {
+        remote.setOnClickListener(view -> {
             if (remote.isChecked()) {
                 if (tg.getString("token", "").isEmpty() || tg.getString("chats", "").trim().isEmpty()) {
                     remote.setChecked(false);
@@ -2846,8 +3017,8 @@ public class MainActivity extends Activity {
 
         // 2) 나머지 보호자 기능은 추후
         sectionTitle(body, "■ 그 밖의 보호자 기능");
-        msgStyleButtonFor(body, "가족 전체 조회", v -> showComingSoon("가족 전체 조회"));
-        msgStyleButtonFor(body, "비밀번호 잠금", v -> showComingSoon("비밀번호 잠금"));
+        msgStyleButtonFor(body, "가족 전체 조회", view -> showComingSoon("가족 전체 조회"));
+        msgStyleButtonFor(body, "비밀번호 잠금", view -> showComingSoon("비밀번호 잠금"));
 
         // 앱 정보 (가족 폰에 어느 버전이 깔렸는지 확인용)
         View sep2 = new View(this);
@@ -2880,7 +3051,7 @@ public class MainActivity extends Activity {
 
     // ■ 원격 위치 요청 (이메일): 보호자가 사용자 Gmail 로 제목 "#where" 메일 -> 이 폰이 위치를 이메일로 회신
     private void buildMailRemote(LinearLayout body) {
-        final SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
         sectionTitle(body, "■ 원격 위치 요청 (이메일)");
         smallNote(body, "보호자가 이 사용자의 Gmail 로 제목 \"#where\" (대소문자 무관) 메일을 보내면, 이 폰이 현재 위치를 이메일로 회신합니다.\n"
                 + "☑ 체크: 바로 자동 회신 (이 폰을 만질 필요 없음)\n"
@@ -2891,10 +3062,10 @@ public class MainActivity extends Activity {
         on.setText("이메일 위치 요청에 자동으로 회신응답");
         on.setTextSize(15);
         on.setTypeface(null, Typeface.BOLD);
-        on.setChecked(u.getBoolean("mailRemote", false));
-        on.setOnClickListener(v -> {
+        on.setChecked(user.getBoolean("mailRemote", false));
+        on.setOnClickListener(view -> {
             if (on.isChecked()) {
-                if (!u.getBoolean("mailVerified", false) || u.getString("mailPass", "").isEmpty()) {
+                if (!user.getBoolean("mailVerified", false) || user.getString("mailPass", "").isEmpty()) {
                     on.setChecked(false);
                     Toast.makeText(this, "사용자 등록에서 발신 이메일(Gmail) 인증을 먼저 해 주세요.", Toast.LENGTH_LONG).show();
                     startActivity(new Intent(this, UserActivity.class));
@@ -2913,7 +3084,7 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            u.edit().putBoolean("mailRemote", on.isChecked()).putString("mailRemoteErr", "").apply();
+            user.edit().putBoolean("mailRemote", on.isChecked()).putString("mailRemoteErr", "").apply();
             HomeService.refresh(this);
             Toast.makeText(this, on.isChecked()
                     ? "자동 회신을 켰습니다. 보호자가 \"#where\" 메일을 보내 보세요."
@@ -2928,40 +3099,40 @@ public class MainActivity extends Activity {
         mailRemoteInfo = smallNote(body, "");
         mailRemoteInfo.setTextColor(Color.DKGRAY);
         mailRemoteInfo.setTextSize(13);
-        msgStyleButtonFor(body, "지금 확인 (Gmail 접속·최근 메일 판단 보기)", v -> diagnoseMailRemote());
+        msgStyleButtonFor(body, "지금 확인 (Gmail 접속·최근 메일 판단 보기)", view -> diagnoseMailRemote());
 
         smallNote(body, "보호자가 하는 방법:\n"
                 + " 1. 아무 메일 앱(Gmail, 네이버 메일 …)을 엽니다.\n"
                 + " 2. 받는 사람 = 이 사용자의 Gmail, 제목 = #where (대소문자 무관, 내용은 비워도 됨)\n"
                 + " 3. 보내면 잠시 뒤 주소·지도 링크가 담긴 회신 메일이 옵니다. (보통 1분 안)\n"
-                + "   (보호자 폰에도 집에왔어요가 있으면 (6) 보호자 전용 모드의 [지금 위치 확인]으로 보낼 수 있습니다)\n\n"
+                + "   (보호자 폰에도 집에왔어요가 있으면 (5) 보호자 전용 모드의 [지금 위치 확인]으로 보낼 수 있습니다)\n\n"
                 + "※ 이 폰의 배터리 설정을 '제한 없음'으로 해야 화면이 꺼져 있을 때도 빨리 회신합니다.");
     }
 
     // [지금 확인]: Gmail 에 접속해 최근 메일 5통을 앱이 어떻게 판단하는지 팝업(화면 1055)으로 보여 줌
     private void diagnoseMailRemote() {
-        final SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
-        if (u.getString("mail", "").isEmpty() || u.getString("mailPass", "").isEmpty()) {
+        final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        if (user.getString("mail", "").isEmpty() || user.getString("mailPass", "").isEmpty()) {
             Toast.makeText(this, "사용자 등록에서 발신 이메일(Gmail)을 먼저 등록하세요.", Toast.LENGTH_LONG).show();
             return;
         }
         Toast.makeText(this, "Gmail 에 접속하는 중...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            String rep = MailWatcher.diagnose(u.getString("mail", ""), u.getString("mailPass", ""),
-                    u.getLong("mailUid", 0), HomeService.guardianEmails(this));
+            String rep = MailWatcher.diagnose(user.getString("mail", ""), user.getString("mailPass", ""),
+                    user.getLong("mailUid", 0), HomeService.guardianEmails(this));
             String head = "감시: " + (HomeService.mailRemoteOn(this) ? "켜짐" : "꺼짐 (Gmail 인증·보호자 이메일 필요)")
-                    + " / 회신: " + (u.getBoolean("mailRemote", false) ? "자동" : "물어보고")
-                    + "\n감시 상태: " + u.getString("mailRemoteState", "아직 접속한 적 없음 (서비스가 안 돌고 있을 수 있음)")
+                    + " / 회신: " + (user.getBoolean("mailRemote", false) ? "자동" : "물어보고")
+                    + "\n감시 상태: " + user.getString("mailRemoteState", "아직 접속한 적 없음 (서비스가 안 돌고 있을 수 있음)")
                     + "\n\n";
             runOnUiThread(() -> {
                 updateRemoteInfo();
-                TextView t = new TextView(this);
-                t.setText(head + rep);
-                t.setTextSize(13);
-                t.setTextIsSelectable(true);
-                t.setPadding(50, 20, 50, 20);
+                TextView tv = new TextView(this);
+                tv.setText(head + rep);
+                tv.setTextSize(13);
+                tv.setTextIsSelectable(true);
+                tv.setPadding(50, 20, 50, 20);
                 ScrollView sv = new ScrollView(this);
-                sv.addView(t);
+                sv.addView(tv);
                 ScreenId.tag(new AlertDialog.Builder(this)
                         .setTitle("이메일 위치 요청 - 지금 확인")
                         .setView(sv)
@@ -2973,23 +3144,23 @@ public class MainActivity extends Activity {
 
     private void updateRemoteInfo() {
         if (mailRemoteInfo != null) {
-            SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
-            long t = u.getLong("mailRemoteTime", 0);
-            String err = u.getString("mailRemoteErr", "");
+            SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+            long time = user.getLong("mailRemoteTime", 0);
+            String err = user.getString("mailRemoteErr", "");
             boolean on = HomeService.mailRemoteOn(this); // Gmail 인증 + 보호자 이메일 있으면 감시 중
-            mailRemoteInfo.setText((on ? "상태: " + u.getString("mailRemoteState", "아직 접속 안 함") + "\n" : "")
-                    + (t == 0 ? "아직 요청을 받은 적이 없습니다."
-                    : "마지막 요청: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
-                    + "  " + u.getString("mailRemoteResult", ""))
+            mailRemoteInfo.setText((on ? "상태: " + user.getString("mailRemoteState", "아직 접속 안 함") + "\n" : "")
+                    + (time == 0 ? "아직 요청을 받은 적이 없습니다."
+                    : "마지막 요청: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(time))
+                    + "  " + user.getString("mailRemoteResult", ""))
                     + (on && !err.isEmpty() ? "\n⚠️ " + err : ""));
         }
         if (remoteInfo == null) {
             return;
         }
         SharedPreferences tg = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
-        long t = tg.getLong("remoteTime", 0);
-        remoteInfo.setText(t == 0 ? "아직 요청을 받은 적이 없습니다."
-                : "마지막 요청: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
+        long time = tg.getLong("remoteTime", 0);
+        remoteInfo.setText(time == 0 ? "아직 요청을 받은 적이 없습니다."
+                : "마지막 요청: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(time))
                 + "  " + tg.getString("remoteResult", ""));
     }
 
@@ -3012,8 +3183,8 @@ public class MainActivity extends Activity {
             sos.setText("🆘\n보내는 중");
             startSosNow();
         };
-        sos.setOnTouchListener((v, e) -> {
-            switch (e.getAction()) {
+        sos.setOnTouchListener((view, event) -> {
+            switch (event.getAction()) {
                 case android.view.MotionEvent.ACTION_DOWN:
                     sos.setText("🆘\n계속\n누르세요");
                     handler.postDelayed(fire, 2000);
@@ -3041,7 +3212,7 @@ public class MainActivity extends Activity {
         SosActivity.fire(this);
     }
 
-    // (3) 알림 설정 탭 맨 위: SOS 설정
+    // (2) 알림 설정 탭 맨 위: SOS 설정
     private void buildSosSection(LinearLayout body) {
         View top = new View(this); // 위 '귀가·외출·미귀가 알림'과 구분선
         top.setBackgroundColor(0xFFDDDDDD);
@@ -3056,8 +3227,8 @@ public class MainActivity extends Activity {
         sosInfo.setTextColor(Color.DKGRAY);
         sosInfo.setTextSize(14);
         updateSosInfo();
-        msgStyleButtonFor(body, "보호자 전화번호 설정 (최대 3명)", v -> showSosSettings());
-        msgStyleButtonFor(body, "홈 화면에 SOS 바로가기 추가", v -> addSosShortcut());
+        msgStyleButtonFor(body, "보호자 전화번호 설정 (최대 3명)", view -> showSosSettings());
+        msgStyleButtonFor(body, "홈 화면에 SOS 바로가기 추가", view -> addSosShortcut());
         smallNote(body, "바로가기를 누르면 3초 카운트다운 후 작동합니다. (그 사이 [취소] 가능)\n"
                 + "앱 아이콘을 길게 눌러 나오는 메뉴에도 'SOS'가 있습니다.");
     }
@@ -3067,13 +3238,13 @@ public class MainActivity extends Activity {
             return;
         }
         StringBuilder ps = new StringBuilder(); // "엄마 010-…, 아빠 010-…"
-        for (String[] e : SosActivity.entries(this)) {
-            ps.append(ps.length() > 0 ? ", " : "").append(SosActivity.label(e));
+        for (String[] entry : SosActivity.entries(this)) {
+            ps.append(ps.length() > 0 ? ", " : "").append(SosActivity.label(entry));
         }
         SharedPreferences ev = getSharedPreferences(HomeService.PREF_EVENT, MODE_PRIVATE);
-        long t = ev.getLong("sosTime", 0);
+        long time = ev.getLong("sosTime", 0);
         sosInfo.setText("보호자: " + (ps.length() == 0 ? "(등록 안 됨)" : ps)
-                + (t == 0 ? "" : "\n마지막 SOS: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
+                + (time == 0 ? "" : "\n마지막 SOS: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(time))
                 + "  " + ev.getString("sosResult", "")));
     }
 
@@ -3103,7 +3274,7 @@ public class MainActivity extends Activity {
         sm.requestPinShortcut(si, null);
     }
 
-    // ---------- (3) 알림 설정 탭 ----------
+    // ---------- (2) 알림 설정 탭 ----------
 
     private CheckBox evHome, evAway;
     private TextView evLast;
@@ -3112,25 +3283,25 @@ public class MainActivity extends Activity {
             {"ch_self", "본인 폰"}, {"ch_email", "일반 이메일"},
             {"ch_kakao", "카톡 본인 메시지"}, {"ch_tg", "텔레그램"}, {"ch_sms", "일반 문자(수동)"}, {"ch_smsauto", "일반 문자(자동)"}};
 
-    private TextView sectionTitle(LinearLayout body, String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(17);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setTextColor(0xFF1976D2);
-        t.setPadding(40, 36, 40, 8);
-        body.addView(t);
-        return t;
+    private TextView sectionTitle(LinearLayout body, String heading) {
+        TextView tv = new TextView(this);
+        tv.setText(heading);
+        tv.setTextSize(17);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(0xFF1976D2);
+        tv.setPadding(40, 36, 40, 8);
+        body.addView(tv);
+        return tv;
     }
 
-    private TextView smallNote(LinearLayout body, String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(12);
-        t.setTextColor(Color.GRAY);
-        t.setPadding(40, 0, 40, 8);
-        body.addView(t);
-        return t;
+    private TextView smallNote(LinearLayout body, String msg) {
+        TextView tv = new TextView(this);
+        tv.setText(msg);
+        tv.setTextSize(12);
+        tv.setTextColor(Color.GRAY);
+        tv.setPadding(40, 0, 40, 8);
+        body.addView(tv);
+        return tv;
     }
 
     private void buildAlarmTab(LinearLayout body) {
@@ -3139,7 +3310,7 @@ public class MainActivity extends Activity {
         // 1) 귀가·외출 순간 알림
         sectionTitle(body, "■ 귀가 · 외출 · 미귀가 알림");
         smallNote(body, "홈 공유기에 연결되거나 끊기는 순간, 아래에서 고른 곳으로 바로 알립니다.\n"
-                + "(받는 사람·계정·보내는 사람 별명은 (4) 위치 보내기 탭의 각 설정을 그대로 씁니다)");
+                + "(받는 사람·계정·보내는 사람 별명은 (3) 위치 보내기 탭의 각 설정을 그대로 씁니다)");
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = 30;
@@ -3147,13 +3318,13 @@ public class MainActivity extends Activity {
         evHome.setText("귀가하면 알림");
         evHome.setTextSize(15);
         evHome.setChecked(ev.getBoolean("home", false));
-        evHome.setOnClickListener(v -> toggleEvent("home", evHome));
+        evHome.setOnClickListener(view -> toggleEvent("home", evHome));
         body.addView(evHome, lp);
         evAway = new CheckBox(this);
         evAway.setText("외출하면 알림 (2분 넘게 밖에 있을 때)");
         evAway.setTextSize(15);
         evAway.setChecked(ev.getBoolean("away", false));
-        evAway.setOnClickListener(v -> toggleEvent("away", evAway));
+        evAway.setOnClickListener(view -> toggleEvent("away", evAway));
         body.addView(evAway, lp);
 
         // 미귀가 알림: [22:00]까지 귀가하지 않으면 알림 (시각 버튼을 눌러 변경)
@@ -3164,18 +3335,18 @@ public class MainActivity extends Activity {
         evLate.setText("미귀가 알림:");
         evLate.setTextSize(15);
         evLate.setChecked(ev.getBoolean("late", false));
-        evLate.setOnClickListener(v -> toggleEvent("late", evLate));
+        evLate.setOnClickListener(view -> toggleEvent("late", evLate));
         lateRow.addView(evLate);
         final Button lateTime = new Button(this);
         lateTime.setText(ev.getString("lateTime", "22:00"));
         lateTime.setTextSize(14);
         lateTime.setTextColor(0xFFC62828);
-        lateTime.setOnClickListener(v -> {
+        lateTime.setOnClickListener(view -> {
             int[] hm = HomeService.parseTime(ev.getString("lateTime", "22:00"));
-            showTagged(new TimePickerDialog(this, (tp, h, m) -> {
-                String t = String.format(Locale.US, "%02d:%02d", h, m);
-                ev.edit().putString("lateTime", t).apply();
-                lateTime.setText(t);
+            showTagged(new TimePickerDialog(this, (tp, hour, minute) -> {
+                String hhmm = String.format(Locale.US, "%02d:%02d", hour, minute);
+                ev.edit().putString("lateTime", hhmm).apply();
+                lateTime.setText(hhmm);
                 HomeService.refresh(this); // 새 시각으로 다시 예약
             }, hm == null ? 22 : hm[0], hm == null ? 0 : hm[1], true), "1120");
         });
@@ -3203,12 +3374,12 @@ public class MainActivity extends Activity {
                 grid.addView(line);
             }
             final String key = EV_CHANNELS[k][0];
-            final CheckBox c = new CheckBox(this);
-            c.setText(EV_CHANNELS[k][1]);
-            c.setTextSize(13);
-            c.setChecked(ev.getBoolean(key, "ch_self".equals(key))); // 처음에는 '본인 폰'만 체크
-            c.setOnClickListener(v -> ev.edit().putBoolean(key, c.isChecked()).apply());
-            line.addView(c, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            final CheckBox check = new CheckBox(this);
+            check.setText(EV_CHANNELS[k][1]);
+            check.setTextSize(13);
+            check.setChecked(ev.getBoolean(key, "ch_self".equals(key))); // 처음에는 '본인 폰'만 체크
+            check.setOnClickListener(view -> ev.edit().putBoolean(key, check.isChecked()).apply());
+            line.addView(check, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
         body.addView(grid);
         if (!ev.contains("ch_self")) {
@@ -3216,7 +3387,7 @@ public class MainActivity extends Activity {
         }
         smallNote(body, "※ 카톡 본인 메시지·일반 문자, 그리고 '수동'으로 설정한 이메일은 알림을 눌러 직접 보내야 합니다.");
 
-        Button test = msgStyleButtonFor(body, "테스트 (지금 '귀가' 알림 보내 보기)", v -> {
+        Button test = msgStyleButtonFor(body, "테스트 (지금 '귀가' 알림 보내 보기)", view -> {
             if (!HomeService.eventOn(this)) {
                 Toast.makeText(this, "귀가 또는 외출 알림을 먼저 켜 주세요.", Toast.LENGTH_SHORT).show();
                 return;
@@ -3231,7 +3402,7 @@ public class MainActivity extends Activity {
         buildSosSection(body); // 2) 긴급 SOS (탭 맨 아래)
     }
 
-    // (4) 위치 보내기 탭: 정해진 시각 위치 보내기 (보내는 사람 별명 + 채널별 줄)
+    // (3) 위치 보내기 탭: 정해진 시각 위치 보내기 (보내는 사람 별명 + 채널별 줄)
     private void buildSendTab(LinearLayout body) {
         sectionTitle(body, "■ 정해진 시각 위치 보내기");
 
@@ -3241,10 +3412,10 @@ public class MainActivity extends Activity {
         away.setTextSize(15);
         away.setTypeface(null, Typeface.BOLD);
         away.setChecked(HomeService.awayOnly(this));
-        away.setOnClickListener(v -> {
+        away.setOnClickListener(view -> {
             if (away.isChecked() && loadRouters().isEmpty() && BtHome.registered(this).isEmpty()) {
                 away.setChecked(false);
-                Toast.makeText(this, "홈 공유기 또는 홈 PC 블루투스를 먼저 등록하세요. ((1) 홈 공유기 등록 탭)",
+                Toast.makeText(this, "홈 공유기 또는 홈 PC 블루투스를 먼저 등록하세요. ((1) 공유기 탭)",
                         Toast.LENGTH_LONG).show();
                 return;
             }
@@ -3299,7 +3470,7 @@ public class MainActivity extends Activity {
         Button save = new Button(this);
         save.setText("저장");
         save.setTypeface(null, Typeface.BOLD);
-        save.setOnClickListener(v -> saveSched(sch));
+        save.setOnClickListener(view -> saveSched(sch));
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         slp.topMargin = 20;
@@ -3320,9 +3491,9 @@ public class MainActivity extends Activity {
         if (sched().contains("mode")) {
             return;
         }
-        for (String p : SCHED_JOBS) {
-            SharedPreferences sp = getSharedPreferences(p, MODE_PRIVATE);
-            if (sp.contains("mode") && !(p.equals(HomeService.PREF_KAKAO))) {
+        for (String prefName : SCHED_JOBS) {
+            SharedPreferences sp = getSharedPreferences(prefName, MODE_PRIVATE);
+            if (sp.contains("mode") && !(prefName.equals(HomeService.PREF_KAKAO))) {
                 sched().edit().putString("mode", sp.getString("mode", "times"))
                         .putString("times", sp.getString("times", ""))
                         .putInt("interval", sp.getInt("interval", 60)).apply();
@@ -3333,12 +3504,12 @@ public class MainActivity extends Activity {
 
     // 공통 시각이 준비되지 않았으면 이유, 됐으면 null
     private String schedProblem() {
-        SharedPreferences s = sched();
-        if (!s.contains("mode")) {
-            return "(4) 위치 보내기 화면 맨 아래 '보내는 시각'을 먼저 저장하세요.";
+        SharedPreferences prefs = sched();
+        if (!prefs.contains("mode")) {
+            return "(3) 위치 보내기 화면 맨 아래 '보내는 시각'을 먼저 저장하세요.";
         }
-        if ("times".equals(s.getString("mode", "")) && s.getString("times", "").trim().isEmpty()) {
-            return "(4) 위치 보내기 화면 맨 아래 '보내는 시각'에 시각을 하나 이상 등록하세요.";
+        if ("times".equals(prefs.getString("mode", "")) && prefs.getString("times", "").trim().isEmpty()) {
+            return "(3) 위치 보내기 화면 맨 아래 '보내는 시각'에 시각을 하나 이상 등록하세요.";
         }
         return null;
     }
@@ -3346,24 +3517,24 @@ public class MainActivity extends Activity {
     // 공통 시각을 한 채널 설정에 복사. start 면 다음 송신 시각도 다시 계산
     // (지정 시각: 다음 시각에 / 일정 간격: 바로 1회 후 간격대로)
     private void copySched(SharedPreferences.Editor ed, boolean start) {
-        SharedPreferences s = sched();
-        String mode = s.getString("mode", "times");
-        String tm = s.getString("times", "");
-        ed.putString("mode", mode).putString("times", tm).putInt("interval", s.getInt("interval", 60));
+        SharedPreferences prefs = sched();
+        String mode = prefs.getString("mode", "times");
+        String tm = prefs.getString("times", "");
+        ed.putString("mode", mode).putString("times", tm).putInt("interval", prefs.getInt("interval", 60));
         if (start) {
             ed.putLong("next", "times".equals(mode) ? HomeService.nextTime(tm, System.currentTimeMillis()) : 0);
         }
     }
 
     // 팝업 안내: 보내는 시각은 1040 공통 설정
-    private void schedNote(LinearLayout f) {
-        TextView t = new TextView(this);
-        String p = schedProblem();
-        t.setText("보내는 시각: " + (p == null ? HomeService.emailSchedule(sched()) : "아직 없음")
-                + "\n((4) 위치 보내기 화면 맨 아래에서 바꿉니다)");
-        t.setTextColor(p == null ? Color.DKGRAY : 0xFFC62828);
-        t.setPadding(0, 24, 0, 0);
-        f.addView(t);
+    private void schedNote(LinearLayout form) {
+        TextView tv = new TextView(this);
+        String problem = schedProblem();
+        tv.setText("보내는 시각: " + (problem == null ? HomeService.emailSchedule(sched()) : "아직 없음")
+                + "\n((3) 위치 보내기 화면 맨 아래에서 바꿉니다)");
+        tv.setTextColor(problem == null ? Color.DKGRAY : 0xFFC62828);
+        tv.setPadding(0, 24, 0, 0);
+        form.addView(tv);
     }
 
     // 1040 [저장]: 공통 시각 저장 -> 모든 채널에 복사 (켜져 있는 채널은 다음 송신 시각 다시 계산)
@@ -3380,8 +3551,8 @@ public class MainActivity extends Activity {
         sched().edit().putString("mode", sch.byTimes() ? "times" : "interval")
                 .putString("times", tm == null ? "" : tm)
                 .putInt("interval", sch.minutes()).apply();
-        for (String p : SCHED_JOBS) {
-            SharedPreferences sp = getSharedPreferences(p, MODE_PRIVATE);
+        for (String prefName : SCHED_JOBS) {
+            SharedPreferences sp = getSharedPreferences(prefName, MODE_PRIVATE);
             SharedPreferences.Editor ed = sp.edit();
             copySched(ed, sp.getBoolean("on", false));
             ed.apply();
@@ -3392,16 +3563,16 @@ public class MainActivity extends Activity {
     }
 
     // msgBox 밖(본문)에 같은 모양의 버튼 하나
-    private Button msgStyleButtonFor(LinearLayout body, String label, View.OnClickListener l) {
-        Button b = msgStyleButton(l);
-        b.setText(label);
+    private Button msgStyleButtonFor(LinearLayout body, String label, View.OnClickListener listener) {
+        Button btn = msgStyleButton(listener);
+        btn.setText(label);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = 30;
         lp.rightMargin = 30;
         lp.topMargin = 10;
-        body.addView(b, lp);
-        return b;
+        body.addView(btn, lp);
+        return btn;
     }
 
     // 귀가(home) / 외출(away) 알림 켜기·끄기
@@ -3410,7 +3581,7 @@ public class MainActivity extends Activity {
         if (cb.isChecked()) {
             if (loadRouters().isEmpty() && BtHome.registered(this).isEmpty()) {
                 cb.setChecked(false);
-                Toast.makeText(this, "홈 공유기 또는 홈 PC 블루투스를 먼저 등록하세요. ((1) 홈 공유기 등록 탭)",
+                Toast.makeText(this, "홈 공유기 또는 홈 PC 블루투스를 먼저 등록하세요. ((1) 공유기 탭)",
                         Toast.LENGTH_LONG).show();
                 return;
             }
@@ -3435,9 +3606,9 @@ public class MainActivity extends Activity {
             return;
         }
         SharedPreferences ev = getSharedPreferences(HomeService.PREF_EVENT, MODE_PRIVATE);
-        long t = ev.getLong("lastTime", 0);
-        evLast.setText(t == 0 ? "아직 보낸 적이 없습니다."
-                : "마지막: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(t))
+        long time = ev.getLong("lastTime", 0);
+        evLast.setText(time == 0 ? "아직 보낸 적이 없습니다."
+                : "마지막: " + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date(time))
                 + "  " + ev.getString("lastResult", ""));
     }
 
@@ -3452,22 +3623,22 @@ public class MainActivity extends Activity {
         syncCheck(TelegramSender.PREF, on);
     }
 
-    private TextView label(LinearLayout f, String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(14);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setPadding(0, 24, 0, 4);
-        f.addView(t);
-        return t;
+    private TextView label(LinearLayout form, String labelText) {
+        TextView tv = new TextView(this);
+        tv.setText(labelText);
+        tv.setTextSize(14);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setPadding(0, 24, 0, 4);
+        form.addView(tv);
+        return tv;
     }
 
     // 설정 팝업: 봇 토큰, 받는 사람, 자동 송신 간격, 자동송신시작
     private void showTelegramDialog() {
         final SharedPreferences sp = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(60, 10, 60, 10);
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(60, 10, 60, 10);
 
         // 처음 쓰는 사람용: 단계별 설정 도우미 (누르면 이 팝업을 닫고 도우미 화면으로)
         Button wizard = new Button(this);
@@ -3475,10 +3646,10 @@ public class MainActivity extends Activity {
         wizard.setTextSize(14);
         wizard.setTypeface(null, Typeface.BOLD);
         wizard.setTextColor(0xFF1976D2);
-        f.addView(wizard, new LinearLayout.LayoutParams(
+        form.addView(wizard, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        label(f, "봇 토큰");
+        label(form, "봇 토큰");
         final EditText token = new EditText(this);
         token.setSingleLine(true);
         token.setHint("123456789:ABC... (BotFather에서 받은 토큰)");
@@ -3490,17 +3661,17 @@ public class MainActivity extends Activity {
         Button paste = new Button(this);
         paste.setText("붙여넣기");
         paste.setTextSize(13);
-        paste.setOnClickListener(v -> pasteToken(token));
+        paste.setOnClickListener(view -> pasteToken(token));
         tokenRow.addView(paste);
-        f.addView(tokenRow);
+        form.addView(tokenRow);
 
-        label(f, "받는 사람 (채팅 ID · 여러 명은 쉼표로 구분)");
+        label(form, "받는 사람 (채팅 ID · 여러 명은 쉼표로 구분)");
         final EditText chats = new EditText(this);
         chats.setSingleLine(true);
         chats.setInputType(InputType.TYPE_CLASS_TEXT);
         chats.setHint("예: 123456789, -100123456789");
         chats.setText(sp.getString("chats", ""));
-        f.addView(chats);
+        form.addView(chats);
         // 등록된 ID 의 이름 (설정 도우미/받는 사람 찾기로 알게 된 이름)
         StringBuilder names = new StringBuilder();
         for (String id : sp.getString("chats", "").split("[,\\s]+")) {
@@ -3514,22 +3685,22 @@ public class MainActivity extends Activity {
             nv.setText("등록: " + names);
             nv.setTextColor(Color.GRAY);
             nv.setTextSize(12);
-            f.addView(nv);
+            form.addView(nv);
         }
         Button find = new Button(this);
         find.setText("받는 사람 찾기 (봇에게 /start 한 사람·단톡방)");
         find.setTextSize(13);
-        find.setOnClickListener(v -> findTelegramChats(token, chats));
-        f.addView(find, new LinearLayout.LayoutParams(
+        find.setOnClickListener(view -> findTelegramChats(token, chats));
+        form.addView(find, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         Button shareBot = new Button(this);
         shareBot.setText("봇 링크 공유 (받는 사람에게 보내기)");
         shareBot.setTextSize(13);
-        shareBot.setOnClickListener(v -> shareBotLink(token));
-        f.addView(shareBot, new LinearLayout.LayoutParams(
+        shareBot.setOnClickListener(view -> shareBotLink(token));
+        form.addView(shareBot, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        label(f, "자동 송신 간격");
+        label(form, "자동 송신 간격");
         final Spinner interval = new Spinner(this);
         interval.setAdapter(new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
@@ -3539,7 +3710,7 @@ public class MainActivity extends Activity {
                 interval.setSelection(i);
             }
         }
-        f.addView(interval);
+        form.addView(interval);
 
         final CheckBox on = new CheckBox(this);
         on.setText("자동송신시작");
@@ -3558,25 +3729,25 @@ public class MainActivity extends Activity {
                 + "  " + sp.getString("lastResult", ""));
         last.setTextColor(Color.GRAY);
         last.setPadding(0, 16, 0, 0);
-        f.addView(last);
+        form.addView(last);
 
         ScrollView sv = new ScrollView(this);
-        sv.addView(f);
+        sv.addView(form);
 
-        final AlertDialog d = new AlertDialog.Builder(this)
+        final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("텔레그램 자동 송신")
                 .setView(sv)
                 .setPositiveButton("저장", null)
                 .setNeutralButton("지금 테스트", null)
                 .setNegativeButton("취소", null)
                 .create();
-        wizard.setOnClickListener(v -> {
-            d.dismiss();
+        wizard.setOnClickListener(view -> {
+            dialog.dismiss();
             startActivity(new Intent(this, TelegramSetupActivity.class));
         });
-        d.setOnShowListener(x -> {
+        dialog.setOnShowListener(shown -> {
             // 저장: 입력값 확인 후 저장, 자동송신시작이 체크되어 있으면 실행
-            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 String tk = token.getText().toString().trim();
                 String ch = chats.getText().toString().trim();
                 int min = TelegramSender.INTERVALS[interval.getSelectedItemPosition()];
@@ -3607,10 +3778,10 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, start
                         ? "저장했습니다. (켜져 있음 · " + TelegramSender.intervalLabel(min) + "마다)"
                         : "저장했습니다.", Toast.LENGTH_SHORT).show();
-                d.dismiss();
+                dialog.dismiss();
             });
             // 지금 테스트: 팝업은 그대로 두고 1회 전송
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
                 String tk = token.getText().toString().trim();
                 String ch = chats.getText().toString().trim();
                 if (tk.isEmpty() || ch.isEmpty()) {
@@ -3621,8 +3792,8 @@ public class MainActivity extends Activity {
                 sendTelegramNow(tk, ch, last);
             });
         });
-        d.show();
-        ScreenId.tag(d, "1180");
+        dialog.show();
+        ScreenId.tag(dialog, "1180");
     }
 
     // 클립보드에서 봇 토큰(숫자:영문 35자 내외)만 찾아 채우기
@@ -3706,9 +3877,9 @@ public class MainActivity extends Activity {
                 }
                 // 이미 등록된 ID 는 체크된 상태로 표시
                 Set<String> cur = new HashSet<>();
-                for (String s : chatsEdit.getText().toString().split("[,\\s]+")) {
-                    if (!s.isEmpty()) {
-                        cur.add(s);
+                for (String chat : chatsEdit.getText().toString().split("[,\\s]+")) {
+                    if (!chat.isEmpty()) {
+                        cur.add(chat);
                     }
                 }
                 final String[] labels = new String[found.size()];
@@ -3720,12 +3891,12 @@ public class MainActivity extends Activity {
                 ScreenId.tag(new AlertDialog.Builder(this)
                         .setTitle("받는 사람 선택")
                         .setMultiChoiceItems(labels, checked, (dlg, which, isChecked) -> checked[which] = isChecked)
-                        .setPositiveButton("추가", (dlg, w) -> {
+                        .setPositiveButton("추가", (dlg, pos) -> {
                             // 기존 목록 순서 유지 + 새로 체크한 것 추가, 체크 해제한 것은 제거
                             java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
-                            for (String s : chatsEdit.getText().toString().split("[,\\s]+")) {
-                                if (!s.isEmpty()) {
-                                    ids.add(s);
+                            for (String chat : chatsEdit.getText().toString().split("[,\\s]+")) {
+                                if (!chat.isEmpty()) {
+                                    ids.add(chat);
                                 }
                             }
                             for (int i = 0; i < found.size(); i++) {
@@ -3745,26 +3916,26 @@ public class MainActivity extends Activity {
 
     // 지금 화면의 위치(없으면 마지막으로 알려진 위치)를 한 번 전송
     private void sendTelegramNow(final String tk, final String ch, final TextView out) {
-        Location l = lastLoc;
-        if (l == null && hasPermission()) {
+        Location best = lastLoc;
+        if (best == null && hasPermission()) {
             try {
-                for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                    Location x = lm.getLastKnownLocation(p);
-                    if (x != null && (l == null || x.getTime() > l.getTime())) {
-                        l = x;
+                for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    Location cand = lm.getLastKnownLocation(provider);
+                    if (cand != null && (best == null || cand.getTime() > best.getTime())) {
+                        best = cand;
                     }
                 }
             } catch (SecurityException ignored) {
             }
         }
-        final Location loc = l;
+        final Location loc = best;
         out.setText("보내는 중...");
         new Thread(() -> {
             String err = TelegramSender.send(tk, ch, TelegramSender.message(this, loc));
             runOnUiThread(() -> {
-                String r = err == null ? "성공" : "실패: " + err;
-                out.setText("지금 테스트: " + r);
-                Toast.makeText(this, err == null ? "텔레그램으로 보냈습니다." : r, Toast.LENGTH_LONG).show();
+                String result = err == null ? "성공" : "실패: " + err;
+                out.setText("지금 테스트: " + result);
+                Toast.makeText(this, err == null ? "텔레그램으로 보냈습니다." : result, Toast.LENGTH_LONG).show();
             });
         }).start();
     }
@@ -3787,9 +3958,9 @@ public class MainActivity extends Activity {
     // 설정 팝업: 보내기 간격, 자동보내기시작
     private void showKakaoDialog() {
         final SharedPreferences sp = getSharedPreferences(HomeService.PREF_KAKAO, MODE_PRIVATE);
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(60, 10, 60, 10);
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(60, 10, 60, 10);
 
         TextView info = new TextView(this);
         info.setText("정해진 시각마다 위치를 확인해 알림을 띄웁니다.\n"
@@ -3798,10 +3969,10 @@ public class MainActivity extends Activity {
                 + "(카톡은 완전 자동 전송을 지원하지 않습니다)");
         info.setTextColor(Color.DKGRAY);
         info.setPadding(0, 16, 0, 0);
-        f.addView(info);
+        form.addView(info);
 
         // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀
-        schedNote(f);
+        schedNote(form);
 
         TextView last = new TextView(this);
         long lt = sp.getLong("lastTime", 0);
@@ -3809,24 +3980,24 @@ public class MainActivity extends Activity {
                 : "마지막 알림: " + new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date(lt)));
         last.setTextColor(Color.GRAY);
         last.setPadding(0, 16, 0, 0);
-        f.addView(last);
+        form.addView(last);
         if (!kakaoInstalled()) {
             last.setText("카카오톡이 설치되어 있지 않습니다.");
             last.setTextColor(0xFFC62828);
         }
 
         ScrollView sv = new ScrollView(this);
-        sv.addView(f);
+        sv.addView(form);
 
-        final AlertDialog d = new AlertDialog.Builder(this)
+        final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("카톡 본인 메시지 (수동)")
                 .setView(sv)
                 .setPositiveButton("저장", null)
                 .setNeutralButton("지금 테스트", null)
                 .setNegativeButton("취소", null)
                 .create();
-        d.setOnShowListener(x -> {
-            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.setOnShowListener(shown -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 boolean start = true; // 저장 = 1040 화면의 이 줄 자동 체크(켜기)
                 if (start && !kakaoInstalled()) {
                     Toast.makeText(this, "카카오톡이 설치되어 있지 않습니다.", Toast.LENGTH_SHORT).show();
@@ -3853,29 +4024,29 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, start
                         ? "저장했습니다. (켜져 있음 · " + HomeService.emailSchedule(sp) + " 알림)"
                         : "저장했습니다.", Toast.LENGTH_SHORT).show();
-                d.dismiss();
+                dialog.dismiss();
             });
             // 지금 테스트: 바로 카톡 공유 화면 열기
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
                 if (!kakaoInstalled()) {
                     Toast.makeText(this, "카카오톡이 설치되어 있지 않습니다.", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 last.setText("위치 메시지 만드는 중...");
-                sendKakaoNow(d);
+                sendKakaoNow(dialog);
             });
         });
-        d.show();
-        ScreenId.tag(d, "1170");
+        dialog.show();
+        ScreenId.tag(dialog, "1170");
     }
 
     // 지금 화면의 위치(없으면 마지막으로 알려진 위치)로 카톡 공유 화면 열기
-    private void sendKakaoNow(final AlertDialog d) {
+    private void sendKakaoNow(final AlertDialog dialog) {
         final Location loc = currentOrLastLocation();
         new Thread(() -> {
             String msg = TelegramSender.message(this, loc);
             runOnUiThread(() -> {
-                d.dismiss();
+                dialog.dismiss();
                 try {
                     startActivity(HomeService.kakaoShare(msg));
                 } catch (Exception e) {
@@ -3897,10 +4068,10 @@ public class MainActivity extends Activity {
     }
 
     // 카톡 이메일 받는 주소: 카카오메일 도메인만 (kakao.com, daum.net, hanmail.net)
-    private static boolean kakaoMailOnly(String s) {
-        for (String e : s.split("[,;\\s]+")) {
-            String d = e.substring(e.indexOf('@') + 1).toLowerCase(Locale.US);
-            if (!e.isEmpty() && !d.equals("kakao.com") && !d.equals("daum.net") && !d.equals("hanmail.net")) {
+    private static boolean kakaoMailOnly(String emails) {
+        for (String addr : emails.split("[,;\\s]+")) {
+            String domain = addr.substring(addr.indexOf('@') + 1).toLowerCase(Locale.US);
+            if (!addr.isEmpty() && !domain.equals("kakao.com") && !domain.equals("daum.net") && !domain.equals("hanmail.net")) {
                 return false;
             }
         }
@@ -3908,13 +4079,13 @@ public class MainActivity extends Activity {
     }
 
     // "8:5, 18:30, 08:05" -> 정렬/중복 제거한 "08:05, 18:30". 틀린 형식이 있으면 null
-    private static String normalizeTimes(String s) {
+    private static String normalizeTimes(String raw) {
         java.util.TreeSet<String> set = new java.util.TreeSet<>();
-        for (String t : s.split("[,\\s]+")) {
-            if (t.isEmpty()) {
+        for (String part : raw.split("[,\\s]+")) {
+            if (part.isEmpty()) {
                 continue;
             }
-            int[] hm = HomeService.parseTime(t);
+            int[] hm = HomeService.parseTime(part);
             if (hm == null) {
                 return null;
             }
@@ -3935,31 +4106,31 @@ public class MainActivity extends Activity {
         final String fr = user.getString("mail", "").trim();
         final String pw = user.getString("mailPass", "").replace(" ", "");
         final SharedPreferences sp = getSharedPreferences(pref, MODE_PRIVATE);
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setPadding(60, 10, 60, 10);
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(60, 10, 60, 10);
 
         // 받는 사람: 최대 5명, 한 줄에 한 명. 저장할 때 "a, b, c" 한 줄로 묶음
-        label(f, "받는 사람 이메일 (최대 5명)");
+        label(form, "받는 사람 이메일 (최대 5명)");
         final EditText[] tos = new EditText[5];
         String[] saved = sp.getString("to", "").split("[,;\\s]+");
-        int k = 0;
+        int slot = 0;
         for (int i = 0; i < tos.length; i++) {
             tos[i] = new EditText(this);
             tos[i].setSingleLine(true);
             tos[i].setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
             tos[i].setHint((i + 1) + ") 예: family@gmail.com");
-            while (k < saved.length && saved[k].trim().isEmpty()) {
-                k++;
+            while (slot < saved.length && saved[slot].trim().isEmpty()) {
+                slot++;
             }
-            if (k < saved.length) {
-                tos[i].setText(saved[k++].trim());
+            if (slot < saved.length) {
+                tos[i].setText(saved[slot++].trim());
             }
-            f.addView(tos[i]);
+            form.addView(tos[i]);
         }
 
         // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀
-        schedNote(f);
+        schedNote(form);
 
         final TextView last = new TextView(this);
         long lt = sp.getLong("lastTime", 0), nx = sp.getLong("next", 0);
@@ -3969,20 +4140,20 @@ public class MainActivity extends Activity {
                 + (sp.getBoolean("on", false) && nx > 0 ? "\n다음 송신: " + fmt.format(new Date(nx)) : ""));
         last.setTextColor(Color.GRAY);
         last.setPadding(0, 16, 0, 0);
-        f.addView(last);
+        form.addView(last);
 
         ScrollView sv = new ScrollView(this);
-        sv.addView(f);
+        sv.addView(form);
 
-        final AlertDialog d = new AlertDialog.Builder(this)
+        final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(HomeService.emailTitle(pref))
                 .setView(sv)
                 .setPositiveButton("저장", null)
                 .setNeutralButton("지금 테스트", null)
                 .setNegativeButton("취소", null)
                 .create();
-        d.setOnShowListener(x -> {
-            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.setOnShowListener(shown -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 String addr = joinEmails(tos);
                 boolean start = true; // 저장 = 1040 화면의 이 줄 자동 체크(켜기)
                 if (!addr.isEmpty() && !validEmails(addr)) {
@@ -4017,10 +4188,10 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, start
                         ? "저장했습니다. (켜져 있음 · " + HomeService.emailSchedule(sp) + ")"
                         : "저장했습니다.", Toast.LENGTH_SHORT).show();
-                d.dismiss();
+                dialog.dismiss();
             });
             // 지금 테스트: 자동 발송이면 바로 전송(팝업 유지), 아니면 Gmail 작성 화면 열기
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
                 final String addr = joinEmails(tos);
                 if (addr.isEmpty() || !validEmails(addr)) {
                     Toast.makeText(this, "받는 사람 이메일을 확인하세요.", Toast.LENGTH_SHORT).show();
@@ -4033,24 +4204,24 @@ public class MainActivity extends Activity {
                     String err = EmailSender.send(fr, pw, addr, HomeService.emailSubject(this),
                             TelegramSender.message(this, loc));
                     runOnUiThread(() -> {
-                        String r = err == null ? "성공" : "실패: " + err;
-                        last.setText("지금 테스트: " + r);
-                        Toast.makeText(this, err == null ? "메일을 보냈습니다." : r, Toast.LENGTH_LONG).show();
+                        String result = err == null ? "성공" : "실패: " + err;
+                        last.setText("지금 테스트: " + result);
+                        Toast.makeText(this, err == null ? "메일을 보냈습니다." : result, Toast.LENGTH_LONG).show();
                     });
                 }).start();
             });
         });
-        d.show();
-        ScreenId.tag(d, "1150");
+        dialog.show();
+        ScreenId.tag(dialog, "1150");
     }
 
     // 받는 사람 칸들(최대 5개) -> "a@x.com, b@y.com" 한 줄 (빈칸은 건너뜀)
     private static String joinEmails(EditText[] tos) {
         StringBuilder sb = new StringBuilder();
-        for (EditText e : tos) {
-            String s = e.getText().toString().trim();
-            if (!s.isEmpty()) {
-                sb.append(sb.length() > 0 ? ", " : "").append(s);
+        for (EditText edit : tos) {
+            String addr = edit.getText().toString().trim();
+            if (!addr.isEmpty()) {
+                sb.append(sb.length() > 0 ? ", " : "").append(addr);
             }
         }
         return sb.toString();
@@ -4072,9 +4243,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static boolean validEmails(String s) {
-        for (String e : s.split("[,;\\s]+")) {
-            if (!e.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(e).matches()) {
+    private static boolean validEmails(String emails) {
+        for (String addr : emails.split("[,;\\s]+")) {
+            if (!addr.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(addr).matches()) {
                 return false;
             }
         }
@@ -4082,19 +4253,19 @@ public class MainActivity extends Activity {
     }
 
     private Location currentOrLastLocation() {
-        Location l = lastLoc;
-        if (l == null && hasPermission()) {
+        Location best = lastLoc;
+        if (best == null && hasPermission()) {
             try {
-                for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                    Location x = lm.getLastKnownLocation(p);
-                    if (x != null && (l == null || x.getTime() > l.getTime())) {
-                        l = x;
+                for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    Location cand = lm.getLastKnownLocation(provider);
+                    if (cand != null && (best == null || cand.getTime() > best.getTime())) {
+                        best = cand;
                     }
                 }
             } catch (SecurityException ignored) {
             }
         }
-        return l;
+        return best;
     }
 
     private static String now() {

@@ -20,60 +20,60 @@ final class ScreenId {
     private ScreenId() {
     }
 
-    private static int dp(Context c, int v) {
-        return (int) (v * c.getResources().getDisplayMetrics().density);
+    private static int dp(Context ctx, int value) {
+        return (int) (value * ctx.getResources().getDisplayMetrics().density);
     }
 
     // 검은 줄 높이
-    static int height(Context c) {
-        return dp(c, 18);
+    static int height(Context ctx) {
+        return dp(ctx, 18);
     }
 
     // 검은 줄 (가로 전체, 흰 글자, 왼쪽 정렬)
-    static TextView label(Context c, String id) {
-        TextView t = new TextView(c);
-        t.setText("화면 " + id);
-        t.setTextSize(10);
-        t.setTextColor(Color.WHITE);
-        t.setBackgroundColor(Color.BLACK);
-        t.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        t.setPadding(dp(c, 8), 0, dp(c, 8), 0);
-        t.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height(c)));
-        return t;
+    static TextView label(Context ctx, String id) {
+        TextView tv = new TextView(ctx);
+        tv.setText("화면 " + id);
+        tv.setTextSize(10);
+        tv.setTextColor(Color.WHITE);
+        tv.setBackgroundColor(Color.BLACK);
+        tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        tv.setPadding(dp(ctx, 8), 0, dp(ctx, 8), 0);
+        tv.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height(ctx)));
+        return tv;
     }
 
     /*
      * 화면 맨 아래에 검은 줄 붙이기 (팝업·별도 화면 공용).
      * 원래 내용 아래쪽에 줄 높이만큼 빈 공간을 만들고, 그 자리에 줄을 놓아서 버튼을 가리지 않음.
      */
-    private static void attach(View contentFrame, Context c, String id) {
+    private static void attach(View contentFrame, Context ctx, String id) {
         if (!(contentFrame instanceof ViewGroup)) {
             return;
         }
         ViewGroup frame = (ViewGroup) contentFrame;
-        int h = height(c);
+        int px = height(ctx);
         if (frame.getChildCount() > 0) {
             View root = frame.getChildAt(0);
             root.setPadding(root.getPaddingLeft(), root.getPaddingTop(),
-                    root.getPaddingRight(), root.getPaddingBottom() + h);
+                    root.getPaddingRight(), root.getPaddingBottom() + px);
         }
-        frame.addView(label(c, id), new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, h, Gravity.BOTTOM));
+        frame.addView(label(ctx, id), new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, px, Gravity.BOTTOM));
     }
 
     // 팝업: show() 한 뒤에 호출
-    static <T extends Dialog> T tag(T d, String id) {
+    static <T extends Dialog> T tag(T dialog, String id) {
         try {
-            attach(d.findViewById(android.R.id.content), d.getContext(), id);
+            attach(dialog.findViewById(android.R.id.content), dialog.getContext(), id);
         } catch (Exception ignored) {
         }
-        return d;
+        return dialog;
     }
 
     // 별도 화면(Activity): setContentView() 한 뒤에 호출
-    static void tag(Activity a, String id) {
+    static void tag(Activity activity, String id) {
         try {
-            attach(a.findViewById(android.R.id.content), a, id);
+            attach(activity.findViewById(android.R.id.content), activity, id);
         } catch (Exception ignored) {
         }
     }

@@ -56,24 +56,24 @@ public class SosActivity extends Activity {
         root.setBackgroundColor(0xFFC62828);
         root.setPadding(60, 60, 60, 60);
 
-        TextView t = new TextView(this);
-        t.setText("🆘 SOS");
-        t.setTextSize(48);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setTextColor(Color.WHITE);
-        t.setGravity(Gravity.CENTER);
-        root.addView(t);
+        TextView tv = new TextView(this);
+        tv.setText("🆘 SOS");
+        tv.setTextSize(48);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(Color.WHITE);
+        tv.setGravity(Gravity.CENTER);
+        root.addView(tv);
 
-        TextView m = new TextView(this);
+        TextView msgView = new TextView(this);
         String first = firstLabel(this); // "엄마 010-1234-5678"
-        m.setText(first.isEmpty()
+        msgView.setText(first.isEmpty()
                 ? "보호자에게 위치를 보냅니다.\n(보호자 전화번호가 등록되지 않아 전화는 걸지 않습니다)"
                 : "보호자(" + first + ")에게 전화하고\n위치를 보냅니다.");
-        m.setTextSize(18);
-        m.setTextColor(Color.WHITE);
-        m.setGravity(Gravity.CENTER);
-        m.setPadding(0, 30, 0, 30);
-        root.addView(m);
+        msgView.setTextSize(18);
+        msgView.setTextColor(Color.WHITE);
+        msgView.setGravity(Gravity.CENTER);
+        msgView.setPadding(0, 30, 0, 30);
+        root.addView(msgView);
 
         count = new TextView(this);
         count.setText(String.valueOf(COUNT));
@@ -86,7 +86,7 @@ public class SosActivity extends Activity {
         Button cancel = new Button(this);
         cancel.setText("취소");
         cancel.setTextSize(28);
-        cancel.setOnClickListener(v -> {
+        cancel.setOnClickListener(view -> {
             handler.removeCallbacks(tick);
             Toast.makeText(this, "SOS 를 취소했습니다.", Toast.LENGTH_SHORT).show();
             finish();
@@ -109,74 +109,74 @@ public class SosActivity extends Activity {
 
     // ---------- 공용 (앱 화면의 [SOS] 버튼도 사용) ----------
 
-    static String phones(Context c) {
-        return c.getSharedPreferences(PREF_SOS, MODE_PRIVATE).getString("phones", "").trim();
+    static String phones(Context ctx) {
+        return ctx.getSharedPreferences(PREF_SOS, MODE_PRIVATE).getString("phones", "").trim();
     }
 
     /*
      * 보호자 목록: 저장 형식 "이름 번호, 이름 번호" (이름은 없어도 됨)
      * 예) "엄마 010-1234-5678, 아빠 010-9876-5432" -> {{"엄마","010-1234-5678"}, {"아빠","010-9876-5432"}}
      */
-    static java.util.List<String[]> entries(Context c) {
+    static java.util.List<String[]> entries(Context ctx) {
         java.util.List<String[]> list = new java.util.ArrayList<>();
-        for (String e : phones(c).split("[,;]+")) {
-            e = e.trim();
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\+?[0-9][0-9\\- ]{2,}[0-9]").matcher(e);
-            if (!m.find()) {
+        for (String part : phones(ctx).split("[,;]+")) {
+            part = part.trim();
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\+?[0-9][0-9\\- ]{2,}[0-9]").matcher(part);
+            if (!matcher.find()) {
                 continue;
             }
-            String num = m.group().trim();
-            String name = (e.substring(0, m.start()) + " " + e.substring(m.end())).trim();
+            String num = matcher.group().trim();
+            String name = (part.substring(0, matcher.start()) + " " + part.substring(matcher.end())).trim();
             list.add(new String[]{name, num});
         }
         return list;
     }
 
     // 표시용: "엄마 010-1234-5678" (이름이 없으면 번호만)
-    static String label(String[] e) {
-        return e[0].isEmpty() ? e[1] : e[0] + " " + e[1];
+    static String label(String[] entry) {
+        return entry[0].isEmpty() ? entry[1] : entry[0] + " " + entry[1];
     }
 
-    static String firstPhone(Context c) {
-        java.util.List<String[]> l = entries(c);
-        return l.isEmpty() ? "" : l.get(0)[1];
+    static String firstPhone(Context ctx) {
+        java.util.List<String[]> list = entries(ctx);
+        return list.isEmpty() ? "" : list.get(0)[1];
     }
 
-    static String firstLabel(Context c) {
-        java.util.List<String[]> l = entries(c);
-        return l.isEmpty() ? "" : label(l.get(0));
+    static String firstLabel(Context ctx) {
+        java.util.List<String[]> list = entries(ctx);
+        return list.isEmpty() ? "" : label(list.get(0));
     }
 
     // SOS 실행: 위치 전송(서비스) + 첫 번째 보호자에게 전화
-    static void fire(Context c) {
-        c.getSharedPreferences(PREF_SOS, MODE_PRIVATE).edit().putLong("lastSos", System.currentTimeMillis()).apply();
+    static void fire(Context ctx) {
+        ctx.getSharedPreferences(PREF_SOS, MODE_PRIVATE).edit().putLong("lastSos", System.currentTimeMillis()).apply();
         try {
-            HomeService.sos(c);
+            HomeService.sos(ctx);
         } catch (Exception e) {
-            Toast.makeText(c, "위치 전송을 시작하지 못했습니다. (위치 권한 확인)", Toast.LENGTH_LONG).show();
+            Toast.makeText(ctx, "위치 전송을 시작하지 못했습니다. (위치 권한 확인)", Toast.LENGTH_LONG).show();
         }
-        String p = firstPhone(c);
-        if (!p.isEmpty()) {
-            call(c, p);
+        String phone = firstPhone(ctx);
+        if (!phone.isEmpty()) {
+            call(ctx, phone);
         } else {
-            Toast.makeText(c, "보호자 전화번호가 없어 위치만 보냅니다.", Toast.LENGTH_LONG).show();
+            Toast.makeText(ctx, "보호자 전화번호가 없어 위치만 보냅니다.", Toast.LENGTH_LONG).show();
         }
     }
 
     // 전화 걸기: '전화 걸기' 권한이 있으면 바로 통화, 없으면 번호가 입력된 전화 화면
-    static void call(Context c, String phone) {
+    static void call(Context ctx, String phone) {
         String num = phone.replaceAll("[^0-9+]", "");
-        boolean direct = c.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
-        Intent i = new Intent(direct ? Intent.ACTION_CALL : Intent.ACTION_DIAL, Uri.parse("tel:" + num))
+        boolean direct = ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
+        Intent intent = new Intent(direct ? Intent.ACTION_CALL : Intent.ACTION_DIAL, Uri.parse("tel:" + num))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
-            c.startActivity(i);
+            ctx.startActivity(intent);
         } catch (Exception e) {
-            Toast.makeText(c, "전화를 걸 수 없습니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, "전화를 걸 수 없습니다.", Toast.LENGTH_SHORT).show();
         }
     }
 
-    static SharedPreferences prefs(Context c) {
-        return c.getSharedPreferences(PREF_SOS, MODE_PRIVATE);
+    static SharedPreferences prefs(Context ctx) {
+        return ctx.getSharedPreferences(PREF_SOS, MODE_PRIVATE);
     }
 }

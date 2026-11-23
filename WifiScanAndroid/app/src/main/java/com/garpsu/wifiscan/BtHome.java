@@ -36,55 +36,117 @@ final class BtHome {
     }
 
     // Android 12 이상은 '근처 기기' 권한 필요
-    static boolean hasPerm(Context c) {
+    static boolean hasPerm(Context ctx) {
         return Build.VERSION.SDK_INT < 31
-                || c.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+                || ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
     }
 
-    static BluetoothAdapter adapter(Context c) {
-        BluetoothManager bm = (BluetoothManager) c.getSystemService(Context.BLUETOOTH_SERVICE);
+    static BluetoothAdapter adapter(Context ctx) {
+        BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
         return bm == null ? null : bm.getAdapter();
     }
 
-    static boolean enabled(Context c) {
-        BluetoothAdapter ad = adapter(c);
+    static boolean enabled(Context ctx) {
+        BluetoothAdapter ad = adapter(ctx);
         return ad != null && ad.isEnabled();
     }
 
     // 등록한 홈 PC 목록: "MAC|이름"
-    static Set<String> registered(Context c) {
-        return new HashSet<>(c.getSharedPreferences("home", Context.MODE_PRIVATE)
+    static Set<String> registered(Context ctx) {
+        return new HashSet<>(ctx.getSharedPreferences("home", Context.MODE_PRIVATE)
                 .getStringSet("bt", new HashSet<String>()));
     }
 
-    static void save(Context c, Set<String> set) {
-        c.getSharedPreferences("home", Context.MODE_PRIVATE).edit().putStringSet("bt", set).apply();
+    static void save(Context ctx, Set<String> set) {
+        ctx.getSharedPreferences("home", Context.MODE_PRIVATE).edit().putStringSet("bt", set).apply();
     }
 
-    // 최근(FRESH 안)에 홈 PC를 찾았는지
-    static boolean seenRecently(Context c) {
-        SharedPreferences sp = c.getSharedPreferences("home", Context.MODE_PRIVATE);
-        return !registered(c).isEmpty()
+    // 기기 종류: "home" 설정의 "btkind_<MAC 대문자>" = "home"(홈) / "other"(기타). 값이 없으면(기존 기기) 기타
+    // 기타 기기(회사 PC, 차 등)는 가까이 있어도 귀가로 보지 않음
+    static boolean isHome(Context ctx, String mac) {
+        return mac != null && !mac.isEmpty() && "home".equals(ctx.getSharedPreferences("home", Context.MODE_PRIVATE)
+                .getString("btkind_" + mac.toUpperCase(Locale.US), "other"));
+    }
+
+    static void setHome(Context ctx, String mac, boolean home) {
+        ctx.getSharedPreferences("home", Context.MODE_PRIVATE).edit()
+                .putString("btkind_" + mac.toUpperCase(Locale.US), home ? "home" : "other").apply();
+    }
+
+    // 기기 별명 (1010 에서 입력): "home" 설정의 "btalias_<MAC 대문자>"
+    static String alias(Context ctx, String mac) {
+        if (mac == null || mac.isEmpty()) {
+            return "";
+        }
+        return ctx.getSharedPreferences("home", Context.MODE_PRIVATE)
+                .getString("btalias_" + mac.toUpperCase(Locale.US), "");
+    }
+
+    static void setAlias(Context ctx, String mac, String alias) {
+        ctx.getSharedPreferences("home", Context.MODE_PRIVATE).edit()
+                .putString("btalias_" + mac.toUpperCase(Locale.US), alias.trim()).apply();
+    }
+
+    // 별명이 있으면 별명, 없으면 페어링 이름
+    static String label(Context ctx, String mac, String name) {
+        String nick = alias(ctx, mac);
+        return nick.isEmpty() ? name : nick;
+    }
+
+    // 등록한 기기 중 '홈'으로 체크된 것이 있나
+    static boolean hasHome(Context ctx) {
+        for (String entry : registered(ctx)) {
+            if (isHome(ctx, entry.split("\\|", 2)[0])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 최근(FRESH 안)에 등록한 기기(홈·기타 모두)를 찾았는지
+    static boolean seenRecently(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences("home", Context.MODE_PRIVATE);
+        return !registered(ctx).isEmpty()
                 && System.currentTimeMillis() - sp.getLong("btSeenAt", 0) < FRESH;
     }
 
-    static void markSeen(Context c, String name) {
-        c.getSharedPreferences("home", Context.MODE_PRIVATE).edit()
-                .putLong("btSeenAt", System.currentTimeMillis()).putString("btSeenName", name).apply();
+    // 최근에 찾은 기기의 MAC / 이름
+    static String seenMac(Context ctx) {
+        return ctx.getSharedPreferences("home", Context.MODE_PRIVATE).getString("btSeenMac", "");
+    }
+
+    static String seenName(Context ctx) {
+        return ctx.getSharedPreferences("home", Context.MODE_PRIVATE).getString("btSeenName", "");
+    }
+
+    // 최근에 '홈' 기기를 찾음 = 집
+    static boolean seenHome(Context ctx) {
+        return seenRecently(ctx) && isHome(ctx, seenMac(ctx));
+    }
+
+    // 최근에 '기타' 기기를 찾음 (집 아님, 이름만 표시)
+    static boolean seenOther(Context ctx) {
+        return seenRecently(ctx) && !isHome(ctx, seenMac(ctx));
+    }
+
+    static void markSeen(Context ctx, String mac, String name) {
+        ctx.getSharedPreferences("home", Context.MODE_PRIVATE).edit()
+                .putLong("btSeenAt", System.currentTimeMillis())
+                .putString("btSeenMac", mac).putString("btSeenName", name).apply();
     }
 
     // 페어링된 기기 목록 {MAC, 이름}
     @SuppressWarnings("MissingPermission")
-    static List<String[]> bonded(Context c) {
+    static List<String[]> bonded(Context ctx) {
         List<String[]> list = new ArrayList<>();
-        BluetoothAdapter ad = adapter(c);
-        if (ad == null || !hasPerm(c)) {
+        BluetoothAdapter ad = adapter(ctx);
+        if (ad == null || !hasPerm(ctx)) {
             return list;
         }
         try {
-            for (BluetoothDevice d : ad.getBondedDevices()) {
-                String name = d.getName();
-                list.add(new String[]{d.getAddress().toUpperCase(Locale.US), name == null ? "(이름 없음)" : name});
+            for (BluetoothDevice device : ad.getBondedDevices()) {
+                String name = device.getName();
+                list.add(new String[]{device.getAddress().toUpperCase(Locale.US), name == null ? "(이름 없음)" : name});
             }
         } catch (SecurityException ignored) {
         }
@@ -92,35 +154,43 @@ final class BtHome {
     }
 
     /**
-     * 등록한 PC 중 하나라도 가까이 있으면 그 이름, 없으면 null.
-     * 오래 걸릴 수 있음(PC당 최대 몇 초) -> 반드시 작업 스레드에서 호출.
+     * 등록한 기기 중 하나라도 가까이 있으면 {MAC, 이름}, 없으면 null. '홈' 기기를 먼저 찾아봄.
+     * 오래 걸릴 수 있음(기기당 최대 몇 초) -> 반드시 작업 스레드에서 호출.
      */
-    static String findAny(Context c) {
-        for (String s : registered(c)) {
-            String[] t = s.split("\\|", 2);
-            if (probe(c, t[0])) {
-                return t.length > 1 ? t[1] : t[0];
+    static String[] findAny(Context ctx) {
+        List<String> order = new ArrayList<>();
+        for (String entry : registered(ctx)) {
+            if (isHome(ctx, entry.split("\\|", 2)[0])) {
+                order.add(0, entry);
+            } else {
+                order.add(entry);
+            }
+        }
+        for (String entry : order) {
+            String[] parts = entry.split("\\|", 2);
+            if (probe(ctx, parts[0])) {
+                return new String[]{parts[0], parts.length > 1 ? parts[1] : parts[0]};
             }
         }
         return null;
     }
 
     @SuppressWarnings("MissingPermission")
-    static boolean probe(Context c, final String mac) {
-        BluetoothAdapter ad = adapter(c);
-        if (ad == null || !ad.isEnabled() || !hasPerm(c)) {
+    static boolean probe(Context context, final String mac) {
+        BluetoothAdapter ad = adapter(context);
+        if (ad == null || !ad.isEnabled() || !hasPerm(context)) {
             return false;
         }
-        BluetoothDevice d;
+        BluetoothDevice device;
         try {
-            d = ad.getRemoteDevice(mac);
+            device = ad.getRemoteDevice(mac);
         } catch (Exception e) {
             return false;
         }
         // 1) 이미 블루투스로 연결되어 있으면 바로 '있음' (숨은 기능이라 안 되는 폰도 있음)
         try {
-            Object r = d.getClass().getMethod("isConnected").invoke(d);
-            if (Boolean.TRUE.equals(r)) {
+            Object connected = device.getClass().getMethod("isConnected").invoke(device);
+            if (Boolean.TRUE.equals(connected)) {
                 return true;
             }
         } catch (Exception ignored) {
@@ -129,35 +199,35 @@ final class BtHome {
         final CountDownLatch acl = new CountDownLatch(1);
         BroadcastReceiver rcv = new BroadcastReceiver() {
             @Override
-            public void onReceive(Context ctx, Intent i) {
-                BluetoothDevice x = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                if (x != null && mac.equalsIgnoreCase(x.getAddress())) {
+            public void onReceive(Context ctx, Intent intent) {
+                BluetoothDevice dev = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (dev != null && mac.equalsIgnoreCase(dev.getAddress())) {
                     acl.countDown();
                 }
             }
         };
-        IntentFilter f = new IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED);
-        Context app = c.getApplicationContext();
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED);
+        Context app = context.getApplicationContext();
         if (Build.VERSION.SDK_INT >= 33) {
-            app.registerReceiver(rcv, f, Context.RECEIVER_NOT_EXPORTED);
+            app.registerReceiver(rcv, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
-            app.registerReceiver(rcv, f);
+            app.registerReceiver(rcv, filter);
         }
-        BluetoothSocket s = null;
+        BluetoothSocket sock = null;
         boolean found = false;
         try {
             try {
                 ad.cancelDiscovery();
             } catch (Exception ignored) {
             }
-            s = d.createInsecureRfcommSocketToServiceRecord(SPP);
-            s.connect(); // 성공하면 당연히 있음, 실패해도 아래 ACL 로 판단
+            sock = device.createInsecureRfcommSocketToServiceRecord(SPP);
+            sock.connect(); // 성공하면 당연히 있음, 실패해도 아래 ACL 로 판단
             found = true;
         } catch (Exception ignored) {
         } finally {
-            if (s != null) {
+            if (sock != null) {
                 try {
-                    s.close();
+                    sock.close();
                 } catch (Exception ignored) {
                 }
             }

@@ -98,10 +98,10 @@ public class TelegramSetupActivity extends Activity {
         root.addView(step("1", "봇 만들기 (처음 한 번)"));
         boolean hasTg = getPackageManager().getLaunchIntentForPackage(TG_PKG) != null;
         if (!hasTg) {
-            TextView w = note("이 폰에 텔레그램이 없습니다. 먼저 설치하세요.");
-            w.setTextColor(0xFFC62828);
-            root.addView(w);
-            root.addView(button("텔레그램 설치하기", v -> open("market://details?id=" + TG_PKG,
+            TextView warn = note("이 폰에 텔레그램이 없습니다. 먼저 설치하세요.");
+            warn.setTextColor(0xFFC62828);
+            root.addView(warn);
+            root.addView(button("텔레그램 설치하기", view -> open("market://details?id=" + TG_PKG,
                     "https://play.google.com/store/apps/details?id=" + TG_PKG)));
         }
         root.addView(note("텔레그램의 BotFather(봇을 만들어 주는 공식 계정)에게 차례로 입력합니다.\n"
@@ -111,8 +111,8 @@ public class TelegramSetupActivity extends Activity {
                 + "완료되면 BotFather가 보낸 긴 메시지를 길게 눌러 [복사]하고 이 화면으로 돌아오세요.\n"
                 + "※ 이미 봇이 있으면: /mybots → 봇 선택 → API Token"));
         LinearLayout r1 = row();
-        r1.addView(button("BotFather 열기", v -> open("https://t.me/BotFather", null)), weight());
-        r1.addView(button("/newbot 복사", v -> copy("/newbot")), weight());
+        r1.addView(button("BotFather 열기", view -> open("https://t.me/BotFather", null)), weight());
+        r1.addView(button("/newbot 복사", view -> copy("/newbot")), weight());
         root.addView(r1);
 
         // ---------- 2단계: 토큰 넣기 ----------
@@ -124,22 +124,22 @@ public class TelegramSetupActivity extends Activity {
         token.setText(sp.getString("token", ""));
         root.addView(token);
         LinearLayout r2 = row();
-        r2.addView(button("붙여넣기", v -> pasteToken()), weight());
-        r2.addView(button("확인", v -> verifyToken()), weight());
+        r2.addView(button("붙여넣기", view -> pasteToken()), weight());
+        r2.addView(button("확인", view -> verifyToken()), weight());
         root.addView(r2);
         tokenStatus = note("");
         root.addView(tokenStatus);
         token.addTextChangedListener(new TextWatcher() {
             @Override
-            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            public void beforeTextChanged(CharSequence text, int pos, int count, int after) {
             }
 
             @Override
-            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            public void onTextChanged(CharSequence text, int pos, int before, int count) {
             }
 
             @Override
-            public void afterTextChanged(Editable s) {
+            public void afterTextChanged(Editable text) {
                 if (bot != null) { // 토큰이 바뀌면 다시 확인해야 함
                     setBot(null);
                     tokenStatus.setText("토큰이 바뀌었습니다. [확인]을 눌러 주세요.");
@@ -157,12 +157,12 @@ public class TelegramSetupActivity extends Activity {
         linkText.setTextIsSelectable(true);
         linkText.setTextColor(0xFF1976D2);
         s3.addView(linkText);
-        s3.addView(button("받는 사람에게 링크 보내기 (카톡·문자)", v -> shareLink(false)));
-        s3.addView(button("단톡방용 링크 보내기", v -> shareLink(true)));
+        s3.addView(button("받는 사람에게 링크 보내기 (카톡·문자)", view -> shareLink(false)));
+        s3.addView(button("단톡방용 링크 보내기", view -> shareLink(true)));
         TextView n3 = note("※ 이 링크를 받은 사람만 등록됩니다. 링크가 퍼졌다면 [새 링크 만들기]를 누르세요.");
         n3.setTextSize(12);
         s3.addView(n3);
-        s3.addView(button("새 링크 만들기", v -> {
+        s3.addView(button("새 링크 만들기", view -> {
             invite = newCode();
             sp.edit().putString("invite", invite).apply();
             showLink();
@@ -183,7 +183,7 @@ public class TelegramSetupActivity extends Activity {
         LinearLayout s5 = section(root);
         s5.addView(step("5", "테스트"));
         s5.addView(note("등록된 모든 사람에게 지금 위치를 한 번 보냅니다. 받는 사람 폰에 왔는지 확인하세요."));
-        s5.addView(button("테스트 보내기", v -> sendTest()));
+        s5.addView(button("테스트 보내기", view -> sendTest()));
         testStatus = note("");
         s5.addView(testStatus);
 
@@ -212,10 +212,10 @@ public class TelegramSetupActivity extends Activity {
             }
         }
         s6.addView(interval);
-        Button go = button("시작하기", v -> start(TelegramSender.INTERVALS[interval.getSelectedItemPosition()]));
+        Button go = button("시작하기", view -> start(TelegramSender.INTERVALS[interval.getSelectedItemPosition()]));
         go.setTypeface(null, Typeface.BOLD);
         s6.addView(go);
-        root.addView(button("닫기 (나중에 하기)", v -> finish())); // 토큰 전에도 누를 수 있게 단계 밖에 둠
+        root.addView(button("닫기 (나중에 하기)", view -> finish())); // 토큰 전에도 누를 수 있게 단계 밖에 둠
 
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
@@ -236,9 +236,9 @@ public class TelegramSetupActivity extends Activity {
         // BotFather 에서 복사하고 돌아오면 자동으로 붙여넣기 (토큰이 아직 없을 때만)
         if (bot == null && token.getText().toString().trim().isEmpty()) {
             handler.postDelayed(() -> {
-                String t = TelegramSender.extractToken(clipText());
-                if (t != null && token.getText().toString().trim().isEmpty()) {
-                    token.setText(t);
+                String found = TelegramSender.extractToken(clipText());
+                if (found != null && token.getText().toString().trim().isEmpty()) {
+                    token.setText(found);
                     verifyToken();
                 }
             }, 500); // 화면에 포커스가 온 뒤에 클립보드 읽기
@@ -268,13 +268,13 @@ public class TelegramSetupActivity extends Activity {
 
     private void pasteToken() {
         CharSequence txt = clipText();
-        String t = TelegramSender.extractToken(txt);
-        if (t == null) {
+        String found = TelegramSender.extractToken(txt);
+        if (found == null) {
             Toast.makeText(this, txt == null ? "복사된 내용이 없습니다. BotFather 메시지를 먼저 복사하세요."
                     : "복사된 내용에서 봇 토큰을 찾지 못했습니다.", Toast.LENGTH_LONG).show();
             return;
         }
-        token.setText(t);
+        token.setText(found);
         verifyToken();
     }
 
@@ -288,9 +288,9 @@ public class TelegramSetupActivity extends Activity {
         tokenStatus.setTextColor(Color.DKGRAY);
         new Thread(() -> {
             String[] err = new String[1];
-            String u = TelegramSender.botUsername(tk, err);
+            String username = TelegramSender.botUsername(tk, err);
             runOnUiThread(() -> {
-                if (u == null) {
+                if (username == null) {
                     tokenStatus.setText("✗ 확인 실패: " + err[0] + "\n토큰을 다시 복사해 붙여 넣으세요.");
                     tokenStatus.setTextColor(0xFFC62828);
                     return;
@@ -300,8 +300,8 @@ public class TelegramSetupActivity extends Activity {
                     ed.putLong("lastUpdate", 0); // 다른 봇: 메시지 번호가 달라지므로 처음부터
                 }
                 ed.apply();
-                setBot(u);
-                tokenStatus.setText("✓ 확인됨: @" + u);
+                setBot(username);
+                tokenStatus.setText("✓ 확인됨: @" + username);
                 tokenStatus.setTextColor(0xFF2E7D32);
                 startPolling();
             });
@@ -309,23 +309,23 @@ public class TelegramSetupActivity extends Activity {
     }
 
     // 토큰 확인 전에는 3~6단계를 흐리게, 누를 수 없게
-    private void setBot(String u) {
-        bot = u;
-        for (View v : afterToken) {
-            v.setAlpha(u == null ? 0.35f : 1f);
-            setEnabledAll(v, u != null);
+    private void setBot(String username) {
+        bot = username;
+        for (View view : afterToken) {
+            view.setAlpha(username == null ? 0.35f : 1f);
+            setEnabledAll(view, username != null);
         }
         showLink();
-        waitStatus.setText(u == null ? "2단계(토큰 확인)를 먼저 해 주세요."
+        waitStatus.setText(username == null ? "2단계(토큰 확인)를 먼저 해 주세요."
                 : "받는 사람이 [시작]을 누르기를 기다리는 중... (3초마다 자동 확인)");
     }
 
-    private static void setEnabledAll(View v, boolean on) {
-        v.setEnabled(on);
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) {
-                setEnabledAll(g.getChildAt(i), on);
+    private static void setEnabledAll(View view, boolean on) {
+        view.setEnabled(on);
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                setEnabledAll(group.getChildAt(i), on);
             }
         }
     }
@@ -334,10 +334,10 @@ public class TelegramSetupActivity extends Activity {
 
     private static String newCode() {
         String abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-        SecureRandom r = new SecureRandom();
+        SecureRandom rnd = new SecureRandom();
         StringBuilder sb = new StringBuilder("w");
         for (int i = 0; i < 11; i++) {
-            sb.append(abc.charAt(r.nextInt(abc.length())));
+            sb.append(abc.charAt(rnd.nextInt(abc.length())));
         }
         return sb.toString();
     }
@@ -397,22 +397,22 @@ public class TelegramSetupActivity extends Activity {
             if (arr != null) {
                 long last = sp.getLong("lastUpdate", 0);
                 long max = last;
-                Pattern p = Pattern.compile("^/start(@\\S+)?(\\s+(\\S+))?\\s*$");
+                Pattern pattern = Pattern.compile("^/start(@\\S+)?(\\s+(\\S+))?\\s*$");
                 for (int i = 0; i < arr.length(); i++) {
-                    JSONObject u = arr.optJSONObject(i);
-                    if (u == null) {
+                    JSONObject update = arr.optJSONObject(i);
+                    if (update == null) {
                         continue;
                     }
-                    long uid = u.optLong("update_id");
+                    long uid = update.optLong("update_id");
                     if (uid <= last) {
                         continue; // 이미 처리한 메시지
                     }
                     max = Math.max(max, uid);
-                    JSONObject m = u.optJSONObject("message");
-                    if (m == null || m.optJSONObject("chat") == null) {
+                    JSONObject msg = update.optJSONObject("message");
+                    if (msg == null || msg.optJSONObject("chat") == null) {
                         continue;
                     }
-                    Matcher mt = p.matcher(m.optString("text"));
+                    Matcher mt = pattern.matcher(msg.optString("text"));
                     if (!mt.matches()) {
                         continue;
                     }
@@ -420,7 +420,7 @@ public class TelegramSetupActivity extends Activity {
                         noCode = true; // 초대 링크 없이 /start
                         continue;
                     }
-                    JSONObject chat = m.optJSONObject("chat");
+                    JSONObject chat = msg.optJSONObject("chat");
                     String id = String.valueOf(chat.optLong("id"));
                     String label = TelegramSender.chatLabel(chat);
                     added.add(new String[]{id, label});
@@ -438,9 +438,9 @@ public class TelegramSetupActivity extends Activity {
                     waitStatus.setText("확인 실패: " + err[0] + " (계속 다시 시도합니다)");
                     return;
                 }
-                for (String[] a : added) {
-                    addPerson(a[0], a[1]);
-                    Toast.makeText(this, a[1] + " 님이 연결되었습니다 ✓", Toast.LENGTH_LONG).show();
+                for (String[] person : added) {
+                    addPerson(person[0], person[1]);
+                    Toast.makeText(this, person[1] + " 님이 연결되었습니다 ✓", Toast.LENGTH_LONG).show();
                 }
                 waitStatus.setText("받는 사람이 [시작]을 누르기를 기다리는 중... (3초마다 자동 확인)"
                         + (hint ? "\n※ 초대 링크 없이 [시작]한 사람이 있습니다. 3단계의 링크를 눌러야 등록됩니다." : ""));
@@ -450,9 +450,9 @@ public class TelegramSetupActivity extends Activity {
 
     private LinkedHashSet<String> chatIds() {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
-        for (String s : sp.getString("chats", "").split("[,\\s]+")) {
-            if (!s.isEmpty()) {
-                ids.add(s);
+        for (String chat : sp.getString("chats", "").split("[,\\s]+")) {
+            if (!chat.isEmpty()) {
+                ids.add(chat);
             }
         }
         return ids;
@@ -473,29 +473,29 @@ public class TelegramSetupActivity extends Activity {
     private void renderPeople() {
         people.removeAllViews();
         LinkedHashSet<String> ids = chatIds();
-        TextView h = note("등록된 받는 사람: " + ids.size() + "명");
-        h.setTypeface(null, Typeface.BOLD);
-        people.addView(h);
+        TextView title = note("등록된 받는 사람: " + ids.size() + "명");
+        title.setTypeface(null, Typeface.BOLD);
+        people.addView(title);
         for (final String id : ids) {
             String name = TelegramSender.nameOf(this, id);
-            LinearLayout r = row();
-            r.setGravity(Gravity.CENTER_VERTICAL);
-            TextView t = new TextView(this);
-            t.setText("✓ " + (name == null ? "ID " + id : name));
-            t.setTextSize(15);
-            t.setTextColor(0xFF2E7D32);
-            r.addView(t, weight());
+            LinearLayout rowBox = row();
+            rowBox.setGravity(Gravity.CENTER_VERTICAL);
+            TextView tv = new TextView(this);
+            tv.setText("✓ " + (name == null ? "ID " + id : name));
+            tv.setTextSize(15);
+            tv.setTextColor(0xFF2E7D32);
+            rowBox.addView(tv, weight());
             Button del = new Button(this);
             del.setText("삭제");
             del.setTextSize(13);
-            del.setOnClickListener(v -> {
-                LinkedHashSet<String> s = chatIds();
-                s.remove(id);
-                saveIds(s);
+            del.setOnClickListener(view -> {
+                LinkedHashSet<String> chatSet = chatIds();
+                chatSet.remove(id);
+                saveIds(chatSet);
                 renderPeople();
             });
-            r.addView(del);
-            people.addView(r);
+            rowBox.addView(del);
+            people.addView(rowBox);
         }
     }
 
@@ -528,10 +528,10 @@ public class TelegramSetupActivity extends Activity {
         LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         Location best = null;
         try {
-            for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                Location l = lm.getLastKnownLocation(p);
-                if (l != null && (best == null || l.getTime() > best.getTime())) {
-                    best = l;
+            for (String str : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                Location loc = lm.getLastKnownLocation(str);
+                if (loc != null && (best == null || loc.getTime() > best.getTime())) {
+                    best = loc;
                 }
             }
         } catch (SecurityException ignored) {
@@ -566,37 +566,37 @@ public class TelegramSetupActivity extends Activity {
 
     // ---------- 화면 도우미 ----------
 
-    private TextView step(String n, String title) {
-        TextView t = new TextView(this);
-        t.setText(n + "단계  " + title);
-        t.setTextSize(18);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setTextColor(0xFF1976D2);
-        t.setPadding(0, 50, 0, 10);
-        return t;
+    private TextView step(String stepNo, String title) {
+        TextView tv = new TextView(this);
+        tv.setText(stepNo + "단계  " + title);
+        tv.setTextSize(18);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(0xFF1976D2);
+        tv.setPadding(0, 50, 0, 10);
+        return tv;
     }
 
-    private TextView note(String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(14);
-        t.setTextColor(Color.DKGRAY);
-        t.setPadding(0, 6, 0, 6);
-        return t;
+    private TextView note(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(14);
+        tv.setTextColor(Color.DKGRAY);
+        tv.setPadding(0, 6, 0, 6);
+        return tv;
     }
 
-    private Button button(String label, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(14);
-        b.setOnClickListener(l);
-        return b;
+    private Button button(String label, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(label);
+        btn.setTextSize(14);
+        btn.setOnClickListener(listener);
+        return btn;
     }
 
     private LinearLayout row() {
-        LinearLayout r = new LinearLayout(this);
-        r.setOrientation(LinearLayout.HORIZONTAL);
-        return r;
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        return row;
     }
 
     private static LinearLayout.LayoutParams weight() {
@@ -605,17 +605,17 @@ public class TelegramSetupActivity extends Activity {
 
     // 토큰 확인 후에만 쓸 수 있는 단계 묶음
     private LinearLayout section(LinearLayout root) {
-        LinearLayout s = new LinearLayout(this);
-        s.setOrientation(LinearLayout.VERTICAL);
-        root.addView(s);
-        afterToken.add(s);
-        return s;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        root.addView(box);
+        afterToken.add(box);
+        return box;
     }
 
-    private void copy(String s) {
+    private void copy(String text) {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("text", s));
-        Toast.makeText(this, "'" + s + "' 를 복사했습니다. BotFather 대화창에 붙여 넣으세요.", Toast.LENGTH_SHORT).show();
+        cm.setPrimaryClip(ClipData.newPlainText("text", text));
+        Toast.makeText(this, "'" + text + "' 를 복사했습니다. BotFather 대화창에 붙여 넣으세요.", Toast.LENGTH_SHORT).show();
     }
 
     // 텔레그램 앱(또는 스토어)으로 열기, 실패하면 대체 주소(브라우저)

@@ -40,7 +40,7 @@ final class MailWatcher {
         boolean onRequest(String fromAddr, String subject);
 
         // 지금 상태 (화면 표시용): "새 메일 대기 중 (마지막 확인 10:42)" 등
-        void state(String s);
+        void state(String msg);
     }
 
     private static String now() {
@@ -74,10 +74,10 @@ final class MailWatcher {
 
     // 다른 스레드에서 감시 중단 (대기 중인 읽기를 바로 끝냄)
     void stop() {
-        SSLSocket x = s;
-        if (x != null) {
+        SSLSocket sock = s;
+        if (sock != null) {
             try {
-                x.close();
+                sock.close();
             } catch (Exception ignored) {
             }
         }
@@ -98,18 +98,18 @@ final class MailWatcher {
         out = s.getOutputStream();
         readLogical(); // 인사말 "* OK"
 
-        List<String> r = cmd("LOGIN " + quote(user) + " " + quote(pass));
-        if (!ok(r)) {
-            return "로그인 실패 - 사용자 등록의 Gmail·앱 비밀번호를 확인하세요 (" + r.get(r.size() - 1) + ")";
+        List<String> resp = cmd("LOGIN " + quote(user) + " " + quote(pass));
+        if (!ok(resp)) {
+            return "로그인 실패 - 사용자 등록의 Gmail·앱 비밀번호를 확인하세요 (" + resp.get(resp.size() - 1) + ")";
         }
-        r = cmd("SELECT INBOX");
-        if (!ok(r)) {
+        resp = cmd("SELECT INBOX");
+        if (!ok(resp)) {
             return "받은편지함 열기 실패";
         }
-        for (String line : r) {
-            Matcher m = UIDNEXT.matcher(line);
-            if (m.find()) {
-                uidNext[0] = Long.parseLong(m.group(1));
+        for (String line : resp) {
+            Matcher matcher = UIDNEXT.matcher(line);
+            if (matcher.find()) {
+                uidNext[0] = Long.parseLong(matcher.group(1));
             }
         }
         return null;
@@ -133,11 +133,11 @@ final class MailWatcher {
 
         while (cb.running()) {
             // 1) 새 메일(마지막 확인 UID 다음부터)의 보낸 사람·제목만 확인
-            List<String> r = cmd("UID FETCH " + (last + 1) + ":* (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])");
-            if (!ok(r)) {
+            List<String> resp = cmd("UID FETCH " + (last + 1) + ":* (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])");
+            if (!ok(resp)) {
                 return "메일 확인 실패";
             }
-            last = handle(r, last, cb);
+            last = handle(resp, last, cb);
             st.edit().putLong("mailUid", last).apply();
             cb.state("새 메일 대기 중 (마지막 확인 " + now() + ")");
 
@@ -160,10 +160,10 @@ final class MailWatcher {
             }
             s.setSoTimeout(30000);
             write("DONE");
-            String l;
+            String ln;
             do {
-                l = readLogical();
-            } while (!l.startsWith(tag + " "));
+                ln = readLogical();
+            } while (!ln.startsWith(tag + " "));
         }
         try {
             cmd("LOGOUT");
@@ -174,22 +174,22 @@ final class MailWatcher {
 
     // FETCH 결과에서 UID 가 after 보다 큰 메일들을 검사: 위치 요청이고 받아들여지면(onRequest true) 삭제.
     // 가장 큰 UID 를 돌려줌
-    private long handle(List<String> r, long after, Callback cb) throws IOException {
+    private long handle(List<String> resp, long after, Callback cb) throws IOException {
         long max = after;
         java.util.Set<Long> seen = new java.util.HashSet<>();
-        for (String line : r) {
-            Matcher m = UID.matcher(line);
-            if (!line.startsWith("*") || !line.contains("FETCH") || !m.find()) {
+        for (String line : resp) {
+            Matcher matcher = UID.matcher(line);
+            if (!line.startsWith("*") || !line.contains("FETCH") || !matcher.find()) {
                 continue;
             }
-            long uid = Long.parseLong(m.group(1));
+            long uid = Long.parseLong(matcher.group(1));
             if (uid <= after || !seen.add(uid)) {
                 continue; // "n:*" 는 새 메일이 없으면 마지막 메일 하나를 돌려줌
             }
             max = Math.max(max, uid);
             String subject = decode(header(line, "Subject")).trim();
-            Matcher a = ADDR.matcher(header(line, "From"));
-            if (a.find() && isRequest(subject) && cb.onRequest(a.group().toLowerCase(Locale.US), subject)) {
+            Matcher addrMatcher = ADDR.matcher(header(line, "From"));
+            if (addrMatcher.find() && isRequest(subject) && cb.onRequest(addrMatcher.group().toLowerCase(Locale.US), subject)) {
                 delete(uid); // 처리한 요청 메일은 삭제 (휴지통으로)
             }
         }
@@ -199,11 +199,11 @@ final class MailWatcher {
     // 받은편지함 전체에서 위치 요청 메일 찾기: 제목 검색("where") + 혹시 몰라 최근 100통
     private void scanInbox(long uidNext, Callback cb) throws IOException {
         java.util.TreeSet<Long> uids = new java.util.TreeSet<>();
-        for (String l : cmd("UID SEARCH SUBJECT \"where\"")) {
-            if (l.startsWith("* SEARCH")) {
-                for (String t : l.substring(8).trim().split("\\s+")) {
+        for (String ln : cmd("UID SEARCH SUBJECT \"where\"")) {
+            if (ln.startsWith("* SEARCH")) {
+                for (String uid : ln.substring(8).trim().split("\\s+")) {
                     try {
-                        uids.add(Long.parseLong(t));
+                        uids.add(Long.parseLong(uid));
                     } catch (NumberFormatException ignored) {
                     }
                 }
@@ -213,12 +213,12 @@ final class MailWatcher {
             uids.pollFirst(); // 너무 많으면 최근 200통만
         }
         StringBuilder set = new StringBuilder(Math.max(1, uidNext - 100) + ":*");
-        for (Long u : uids) {
-            set.append(',').append(u);
+        for (Long uid : uids) {
+            set.append(',').append(uid);
         }
-        List<String> r = cmd("UID FETCH " + set + " (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])");
-        if (ok(r)) {
-            handle(r, 0, cb);
+        List<String> resp = cmd("UID FETCH " + set + " (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])");
+        if (ok(resp)) {
+            handle(resp, 0, cb);
         }
     }
 
@@ -228,10 +228,10 @@ final class MailWatcher {
 
     private void findTrash() throws IOException {
         trash = null;
-        for (String l : cmd("LIST \"\" \"*\"")) {
-            Matcher m = LIST.matcher(l);
-            if (m.find() && m.group(1).contains("\\Trash")) {
-                trash = m.group(2).trim();
+        for (String ln : cmd("LIST \"\" \"*\"")) {
+            Matcher matcher = LIST.matcher(ln);
+            if (matcher.find() && matcher.group(1).contains("\\Trash")) {
+                trash = matcher.group(2).trim();
             }
         }
     }
@@ -247,11 +247,11 @@ final class MailWatcher {
 
     // [지금 확인] 진단: 접속·로그인 결과와 받은편지함 최근 메일 5통을 앱이 어떻게 판단하는지 보여 줌 (처리는 안 함)
     static String diagnose(String user, String pass, long lastUid, java.util.Set<String> allowed) {
-        MailWatcher w = new MailWatcher();
+        MailWatcher watcher = new MailWatcher();
         StringBuilder sb = new StringBuilder();
         try {
             long[] un = new long[1];
-            String err = w.open(user.trim(), pass.replace(" ", ""), un);
+            String err = watcher.open(user.trim(), pass.replace(" ", ""), un);
             if (err != null) {
                 return "❌ " + err;
             }
@@ -260,19 +260,19 @@ final class MailWatcher {
                     .append(" / 앱이 마지막으로 확인한 번호: ").append(lastUid == 0 ? "아직 없음" : String.valueOf(lastUid))
                     .append("\n\n최근 메일 5통:\n");
             long from = Math.max(1, un[0] - 5);
-            List<String> r = w.cmd("UID FETCH " + from + ":* (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])");
-            int n = 0;
-            for (String line : r) {
-                Matcher m = UID.matcher(line);
-                if (!line.startsWith("*") || !line.contains("FETCH") || !m.find()) {
+            List<String> resp = watcher.cmd("UID FETCH " + from + ":* (UID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])");
+            int count = 0;
+            for (String line : resp) {
+                Matcher matcher = UID.matcher(line);
+                if (!line.startsWith("*") || !line.contains("FETCH") || !matcher.find()) {
                     continue;
                 }
-                n++;
-                long uid = Long.parseLong(m.group(1));
+                count++;
+                long uid = Long.parseLong(matcher.group(1));
                 String rawSubject = header(line, "Subject");
                 String subject = decode(rawSubject).trim();
-                Matcher a = ADDR.matcher(header(line, "From"));
-                String addr = a.find() ? a.group().toLowerCase(Locale.US) : "(주소 없음)";
+                Matcher addrMatcher = ADDR.matcher(header(line, "From"));
+                String addr = addrMatcher.find() ? addrMatcher.group().toLowerCase(Locale.US) : "(주소 없음)";
                 boolean req = isRequest(subject);
                 sb.append("\n#").append(uid).append("  ").append(addr).append("\n  제목: \"").append(subject).append("\"");
                 if (!req) {
@@ -289,7 +289,7 @@ final class MailWatcher {
                 }
                 sb.append('\n');
             }
-            if (n == 0) {
+            if (count == 0) {
                 sb.append("(메일 없음)\n");
             }
             sb.append("\n등록된 보호자 이메일: ").append(allowed.isEmpty() ? "없음" : android.text.TextUtils.join(", ", allowed));
@@ -297,7 +297,7 @@ final class MailWatcher {
         } catch (Exception e) {
             return sb + "\n❌ 연결 오류: " + e;
         } finally {
-            w.stop();
+            watcher.stop();
         }
     }
 
@@ -305,10 +305,10 @@ final class MailWatcher {
     // 너그럽게: 전각 ＃·전각 영문, 보이지 않는 글자, 앞뒤에 붙은 말("Re: #where", "#where please") 허용
     // "#wherever" 처럼 뒤에 영문이 더 붙은 것은 아님. 한글("#위치")은 인식하지 않음
     static boolean isRequest(String subject) {
-        String s = java.text.Normalizer.normalize(subject, java.text.Normalizer.Form.NFKC) // 전각 ＃ｗｈｅｒｅ -> #where
+        String norm = java.text.Normalizer.normalize(subject, java.text.Normalizer.Form.NFKC) // 전각 ＃ｗｈｅｒｅ -> #where
                 .replaceAll("[\\u200B-\\u200D\\uFEFF\\u00A0]", " ")
                 .toLowerCase(Locale.US);
-        return s.matches("(?s).*#\\s*where(?![a-z]).*");
+        return norm.matches("(?s).*#\\s*where(?![a-z]).*");
     }
 
     // ---------- IMAP 주고받기 ----------
@@ -323,21 +323,21 @@ final class MailWatcher {
     }
 
     // 명령 보내고, 태그가 붙은 마지막 줄까지 읽음 (마지막 원소 = 결과 줄)
-    private List<String> cmd(String c) throws IOException {
+    private List<String> cmd(String command) throws IOException {
         String tag = nextTag();
-        write(tag + " " + c);
-        List<String> r = new ArrayList<>();
+        write(tag + " " + command);
+        List<String> resp = new ArrayList<>();
         while (true) {
-            String l = readLogical();
-            r.add(l);
-            if (l.startsWith(tag + " ")) {
-                return r;
+            String ln = readLogical();
+            resp.add(ln);
+            if (ln.startsWith(tag + " ")) {
+                return resp;
             }
         }
     }
 
-    private static boolean ok(List<String> r) {
-        String last = r.get(r.size() - 1);
+    private static boolean ok(List<String> resp) {
+        String last = resp.get(resp.size() - 1);
         int sp = last.indexOf(' ');
         return sp > 0 && last.startsWith("OK", sp + 1);
     }
@@ -348,21 +348,21 @@ final class MailWatcher {
         while (true) {
             byte[] line = readRawLine();
             buf.write(line);
-            Matcher m = LITERAL.matcher(new String(line, StandardCharsets.ISO_8859_1));
-            if (!m.find()) {
+            Matcher matcher = LITERAL.matcher(new String(line, StandardCharsets.ISO_8859_1));
+            if (!matcher.find()) {
                 break;
             }
-            int n = Integer.parseInt(m.group(1));
+            int size = Integer.parseInt(matcher.group(1));
             buf.write('\r');
             buf.write('\n');
-            byte[] lit = new byte[n];
+            byte[] lit = new byte[size];
             int got = 0;
-            while (got < n) {
-                int k = in.read(lit, got, n - got);
-                if (k < 0) {
+            while (got < size) {
+                int read = in.read(lit, got, size - got);
+                if (read < 0) {
                     throw new IOException("끊김");
                 }
-                got += k;
+                got += read;
             }
             buf.write(lit);
         }
@@ -370,23 +370,23 @@ final class MailWatcher {
     }
 
     private byte[] readRawLine() throws IOException {
-        ByteArrayOutputStream b = new ByteArrayOutputStream();
-        int c;
-        while ((c = in.read()) >= 0) {
-            if (c == '\n') {
-                byte[] a = b.toByteArray();
-                int len = a.length > 0 && a[a.length - 1] == '\r' ? a.length - 1 : a.length;
-                byte[] r = new byte[len];
-                System.arraycopy(a, 0, r, 0, len);
-                return r;
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        int ch;
+        while ((ch = in.read()) >= 0) {
+            if (ch == '\n') {
+                byte[] all = buf.toByteArray();
+                int len = all.length > 0 && all[all.length - 1] == '\r' ? all.length - 1 : all.length;
+                byte[] trimmed = new byte[len];
+                System.arraycopy(all, 0, trimmed, 0, len);
+                return trimmed;
             }
-            b.write(c);
+            buf.write(ch);
         }
         throw new IOException("끊김");
     }
 
-    private static String quote(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    private static String quote(String text) {
+        return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     // ---------- 메일 머리글 ----------
@@ -394,23 +394,23 @@ final class MailWatcher {
     // 머리글 묶음에서 한 항목 값 (여러 줄로 접힌 것은 펼침)
     static String header(String block, String name) {
         String unfolded = block.replaceAll("\r\n[ \t]+", " ");
-        for (String l : unfolded.split("\r\n")) {
-            if (l.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
-                return l.substring(name.length() + 1).trim();
+        for (String ln : unfolded.split("\r\n")) {
+            if (ln.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                return ln.substring(name.length() + 1).trim();
             }
         }
         return "";
     }
 
     // "=?UTF-8?B?I+ychOy5mA==?=" 같은 인코딩된 제목을 글자로
-    static String decode(String s) {
-        s = s.replaceAll("(\\?=)\\s+(=\\?)", "$1$2"); // 이어진 인코딩 조각 사이 공백 제거
-        Matcher m = ENCODED.matcher(s);
+    static String decode(String encoded) {
+        encoded = encoded.replaceAll("(\\?=)\\s+(=\\?)", "$1$2"); // 이어진 인코딩 조각 사이 공백 제거
+        Matcher matcher = ENCODED.matcher(encoded);
         StringBuffer sb = new StringBuffer();
-        while (m.find()) {
+        while (matcher.find()) {
             String text;
             try {
-                String name = m.group(1);
+                String name = matcher.group(1);
                 Charset cs;
                 try {
                     cs = Charset.forName(name);
@@ -418,34 +418,34 @@ final class MailWatcher {
                     cs = Charset.forName("EUC-KR"); // ks_c_5601-1987 등 옛 한글 이름
                 }
                 byte[] bytes;
-                if (m.group(2).equalsIgnoreCase("B")) {
-                    bytes = Base64.decode(m.group(3), Base64.DEFAULT);
+                if (matcher.group(2).equalsIgnoreCase("B")) {
+                    bytes = Base64.decode(matcher.group(3), Base64.DEFAULT);
                 } else {
-                    bytes = qDecode(m.group(3));
+                    bytes = qDecode(matcher.group(3));
                 }
                 text = new String(bytes, cs);
             } catch (Exception e) {
-                text = m.group();
+                text = matcher.group();
             }
-            m.appendReplacement(sb, Matcher.quoteReplacement(text));
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(text));
         }
-        m.appendTail(sb);
+        matcher.appendTail(sb);
         return sb.toString();
     }
 
-    private static byte[] qDecode(String q) {
-        ByteArrayOutputStream b = new ByteArrayOutputStream();
-        for (int i = 0; i < q.length(); i++) {
-            char c = q.charAt(i);
-            if (c == '_') {
-                b.write(' ');
-            } else if (c == '=' && i + 2 < q.length()) {
-                b.write(Integer.parseInt(q.substring(i + 1, i + 3), 16));
+    private static byte[] qDecode(String text) {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '_') {
+                buf.write(' ');
+            } else if (ch == '=' && i + 2 < text.length()) {
+                buf.write(Integer.parseInt(text.substring(i + 1, i + 3), 16));
                 i += 2;
             } else {
-                b.write(c);
+                buf.write(ch);
             }
         }
-        return b.toByteArray();
+        return buf.toByteArray();
     }
 }

@@ -32,8 +32,8 @@ final class SmsSender {
     private SmsSender() {
     }
 
-    private static String digits(String s) {
-        return s == null ? "" : s.replaceAll("[^0-9]", "");
+    private static String digits(String text) {
+        return text == null ? "" : text.replaceAll("[^0-9]", "");
     }
 
     // 받는 번호 여러 개(쉼표 구분)에게 같은 내용 발송. 성공하면 null, 실패하면 오류 내용
@@ -47,8 +47,8 @@ final class SmsSender {
         HttpURLConnection con = null;
         try {
             JSONArray msgs = new JSONArray();
-            for (String t : toCsv.split("[,;]+")) {
-                String to = digits(t);
+            for (String phone : toCsv.split("[,;]+")) {
+                String to = digits(phone);
                 if (to.length() >= 8) {
                     msgs.put(new JSONObject().put("to", to).put("from", sender).put("text", text));
                 }
@@ -70,16 +70,16 @@ final class SmsSender {
             }
             int code = con.getResponseCode();
             String res = read(code >= 200 && code < 300 ? con.getInputStream() : con.getErrorStream());
-            JSONObject r = res.isEmpty() ? new JSONObject() : new JSONObject(res);
+            JSONObject resp = res.isEmpty() ? new JSONObject() : new JSONObject(res);
             if (code < 200 || code >= 300) {
-                return r.optString("errorMessage", r.optString("errorCode", "HTTP " + code));
+                return resp.optString("errorMessage", resp.optString("errorCode", "HTTP " + code));
             }
             // 일부 번호만 실패한 경우
-            JSONArray failed = r.optJSONArray("failedMessageList");
+            JSONArray failed = resp.optJSONArray("failedMessageList");
             if (failed != null && failed.length() > 0) {
-                JSONObject f = failed.optJSONObject(0);
+                JSONObject fail = failed.optJSONObject(0);
                 return failed.length() + "건 실패"
-                        + (f == null ? "" : ": " + f.optString("statusMessage", f.optString("statusCode", "")));
+                        + (fail == null ? "" : ": " + fail.optString("statusMessage", fail.optString("statusCode", "")));
             }
             return null;
         } catch (Exception e) {
@@ -105,10 +105,10 @@ final class SmsSender {
         return "HMAC-SHA256 apiKey=" + apiKey + ", date=" + date + ", salt=" + salt + ", signature=" + sig;
     }
 
-    private static String hex(byte[] b) {
+    private static String hex(byte[] bytes) {
         StringBuilder sb = new StringBuilder();
-        for (byte x : b) {
-            sb.append(String.format(Locale.US, "%02x", x));
+        for (byte one : bytes) {
+            sb.append(String.format(Locale.US, "%02x", one));
         }
         return sb.toString();
     }

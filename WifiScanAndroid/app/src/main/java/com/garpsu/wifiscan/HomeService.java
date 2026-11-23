@@ -83,15 +83,15 @@ public class HomeService extends Service {
     static final String ACTION_MAIL_RESCAN = "com.garpsu.wifiscan.MAIL_RESCAN"; // 앱 시작: 받은편지함 요청 메일 다시 찾기
 
     // 앱을 켤 때: Gmail 에 다시 접속해 받은편지함에 남아 있는 위치 요청 메일을 찾아 회신·삭제
-    static void mailRescan(Context c) {
-        if (!mailRemoteOn(c)) {
+    static void mailRescan(Context ctx) {
+        if (!mailRemoteOn(ctx)) {
             return;
         }
-        Intent i = new Intent(c, HomeService.class).setAction(ACTION_MAIL_RESCAN);
+        Intent intent = new Intent(ctx, HomeService.class).setAction(ACTION_MAIL_RESCAN);
         if (Build.VERSION.SDK_INT >= 26) {
-            c.startForegroundService(i);
+            ctx.startForegroundService(intent);
         } else {
-            c.startService(i);
+            ctx.startService(intent);
         }
     }
     private static final String CH_STATUS = "status";   // 상시 알림 (조용히)
@@ -120,64 +120,64 @@ public class HomeService extends Service {
 
     private final ConnectivityManager.NetworkCallback netCb = new ConnectivityManager.NetworkCallback() {
         @Override
-        public void onAvailable(Network n) {
+        public void onAvailable(Network network) {
             schedule();
         }
 
         @Override
-        public void onLost(Network n) {
+        public void onLost(Network network) {
             schedule();
         }
 
         @Override
-        public void onCapabilitiesChanged(Network n, NetworkCapabilities c) {
+        public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
             schedule();
         }
     };
 
     // ---------- 시작 / 중지 (Activity, 부팅 수신기에서 호출) ----------
 
-    static boolean homeOn(Context c) {
-        return c.getSharedPreferences("home", MODE_PRIVATE).getBoolean(PREF_BG, false);
+    static boolean homeOn(Context ctx) {
+        return ctx.getSharedPreferences("home", MODE_PRIVATE).getBoolean(PREF_BG, false);
     }
 
-    static boolean tgOn(Context c) {
-        return c.getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).getBoolean("on", false);
+    static boolean tgOn(Context ctx) {
+        return ctx.getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).getBoolean("on", false);
     }
 
-    static boolean kakaoOn(Context c) {
-        return c.getSharedPreferences(PREF_KAKAO, MODE_PRIVATE).getBoolean("on", false);
+    static boolean kakaoOn(Context ctx) {
+        return ctx.getSharedPreferences(PREF_KAKAO, MODE_PRIVATE).getBoolean("on", false);
     }
 
-    static boolean emailOn(Context c, String pref) {
+    static boolean emailOn(Context ctx, String pref) {
         if (PREF_KMAIL.equals(pref)) {
             return false; // 카톡 이메일(1160)은 삭제: 예전에 켜 둔 값이 남아 있어도 동작하지 않음
         }
-        return c.getSharedPreferences(pref, MODE_PRIVATE).getBoolean("on", false);
+        return ctx.getSharedPreferences(pref, MODE_PRIVATE).getBoolean("on", false);
     }
 
-    static boolean anyOn(Context c) {
-        return homeOn(c) || tgOn(c) || kakaoOn(c) || emailOn(c, PREF_EMAIL) || emailOn(c, PREF_KMAIL)
-                || emailOn(c, PREF_SMS) || emailOn(c, PREF_SMSAUTO) || emailOn(c, PREF_SELF) || eventOn(c) || remoteOn(c)
-                || mailRemoteOn(c);
+    static boolean anyOn(Context ctx) {
+        return homeOn(ctx) || tgOn(ctx) || kakaoOn(ctx) || emailOn(ctx, PREF_EMAIL) || emailOn(ctx, PREF_KMAIL)
+                || emailOn(ctx, PREF_SMS) || emailOn(ctx, PREF_SMSAUTO) || emailOn(ctx, PREF_SELF) || eventOn(ctx) || remoteOn(ctx)
+                || mailRemoteOn(ctx);
     }
 
     // 이메일 위치 요청 감시를 할지: 사용자 등록(1075) Gmail 인증 완료 + 보호자 이메일(1100)이 있으면 항상 감시.
     // (1050 체크박스 "mailRemote" 는 감시 여부가 아니라 '자동 회신 / 물어보고 회신' 선택)
-    static boolean mailRemoteOn(Context c) {
-        SharedPreferences u = c.getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
-        return u.getBoolean("mailVerified", false) && !u.getString("mail", "").isEmpty()
-                && !u.getString("mailPass", "").isEmpty() && !guardianEmails(c).isEmpty();
+    static boolean mailRemoteOn(Context ctx) {
+        SharedPreferences user = ctx.getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        return user.getBoolean("mailVerified", false) && !user.getString("mail", "").isEmpty()
+                && !user.getString("mailPass", "").isEmpty() && !guardianEmails(ctx).isEmpty();
     }
 
     // 보호자 이메일 -> 보호자 이름 (1100 카드). 이름이 없으면 이메일 그대로
-    static String guardianName(Context c, String email) {
+    static String guardianName(Context ctx, String email) {
         try {
-            org.json.JSONArray a = new org.json.JSONArray(SosActivity.prefs(c).getString("guardians", "[]"));
-            for (int i = 0; i < a.length(); i++) {
-                org.json.JSONObject o = a.getJSONObject(i);
-                if (email.equalsIgnoreCase(o.optString("email")) && !o.optString("name").isEmpty()) {
-                    return o.optString("name");
+            org.json.JSONArray arr = new org.json.JSONArray(SosActivity.prefs(ctx).getString("guardians", "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.getJSONObject(i);
+                if (email.equalsIgnoreCase(item.optString("email")) && !item.optString("name").isEmpty()) {
+                    return item.optString("name");
                 }
             }
         } catch (Exception ignored) {
@@ -186,64 +186,64 @@ public class HomeService extends Service {
     }
 
     // 귀가 또는 외출 알림이 켜져 있는지
-    static boolean eventOn(Context c) {
-        SharedPreferences ev = c.getSharedPreferences(PREF_EVENT, MODE_PRIVATE);
+    static boolean eventOn(Context ctx) {
+        SharedPreferences ev = ctx.getSharedPreferences(PREF_EVENT, MODE_PRIVATE);
         return ev.getBoolean("home", false) || ev.getBoolean("away", false) || ev.getBoolean("late", false);
     }
 
     // 원격 위치 요청 받기가 켜져 있는지 (텔레그램 봇 토큰이 있어야 함)
-    static boolean remoteOn(Context c) {
-        SharedPreferences tg = c.getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
+    static boolean remoteOn(Context ctx) {
+        SharedPreferences tg = ctx.getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
         return tg.getBoolean("remote", false) && !tg.getString("token", "").isEmpty();
     }
 
     // 긴급 SOS: 지금 위치를 설정된 자동 채널 전부로 보냄 (다른 기능이 모두 꺼져 있어도 동작)
-    // 앱 시작 알림: 지금 위치를 (3) 알림 설정의 '보낼 곳'으로 보냄 (다른 기능이 모두 꺼져 있어도 동작)
-    static void startMessage(Context c) {
-        Intent i = new Intent(c, HomeService.class).setAction(ACTION_START_MSG);
+    // 앱 시작 알림: 지금 위치를 (2) 알림 설정의 '보낼 곳'으로 보냄 (다른 기능이 모두 꺼져 있어도 동작)
+    static void startMessage(Context ctx) {
+        Intent intent = new Intent(ctx, HomeService.class).setAction(ACTION_START_MSG);
         if (Build.VERSION.SDK_INT >= 26) {
-            c.startForegroundService(i);
+            ctx.startForegroundService(intent);
         } else {
-            c.startService(i);
+            ctx.startService(intent);
         }
     }
 
     // 앱 종료 알림: 앱 화면을 닫기 직전, 지금 위치를 '보낼 곳'으로 보냄
-    static void stopMessage(Context c) {
-        Intent i = new Intent(c, HomeService.class).setAction(ACTION_STOP_MSG);
+    static void stopMessage(Context ctx) {
+        Intent intent = new Intent(ctx, HomeService.class).setAction(ACTION_STOP_MSG);
         if (Build.VERSION.SDK_INT >= 26) {
-            c.startForegroundService(i);
+            ctx.startForegroundService(intent);
         } else {
-            c.startService(i);
+            ctx.startService(intent);
         }
     }
 
-    static void sos(Context c) {
-        Intent i = new Intent(c, HomeService.class).setAction(ACTION_SOS);
+    static void sos(Context ctx) {
+        Intent intent = new Intent(ctx, HomeService.class).setAction(ACTION_SOS);
         if (Build.VERSION.SDK_INT >= 26) {
-            c.startForegroundService(i);
+            ctx.startForegroundService(intent);
         } else {
-            c.startService(i);
+            ctx.startService(intent);
         }
     }
 
     // [초기화]: 서비스 종료, 모든 예약 알람 취소, 이 앱의 알림 모두 지우기
-    static void stopAll(Context c) {
-        for (String a : new String[]{ACTION_TG, ACTION_KAKAO, ACTION_EMAIL, ACTION_KMAIL,
+    static void stopAll(Context ctx) {
+        for (String action : new String[]{ACTION_TG, ACTION_KAKAO, ACTION_EMAIL, ACTION_KMAIL,
                 ACTION_SMS, ACTION_SMSAUTO, ACTION_SELF, ACTION_CHECK, ACTION_LATE}) {
-            cancelAlarm(c, a);
+            cancelAlarm(ctx, action);
         }
-        c.stopService(new Intent(c, HomeService.class));
-        c.getSystemService(NotificationManager.class).cancelAll();
+        ctx.stopService(new Intent(ctx, HomeService.class));
+        ctx.getSystemService(NotificationManager.class).cancelAll();
     }
 
-    // (3) 알림 설정 탭의 [테스트]: 지금 '귀가' 알림을 고른 곳으로 보내 봄
-    static void testEvent(Context c) {
-        Intent i = new Intent(c, HomeService.class).setAction(ACTION_EVENT_TEST);
+    // (2) 알림 설정 탭의 [테스트]: 지금 '귀가' 알림을 고른 곳으로 보내 봄
+    static void testEvent(Context ctx) {
+        Intent intent = new Intent(ctx, HomeService.class).setAction(ACTION_EVENT_TEST);
         if (Build.VERSION.SDK_INT >= 26) {
-            c.startForegroundService(i);
+            ctx.startForegroundService(intent);
         } else {
-            c.startService(i);
+            ctx.startService(intent);
         }
     }
 
@@ -256,27 +256,27 @@ public class HomeService extends Service {
     }
 
     // 본인 폰 알림 띄우기 (서비스·화면 공용). 누르면 지도, [공유]로 다른 앱에 보내기
-    static void notifySelf(Context c, String msg, Location loc) {
-        NotificationManager nm = c.getSystemService(NotificationManager.class);
+    static void notifySelf(Context ctx, String msg, Location loc) {
+        NotificationManager nm = ctx.getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(new NotificationChannel(
                     CH_SELF, "본인 폰 위치 알림", NotificationManager.IMPORTANCE_HIGH));
         }
-        Notification.Builder b = Build.VERSION.SDK_INT >= 26
-                ? new Notification.Builder(c, CH_SELF) : new Notification.Builder(c);
+        Notification.Builder notif = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(ctx, CH_SELF) : new Notification.Builder(ctx);
         Intent open = loc == null
-                ? new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                ? new Intent(ctx, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 : new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(String.format(Locale.US,
                 "https://maps.google.com/?q=%.6f,%.6f", loc.getLatitude(), loc.getLongitude())))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Intent share = Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain")
                 .putExtra(Intent.EXTRA_TEXT, msg), "위치 공유").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        PendingIntent piOpen = PendingIntent.getActivity(c, 6, open,
+        PendingIntent piOpen = PendingIntent.getActivity(ctx, 6, open,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        PendingIntent piShare = PendingIntent.getActivity(c, 7, share,
+        PendingIntent piShare = PendingIntent.getActivity(ctx, 7, share,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         int nl = msg.indexOf('\n');
-        b.setSmallIcon(android.R.drawable.ic_dialog_map)
+        notif.setSmallIcon(android.R.drawable.ic_dialog_map)
                 .setContentTitle(nl > 0 ? msg.substring(0, nl) : "📍 현재 위치")
                 .setContentText(loc == null ? "위치를 확인하지 못했습니다" : "눌러서 지도 보기")
                 .setStyle(new Notification.BigTextStyle().bigText(msg))
@@ -284,13 +284,13 @@ public class HomeService extends Service {
                 .setColor(0xFF1976D2)
                 .setAutoCancel(true);
         if (Build.VERSION.SDK_INT >= 20) {
-            b.addAction(new Notification.Action.Builder(0, "지도 보기", piOpen).build());
-            b.addAction(new Notification.Action.Builder(0, "공유", piShare).build());
+            notif.addAction(new Notification.Action.Builder(0, "지도 보기", piOpen).build());
+            notif.addAction(new Notification.Action.Builder(0, "공유", piShare).build());
         }
         if (Build.VERSION.SDK_INT < 26) {
-            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+            notif.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
         }
-        nm.notify(ID_SELF, b.build());
+        nm.notify(ID_SELF, notif.build());
     }
 
     private static String emailAction(String pref) {
@@ -305,36 +305,36 @@ public class HomeService extends Service {
     // "08:00, 18:30" -> 지금 이후 가장 가까운 시각 (오늘 또는 내일). 형식이 틀리면 0
     static long nextTime(String times, long now) {
         long best = 0;
-        for (String s : times.split("[,\\s]+")) {
-            int[] hm = parseTime(s);
+        for (String part : times.split("[,\\s]+")) {
+            int[] hm = parseTime(part);
             if (hm == null) {
                 continue;
             }
-            java.util.Calendar c = java.util.Calendar.getInstance();
-            c.setTimeInMillis(now);
-            c.set(java.util.Calendar.HOUR_OF_DAY, hm[0]);
-            c.set(java.util.Calendar.MINUTE, hm[1]);
-            c.set(java.util.Calendar.SECOND, 0);
-            c.set(java.util.Calendar.MILLISECOND, 0);
-            if (c.getTimeInMillis() <= now + 30 * 1000) {
-                c.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            cal.setTimeInMillis(now);
+            cal.set(java.util.Calendar.HOUR_OF_DAY, hm[0]);
+            cal.set(java.util.Calendar.MINUTE, hm[1]);
+            cal.set(java.util.Calendar.SECOND, 0);
+            cal.set(java.util.Calendar.MILLISECOND, 0);
+            if (cal.getTimeInMillis() <= now + 30 * 1000) {
+                cal.add(java.util.Calendar.DAY_OF_MONTH, 1);
             }
-            if (best == 0 || c.getTimeInMillis() < best) {
-                best = c.getTimeInMillis();
+            if (best == 0 || cal.getTimeInMillis() < best) {
+                best = cal.getTimeInMillis();
             }
         }
         return best;
     }
 
     // "8:05" / "08:05" -> {8, 5}, 틀리면 null
-    static int[] parseTime(String s) {
-        String[] t = s.trim().split(":");
-        if (t.length != 2) {
+    static int[] parseTime(String text) {
+        String[] parts = text.trim().split(":");
+        if (parts.length != 2) {
             return null;
         }
         try {
-            int h = Integer.parseInt(t[0].trim()), m = Integer.parseInt(t[1].trim());
-            return h >= 0 && h < 24 && m >= 0 && m < 60 ? new int[]{h, m} : null;
+            int hour = Integer.parseInt(parts[0].trim()), minute = Integer.parseInt(parts[1].trim());
+            return hour >= 0 && hour < 24 && minute >= 0 && minute < 60 ? new int[]{hour, minute} : null;
         } catch (NumberFormatException e) {
             return null;
         }
@@ -360,57 +360,57 @@ public class HomeService extends Service {
     }
 
     // Gmail 작성 화면 (받는 사람, 제목, 내용이 채워진 상태). Gmail이 없으면 다른 메일 앱
-    static Intent emailCompose(Context c, String to, String subject, String body) {
-        Intent i = new Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:"))
+    static Intent emailCompose(Context ctx, String to, String subject, String body) {
+        Intent intent = new Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:"))
                 .putExtra(Intent.EXTRA_EMAIL, to.split("[,;\\s]+"))
                 .putExtra(Intent.EXTRA_SUBJECT, subject)
                 .putExtra(Intent.EXTRA_TEXT, body)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (c.getPackageManager().getLaunchIntentForPackage(GMAIL_PKG) != null) {
-            i.setPackage(GMAIL_PKG);
+        if (ctx.getPackageManager().getLaunchIntentForPackage(GMAIL_PKG) != null) {
+            intent.setPackage(GMAIL_PKG);
         }
-        return i;
+        return intent;
     }
 
     // 예: "[위치] 할머니 · 11-21 18:00 현재 위치" (보내는 사람 이름이 없으면 이름 생략)
-    static String emailSubject(Context c) {
-        String who = TelegramSender.senderName(c);
+    static String emailSubject(Context ctx) {
+        String who = TelegramSender.senderName(ctx);
         return "[위치] " + (who.isEmpty() ? "" : who + " · ")
                 + new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date()) + " 현재 위치";
     }
 
     // 설정에 맞게 시작하거나 종료 (이미 실행 중이면 설정을 다시 읽음)
-    static void refresh(Context c) {
-        if (!tgOn(c)) {
-            cancelAlarm(c, ACTION_TG);
+    static void refresh(Context ctx) {
+        if (!tgOn(ctx)) {
+            cancelAlarm(ctx, ACTION_TG);
         }
-        if (!kakaoOn(c)) {
-            cancelAlarm(c, ACTION_KAKAO);
+        if (!kakaoOn(ctx)) {
+            cancelAlarm(ctx, ACTION_KAKAO);
         }
-        if (!emailOn(c, PREF_EMAIL)) {
-            cancelAlarm(c, ACTION_EMAIL);
+        if (!emailOn(ctx, PREF_EMAIL)) {
+            cancelAlarm(ctx, ACTION_EMAIL);
         }
-        if (!emailOn(c, PREF_KMAIL)) {
-            cancelAlarm(c, ACTION_KMAIL);
+        if (!emailOn(ctx, PREF_KMAIL)) {
+            cancelAlarm(ctx, ACTION_KMAIL);
         }
-        if (!emailOn(c, PREF_SMS)) {
-            cancelAlarm(c, ACTION_SMS);
+        if (!emailOn(ctx, PREF_SMS)) {
+            cancelAlarm(ctx, ACTION_SMS);
         }
-        if (!emailOn(c, PREF_SMSAUTO)) {
-            cancelAlarm(c, ACTION_SMSAUTO);
+        if (!emailOn(ctx, PREF_SMSAUTO)) {
+            cancelAlarm(ctx, ACTION_SMSAUTO);
         }
-        if (!emailOn(c, PREF_SELF)) {
-            cancelAlarm(c, ACTION_SELF);
+        if (!emailOn(ctx, PREF_SELF)) {
+            cancelAlarm(ctx, ACTION_SELF);
         }
-        if (anyOn(c)) {
-            Intent i = new Intent(c, HomeService.class);
+        if (anyOn(ctx)) {
+            Intent intent = new Intent(ctx, HomeService.class);
             if (Build.VERSION.SDK_INT >= 26) {
-                c.startForegroundService(i);
+                ctx.startForegroundService(intent);
             } else {
-                c.startService(i);
+                ctx.startService(intent);
             }
         } else {
-            c.stopService(new Intent(c, HomeService.class));
+            ctx.stopService(new Intent(ctx, HomeService.class));
         }
     }
 
@@ -430,11 +430,11 @@ public class HomeService extends Service {
         super.onCreate();
         createChannels();
         try {
-            Notification n = statusNotification("확인 중...", "백그라운드 실행 중");
+            Notification notification = statusNotification("확인 중...", "백그라운드 실행 중");
             if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(ID_STATUS, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+                startForeground(ID_STATUS, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
             } else {
-                startForeground(ID_STATUS, n);
+                startForeground(ID_STATUS, notification);
             }
         } catch (Exception e) {
             // 위치 권한이 없거나 백그라운드에서 시작이 막힌 경우
@@ -452,21 +452,21 @@ public class HomeService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String a = intent == null ? null : intent.getAction();
-        if (ACTION_MAIL_RESCAN.equals(a)) {
+        String action = intent == null ? null : intent.getAction();
+        if (ACTION_MAIL_RESCAN.equals(action)) {
             // 감시 중이면 연결을 끊고 바로 다시 접속 (접속할 때마다 받은편지함 전체를 찾음).
             // 감시 중이 아니면 아래 updateMailRemote() 가 새로 시작하면서 찾음
-            MailWatcher w = mailWatcher;
-            if (w != null) {
+            MailWatcher watcher = mailWatcher;
+            if (watcher != null) {
                 mailRescanNow = true;
-                w.stop();
+                watcher.stop();
             }
         }
-        if (ACTION_MAIL_YES.equals(a) || ACTION_MAIL_NO.equals(a)) {
+        if (ACTION_MAIL_YES.equals(action) || ACTION_MAIL_NO.equals(action)) {
             // 이메일 위치 요청 확인 알림(또는 화면 1057)에서 Yes / No
             String to = intent.getStringExtra("to");
             getSystemService(NotificationManager.class).cancel(mailAskId(to == null ? "" : to));
-            if (to != null && cm != null && ACTION_MAIL_YES.equals(a)) {
+            if (to != null && cm != null && ACTION_MAIL_YES.equals(action)) {
                 replyMailLocation(to);
             } else if (to != null) {
                 getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).edit()
@@ -474,9 +474,9 @@ public class HomeService extends Service {
                         .putString("mailRemoteResult", "회신 안 함 (" + guardianName(this, to) + ")").apply();
             }
         }
-        if (cm != null && (ACTION_SOS.equals(a) || ACTION_START_MSG.equals(a) || ACTION_STOP_MSG.equals(a))) {
+        if (cm != null && (ACTION_SOS.equals(action) || ACTION_START_MSG.equals(action) || ACTION_STOP_MSG.equals(action))) {
             // 다른 기능이 모두 꺼져 있어도 SOS·앱 시작 알림은 보냄 (다 보내면 종료)
-            sendEvent(ACTION_SOS.equals(a) ? KIND_SOS : ACTION_START_MSG.equals(a) ? KIND_START : KIND_STOP, null, false);
+            sendEvent(ACTION_SOS.equals(action) ? KIND_SOS : ACTION_START_MSG.equals(action) ? KIND_START : KIND_STOP, null, false);
             if (!anyOn(this)) {
                 return START_NOT_STICKY;
             }
@@ -495,20 +495,20 @@ public class HomeService extends Service {
             }
             return START_NOT_STICKY;
         }
-        if (ACTION_EVENT_TEST.equals(a)) {
+        if (ACTION_EVENT_TEST.equals(action)) {
             sendEvent(true, null, true);
         }
-        if (ACTION_CHECK.equals(a)) {
+        if (ACTION_CHECK.equals(action)) {
             evaluate(); // 나간 뒤 2분: 절전 중 알람으로 깨어난 김에 바로 확인 (지연 없이)
         }
         schedule();
-        scheduleTelegram(ACTION_TG.equals(a));
-        scheduleKakao(ACTION_KAKAO.equals(a));
-        scheduleEmail(PREF_EMAIL, ACTION_EMAIL.equals(a));
-        scheduleNotifyJob(PREF_SMS, ACTION_SMS, ACTION_SMS.equals(a));
-        scheduleNotifyJob(PREF_SMSAUTO, ACTION_SMSAUTO, ACTION_SMSAUTO.equals(a));
-        scheduleNotifyJob(PREF_SELF, ACTION_SELF, ACTION_SELF.equals(a));
-        scheduleLate(ACTION_LATE.equals(a));
+        scheduleTelegram(ACTION_TG.equals(action));
+        scheduleKakao(ACTION_KAKAO.equals(action));
+        scheduleEmail(PREF_EMAIL, ACTION_EMAIL.equals(action));
+        scheduleNotifyJob(PREF_SMS, ACTION_SMS, ACTION_SMS.equals(action));
+        scheduleNotifyJob(PREF_SMSAUTO, ACTION_SMSAUTO, ACTION_SMSAUTO.equals(action));
+        scheduleNotifyJob(PREF_SELF, ACTION_SELF, ACTION_SELF.equals(action));
+        scheduleLate(ACTION_LATE.equals(action));
         updateRemotePoll();
         updateMailRemote();
         updateStatus();
@@ -561,23 +561,28 @@ public class HomeService extends Service {
         String bssid = connectedBssid(this);
         String ssid = null;
         boolean home = false;
+        boolean otherRouter = false;
         if (bssid != null) {
-            for (String s : routers) {
-                String[] t = s.split("\\|", 2);
-                if (t[0].equals(bssid)) {
-                    home = true;
-                    ssid = t.length > 1 ? t[1] : "";
+            for (String entry : routers) {
+                String[] parts = entry.split("\\|", 2);
+                if (parts[0].equals(bssid)) {
+                    // '기타' 공유기(1010 라디오)는 귀가로 보지 않음 -> 외출과 같게
+                    home = MainActivity.routerIsHome(this, bssid);
+                    otherRouter = !home;
+                    ssid = parts.length > 1 ? parts[1] : "";
                     break;
                 }
             }
         }
+        boolean hasHome = MainActivity.hasHomeRouter(this); // '홈'으로 체크된 공유기가 있나
 
         // 홈 PC 블루투스: 공유기로 '집'이 아닐 때, 최근 3분 안에 페어링된 PC를 찾았으면 '집'
-        boolean btReg = !BtHome.registered(this).isEmpty();
+        boolean btAny = !BtHome.registered(this).isEmpty(); // 등록한 블루투스 기기(홈·기타)
+        boolean btReg = BtHome.hasHome(this);                 // '홈'으로 체크된 블루투스 기기
         boolean btHome = false;
-        if (!home && btReg) {
+        if (!home && btAny) {
             long seenAgo = System.currentTimeMillis() - sp.getLong("btSeenAt", 0);
-            btHome = seenAgo < BtHome.FRESH;
+            btHome = seenAgo < BtHome.FRESH && BtHome.isHome(this, BtHome.seenMac(this)); // '기타' 기기는 집 아님
             if (seenAgo > BtHome.FRESH - 60 * 1000) {
                 startBtProbe(); // 곧 만료되거나 만료됨 -> 다시 찾아봄 (결과가 나오면 다시 판정)
             }
@@ -590,7 +595,7 @@ public class HomeService extends Service {
 
         // 확인할 수 없는 상황(등록 없음 / 위치 서비스 꺼짐)에서는 상태를 바꾸지 않음
         // (안 그러면 위치 서비스를 끄는 순간 '외출'로 잘못 알림). PC 블루투스로 '집'이 확인되면 확실
-        boolean known = btHome || (!routers.isEmpty() && locationOn(this));
+        boolean known = btHome || (hasHome && locationOn(this));
 
         // 이전 상태 (서비스가 재시작되어도 이어지도록 저장)
         int prev = sp.getInt("bgState", -1); // -1 모름, 0 외출, 1 홈
@@ -636,14 +641,22 @@ public class HomeService extends Service {
         homeTitle = home ? "홈" : "외출";
         if (btHome) {
             homeNote = "홈 PC 블루투스 확인됨 · " + sp.getString("btSeenName", "");
-        } else if (routers.isEmpty() && !btReg) {
-            homeNote = "등록된 홈 공유기가 없습니다";
+        } else if (!hasHome && !btReg) {
+            homeNote = routers.isEmpty() ? "등록된 홈 공유기가 없습니다"
+                    : "'홈'으로 체크된 공유기가 없습니다 (공유기 화면에서 체크)";
         } else if (!locationOn(this) && !btReg) {
             homeNote = "위치 서비스가 꺼져 있어 공유기를 확인할 수 없습니다";
         } else if (home) {
             homeNote = "홈 공유기 연결됨" + (ssid == null || ssid.isEmpty() ? "" : " · " + ssid);
         } else {
-            homeNote = bssid == null ? "Wi-Fi 연결 없음" : "다른 공유기에 연결됨";
+            if (otherRouter) {
+                String alias = MainActivity.routerAlias(this, bssid);
+                homeNote = "기타 공유기 연결됨 · " + (alias.isEmpty() ? ssid : alias);
+            } else if (BtHome.seenOther(this)) {
+                homeNote = "기타 블루투스 기기 가까이 있음 · " + BtHome.label(this, BtHome.seenMac(this), BtHome.seenName(this));
+            } else {
+                homeNote = bssid == null ? "Wi-Fi 연결 없음" : "다른 공유기에 연결됨";
+            }
         }
         updateStatus();
     }
@@ -661,18 +674,18 @@ public class HomeService extends Service {
         btBusy = true;
         btLastProbe = now;
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        final PowerManager.WakeLock w = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wifiscan:bt");
-        w.acquire(40 * 1000);
+        final PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wifiscan:bt");
+        lock.acquire(40 * 1000);
         new Thread(() -> {
-            final String name = BtHome.findAny(this);
+            final String[] found = BtHome.findAny(this);
             handler.post(() -> {
                 btBusy = false;
-                if (name != null) {
-                    BtHome.markSeen(this, name);
+                if (found != null) {
+                    BtHome.markSeen(this, found[0], found[1]);
                     evaluate(); // 찾았으면 바로 다시 판정 (귀가)
                 }
-                if (w.isHeld()) {
-                    w.release();
+                if (lock.isHeld()) {
+                    lock.release();
                 }
             });
         }).start();
@@ -690,7 +703,7 @@ public class HomeService extends Service {
 
     /*
      * 귀가 / 외출 / 미귀가 / SOS 알림 보내기
-     * - 귀가·외출·미귀가: (3) 알림 설정의 '보낼 곳'에서 고른 곳으로
+     * - 귀가·외출·미귀가: (2) 알림 설정의 '보낼 곳'에서 고른 곳으로
      * - SOS: 설정되어 있는 '자동' 채널 전부(텔레그램, 자동 이메일·카톡 이메일) + 본인 폰 기록
      *        (전화는 화면에서 바로 걸기 때문에, 알림을 눌러야 하는 수동 채널은 제외)
      */
@@ -704,18 +717,18 @@ public class HomeService extends Service {
         final SharedPreferences ev = getSharedPreferences(PREF_EVENT, MODE_PRIVATE);
         fetchLocation(loc -> new Thread(() -> {
             String who = TelegramSender.senderName(this);
-            String w = who.isEmpty() ? "" : who + " ";
+            String whoPrefix = who.isEmpty() ? "" : who + " ";
             String time = new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date());
             String head = (test ? "[테스트] " : "")
-                    + (kind == KIND_HOME ? "🏠 " + w + "귀가했습니다"
-                    : kind == KIND_AWAY ? "🚶 " + w + "외출했습니다"
-                    : kind == KIND_LATE ? "⚠️ " + w + "아직 귀가하지 않았습니다 ("
+                    + (kind == KIND_HOME ? "🏠 " + whoPrefix + "귀가했습니다"
+                    : kind == KIND_AWAY ? "🚶 " + whoPrefix + "외출했습니다"
+                    : kind == KIND_LATE ? "⚠️ " + whoPrefix + "아직 귀가하지 않았습니다 ("
                     + ev.getString("lateTime", "22:00") + " 기준)"
-                    : kind == KIND_START ? "📱 " + w + "앱을 시작했습니다"
-                    : kind == KIND_STOP ? "📴 " + w + "[집에 왔어요] 앱이 종료됩니다"
+                    : kind == KIND_START ? "📱 " + whoPrefix + "앱을 시작했습니다"
+                    : kind == KIND_STOP ? "📴 " + whoPrefix + "[집에 왔어요] 앱이 종료됩니다"
                     // 백그라운드 기능이 하나라도 켜져 있으면 서비스는 계속 동작 -> 오해하지 않게 안내
                     + (anyOn(this) ? "\n(백그라운드 감지는 계속됩니다)" : "")
-                    : "🆘 긴급 SOS — " + w + "도움을 요청했습니다");
+                    : "🆘 긴급 SOS — " + whoPrefix + "도움을 요청했습니다");
             // 첫 줄 = 지금 상태 (홈 · 공유기 이름 (MAC) / 외출), 그다음 알림 제목
             String status = TelegramSender.statusLine(this);
             final String full = status + "\n" + head + "  " + time
@@ -739,8 +752,8 @@ public class HomeService extends Service {
                     SharedPreferences em = getSharedPreferences(pref, MODE_PRIVATE);
                     String to = em.getString("to", "");
                     if (!to.trim().isEmpty() && emailSmtp(em) && !em.getString("pass", "").isEmpty()) {
-                        String e = EmailSender.send(em.getString("from", ""), em.getString("pass", ""), to, subject, full);
-                        res.add(emailTitle(pref) + " " + (e == null ? "✓" : "✗"));
+                        String err = EmailSender.send(em.getString("from", ""), em.getString("pass", ""), to, subject, full);
+                        res.add(emailTitle(pref) + " " + (err == null ? "✓" : "✗"));
                     }
                 }
                 notes.add(() -> notifySelf(this, full, loc));
@@ -766,8 +779,8 @@ public class HomeService extends Service {
                 if (to.trim().isEmpty()) {
                     res.add(nm + " 설정 없음");
                 } else if (emailSmtp(em)) {
-                    String e = EmailSender.send(em.getString("from", ""), em.getString("pass", ""), to, subject, full);
-                    res.add(nm + " " + (e == null ? "✓" : "✗"));
+                    String err = EmailSender.send(em.getString("from", ""), em.getString("pass", ""), to, subject, full);
+                    res.add(nm + " " + (err == null ? "✓" : "✗"));
                 } else {
                     notes.add(() -> notifyEmail(pref, to, full, loc));
                     res.add(nm + " 알림");
@@ -805,8 +818,8 @@ public class HomeService extends Service {
             final String summary = KIND_NAME[kind] + (test ? "(테스트)" : "") + ": "
                     + (res.isEmpty() ? "보낼 곳이 선택되지 않음" : android.text.TextUtils.join(", ", res));
             handler.post(() -> {
-                for (Runnable r : notes) {
-                    r.run();
+                for (Runnable note : notes) {
+                    note.run();
                 }
                 ev.edit().putLong(sos ? "sosTime" : "lastTime", System.currentTimeMillis())
                         .putString(sos ? "sosResult" : "lastResult", summary).apply();
@@ -864,23 +877,23 @@ public class HomeService extends Service {
                 continue;
             }
             Set<String> allowed = new HashSet<>();
-            for (String s : tg.getString("chats", "").split("[,\\s]+")) {
-                if (!s.isEmpty()) {
-                    allowed.add(s);
+            for (String chat : tg.getString("chats", "").split("[,\\s]+")) {
+                if (!chat.isEmpty()) {
+                    allowed.add(chat);
                 }
             }
             for (int i = 0; i < arr.length(); i++) {
-                org.json.JSONObject u = arr.optJSONObject(i);
-                if (u == null) {
+                org.json.JSONObject update = arr.optJSONObject(i);
+                if (update == null) {
                     continue;
                 }
-                offset = Math.max(offset, u.optLong("update_id") + 1);
-                org.json.JSONObject m = u.optJSONObject("message");
-                if (m == null || m.optJSONObject("chat") == null
-                        || !TelegramSender.isLocationCommand(m.optString("text"))) {
+                offset = Math.max(offset, update.optLong("update_id") + 1);
+                org.json.JSONObject msg = update.optJSONObject("message");
+                if (msg == null || msg.optJSONObject("chat") == null
+                        || !TelegramSender.isLocationCommand(msg.optString("text"))) {
                     continue;
                 }
-                final String cid = String.valueOf(m.optJSONObject("chat").optLong("id"));
+                final String cid = String.valueOf(msg.optJSONObject("chat").optLong("id"));
                 if (!allowed.contains(cid)) {
                     TelegramSender.send(token, cid, "등록된 보호자만 위치를 요청할 수 있습니다.");
                     continue;
@@ -934,9 +947,9 @@ public class HomeService extends Service {
 
     private void stopMailRemote() {
         mailRunning = false;
-        MailWatcher w = mailWatcher;
-        if (w != null) {
-            w.stop(); // 대기 중인 연결을 바로 끊음
+        MailWatcher watcher = mailWatcher;
+        if (watcher != null) {
+            watcher.stop(); // 대기 중인 연결을 바로 끊음
         }
         if (mailThread != null) {
             mailThread.interrupt();
@@ -944,24 +957,24 @@ public class HomeService extends Service {
     }
 
     // 보호자 등록(1100)에 적힌 이메일 주소들 (소문자)
-    static Set<String> guardianEmails(Context c) {
-        Set<String> r = new HashSet<>();
-        for (String s : SosActivity.prefs(c).getString("emails", "").split("[,;\\s]+")) {
-            if (s.contains("@")) {
-                r.add(s.trim().toLowerCase(Locale.US));
+    static Set<String> guardianEmails(Context ctx) {
+        Set<String> emails = new HashSet<>();
+        for (String addr : SosActivity.prefs(ctx).getString("emails", "").split("[,;\\s]+")) {
+            if (addr.contains("@")) {
+                emails.add(addr.trim().toLowerCase(Locale.US));
             }
         }
-        return r;
+        return emails;
     }
 
     // 작업 스레드: Gmail 에 접속해 새 메일을 기다림. 끊기면 1분 후 다시 접속
     private void mailLoop() {
-        final SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        final SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
         while (mailRunning) {
-            MailWatcher w = new MailWatcher();
-            mailWatcher = w;
-            u.edit().putString("mailRemoteState", "Gmail 접속 중...").apply();
-            String err = w.watch(u.getString("mail", ""), u.getString("mailPass", ""), u, new MailWatcher.Callback() {
+            MailWatcher watcher = new MailWatcher();
+            mailWatcher = watcher;
+            user.edit().putString("mailRemoteState", "Gmail 접속 중...").apply();
+            String err = watcher.watch(user.getString("mail", ""), user.getString("mailPass", ""), user, new MailWatcher.Callback() {
                 @Override
                 public boolean running() {
                     return mailRunning;
@@ -971,11 +984,11 @@ public class HomeService extends Service {
                 public boolean onRequest(String from, String subject) {
                     if (!guardianEmails(HomeService.this).contains(from)) {
                         // 등록되지 않은 주소: 답장하지 않음 (메일도 읽지 않은 채로 둠)
-                        u.edit().putLong("mailRemoteTime", System.currentTimeMillis())
+                        user.edit().putLong("mailRemoteTime", System.currentTimeMillis())
                                 .putString("mailRemoteResult", "등록 안 된 주소라 무시: " + from).apply();
                         return false;
                     }
-                    if (u.getBoolean("mailRemote", false)) {
+                    if (user.getBoolean("mailRemote", false)) {
                         handler.post(() -> replyMailLocation(from)); // 자동 회신
                     } else {
                         handler.post(() -> askMailReply(from)); // 물어보고 회신 (알림 Yes/No)
@@ -984,12 +997,12 @@ public class HomeService extends Service {
                 }
 
                 @Override
-                public void state(String s) {
-                    u.edit().putString("mailRemoteState", s).putString("mailRemoteErr", "").apply();
+                public void state(String msg) {
+                    user.edit().putString("mailRemoteState", msg).putString("mailRemoteErr", "").apply();
                 }
             });
             mailWatcher = null;
-            u.edit().putString("mailRemoteErr", err == null ? "" : err)
+            user.edit().putString("mailRemoteErr", err == null ? "" : err)
                     .putString("mailRemoteState", mailRunning ? "연결 끊김 - 잠시 후 다시 접속" : "꺼짐").apply();
             if (mailRescanNow) {
                 mailRescanNow = false; // 앱 시작: 바로 다시 접속해서 받은편지함 다시 찾기
@@ -1005,8 +1018,8 @@ public class HomeService extends Service {
         return 7000 + (from.toLowerCase(Locale.US).hashCode() & 0xFFF);
     }
 
-    static String mailAskText(Context c, String from) {
-        return "보호자 " + guardianName(c, from) + "님으로부터 위치 질문을 받았습니다. 회신할까요?";
+    static String mailAskText(Context ctx, String from) {
+        return "보호자 " + guardianName(ctx, from) + "님으로부터 위치 질문을 받았습니다. 회신할까요?";
     }
 
     // 자동 회신이 꺼져 있을 때: "보호자 ○○님으로부터 위치 질문을 받았습니다. 회신할까요?" 알림 + [Yes] [No]
@@ -1023,7 +1036,7 @@ public class HomeService extends Service {
                 .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pOpen = PendingIntent.getActivity(this, id, open, flags);
         String text = mailAskText(this, from);
-        Notification.Builder b = builder(CH_ALERT)
+        Notification.Builder notif = builder(CH_ALERT)
                 .setContentTitle("📨 위치 질문")
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
@@ -1032,9 +1045,9 @@ public class HomeService extends Service {
                 .addAction(new Notification.Action.Builder(0, "Yes (회신)", pYes).build())
                 .addAction(new Notification.Action.Builder(0, "No", pNo).build());
         if (Build.VERSION.SDK_INT < 26) {
-            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+            notif.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
         }
-        getSystemService(NotificationManager.class).notify(id, b.build());
+        getSystemService(NotificationManager.class).notify(id, notif.build());
         getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).edit()
                 .putLong("mailRemoteTime", System.currentTimeMillis())
                 .putString("mailRemoteResult", "회신할지 묻는 중 (" + guardianName(this, from) + ")").apply();
@@ -1048,12 +1061,12 @@ public class HomeService extends Service {
         }
         jobBusy.add(busy);
         fetchLocation(loc -> new Thread(() -> {
-            SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
-            String err = EmailSender.send(u.getString("mail", ""), u.getString("mailPass", ""), to,
+            SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+            String err = EmailSender.send(user.getString("mail", ""), user.getString("mailPass", ""), to,
                     emailSubject(this) + " - 요청하신 위치",
                     TelegramSender.statusLine(this) + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false));
             handler.post(() -> {
-                u.edit().putLong("mailRemoteTime", System.currentTimeMillis())
+                user.edit().putLong("mailRemoteTime", System.currentTimeMillis())
                         .putString("mailRemoteResult", (err == null ? "회신 ✓" : "회신 실패: " + err) + " (" + to + ")")
                         .apply();
                 jobBusy.remove(busy);
@@ -1082,10 +1095,10 @@ public class HomeService extends Service {
         }
     }
 
-    // ---------- 외출 중에만 보내기 ((4) 위치 보내기 탭 옵션) ----------
+    // ---------- 외출 중에만 보내기 ((3) 위치 보내기 탭 옵션) ----------
 
-    static boolean awayOnly(Context c) {
-        return c.getSharedPreferences(TelegramSender.PREF_APP, MODE_PRIVATE).getBoolean("awayOnly", false);
+    static boolean awayOnly(Context ctx) {
+        return ctx.getSharedPreferences(TelegramSender.PREF_APP, MODE_PRIVATE).getBoolean("awayOnly", false);
     }
 
     // 지금 '외출 확정(2분 넘게 밖)' 상태가 아니면 true. 집인지 알 수 없으면 false (안전하게 보냄)
@@ -1093,18 +1106,18 @@ public class HomeService extends Service {
         if (!awayOnly(this)) {
             return false;
         }
-        SharedPreferences h = getSharedPreferences("home", MODE_PRIVATE);
-        boolean registered = !h.getStringSet("routers", new HashSet<String>()).isEmpty()
-                || !BtHome.registered(this).isEmpty();
+        SharedPreferences homePrefs = getSharedPreferences("home", MODE_PRIVATE);
+        boolean registered = MainActivity.hasHomeRouter(this) // '홈'으로 체크된 공유기만 집
+                || BtHome.hasHome(this); // '홈'으로 체크된 블루투스 기기만 집
         if (!registered) {
             return false; // 집이 등록되지 않음 -> 옵션 무시하고 보냄
         }
-        int st = h.getInt("bgState", -1);
+        int st = homePrefs.getInt("bgState", -1);
         if (st == 1) {
             return true; // 집
         }
         if (st == 0) {
-            return !h.getBoolean("awaySent", false); // 나간 지 2분이 안 됨 -> 아직 집 근처로 봄
+            return !homePrefs.getBoolean("awaySent", false); // 나간 지 2분이 안 됨 -> 아직 집 근처로 봄
         }
         return false; // 모름 -> 보냄
     }
@@ -1124,11 +1137,11 @@ public class HomeService extends Service {
     // 외출이 확정된 순간: '일정 간격' 전송들은 바로 한 번 보내고 그때부터 간격대로
     private void startSendingOnLeave() {
         String[] interval = {TelegramSender.PREF};
-        for (String p : interval) {
-            getSharedPreferences(p, MODE_PRIVATE).edit().putLong("next", 0).apply();
+        for (String prefName : interval) {
+            getSharedPreferences(prefName, MODE_PRIVATE).edit().putLong("next", 0).apply();
         }
-        for (String p : new String[]{PREF_EMAIL, PREF_KMAIL, PREF_KAKAO, PREF_SMS, PREF_SMSAUTO, PREF_SELF}) {
-            SharedPreferences sp = getSharedPreferences(p, MODE_PRIVATE);
+        for (String prefName : new String[]{PREF_EMAIL, PREF_KMAIL, PREF_KAKAO, PREF_SMS, PREF_SMSAUTO, PREF_SELF}) {
+            SharedPreferences sp = getSharedPreferences(prefName, MODE_PRIVATE);
             if ("interval".equals(sp.getString("mode", ""))) {
                 sp.edit().putLong("next", 0).apply(); // 지정 시각 방식은 원래 시각대로
             }
@@ -1227,7 +1240,7 @@ public class HomeService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 2, kakaoShare(msg),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         String time = new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date());
-        Notification.Builder b = builder(CH_KAKAO)
+        Notification.Builder notif = builder(CH_KAKAO)
                 .setContentTitle("카톡으로 위치 보내기 (" + time + ")")
                 .setContentText(loc == null ? "위치를 확인하지 못했습니다. 눌러서 카톡 열기"
                         : "눌러서 받는 사람을 고르고 [전송]하세요")
@@ -1236,12 +1249,12 @@ public class HomeService extends Service {
                 .setColor(0xFFFEE500)
                 .setAutoCancel(true);
         if (Build.VERSION.SDK_INT >= 20) {
-            b.addAction(new Notification.Action.Builder(0, "카톡으로 보내기", pi).build());
+            notif.addAction(new Notification.Action.Builder(0, "카톡으로 보내기", pi).build());
         }
         if (Build.VERSION.SDK_INT < 26) {
-            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+            notif.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
         }
-        getSystemService(NotificationManager.class).notify(ID_KAKAO, b.build());
+        getSystemService(NotificationManager.class).notify(ID_KAKAO, notif.build());
     }
 
     // ---------- 4) 이메일 자동 송신 (알림 -> Gmail 작성 화면) ----------
@@ -1297,11 +1310,11 @@ public class HomeService extends Service {
     }
 
     private void notifyEmail(String pref, String to, String msg, Location loc) {
-        boolean k = PREF_KMAIL.equals(pref);
-        PendingIntent pi = PendingIntent.getActivity(this, k ? 4 : 3, emailCompose(this, to, emailSubject(this), msg),
+        boolean kakaoMail = PREF_KMAIL.equals(pref);
+        PendingIntent pi = PendingIntent.getActivity(this, kakaoMail ? 4 : 3, emailCompose(this, to, emailSubject(this), msg),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         String time = new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date());
-        Notification.Builder b = builder(CH_EMAIL)
+        Notification.Builder notif = builder(CH_EMAIL)
                 .setContentTitle(emailTitle(pref) + "로 위치 보내기 (" + time + ")")
                 .setContentText(loc == null ? "위치를 확인하지 못했습니다. 눌러서 메일 쓰기"
                         : "받는 사람: " + to + " · 눌러서 [보내기]")
@@ -1310,12 +1323,12 @@ public class HomeService extends Service {
                 .setColor(0xFFD93025)
                 .setAutoCancel(true);
         if (Build.VERSION.SDK_INT >= 20) {
-            b.addAction(new Notification.Action.Builder(0, "메일 쓰기", pi).build());
+            notif.addAction(new Notification.Action.Builder(0, "메일 쓰기", pi).build());
         }
         if (Build.VERSION.SDK_INT < 26) {
-            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+            notif.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
         }
-        getSystemService(NotificationManager.class).notify(k ? ID_KMAIL : ID_EMAIL, b.build());
+        getSystemService(NotificationManager.class).notify(kakaoMail ? ID_KMAIL : ID_EMAIL, notif.build());
     }
 
     // ---------- 5) 일반 문자(수동) / 본인 폰 알림 (정해진 시각·간격마다 위치 측정 후 알림) ----------
@@ -1377,7 +1390,7 @@ public class HomeService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 5, smsCompose(to, msg),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         String time = new SimpleDateFormat("HH:mm", Locale.KOREA).format(new Date());
-        Notification.Builder b = builder(CH_EMAIL)
+        Notification.Builder notif = builder(CH_EMAIL)
                 .setContentTitle("문자로 위치 보내기 (" + time + ")")
                 .setContentText(loc == null ? "위치를 확인하지 못했습니다. 눌러서 문자 쓰기"
                         : "받는 사람: " + to + " · 눌러서 [전송]")
@@ -1386,18 +1399,18 @@ public class HomeService extends Service {
                 .setColor(0xFF2E7D32)
                 .setAutoCancel(true);
         if (Build.VERSION.SDK_INT >= 20) {
-            b.addAction(new Notification.Action.Builder(0, "문자 쓰기", pi).build());
+            notif.addAction(new Notification.Action.Builder(0, "문자 쓰기", pi).build());
         }
         if (Build.VERSION.SDK_INT < 26) {
-            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+            notif.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
         }
-        getSystemService(NotificationManager.class).notify(ID_SMS, b.build());
+        getSystemService(NotificationManager.class).notify(ID_SMS, notif.build());
     }
 
     // ---------- 위치 측정 (텔레그램/카톡/이메일/문자/본인 알림 공용) ----------
 
     interface LocCallback {
-        void done(Location l); // 측정 실패 시 마지막으로 알려진 위치, 그것도 없으면 null
+        void done(Location loc); // 측정 실패 시 마지막으로 알려진 위치, 그것도 없으면 null
     }
 
     private final List<LocCallback> waiting = new ArrayList<>();
@@ -1412,29 +1425,29 @@ public class HomeService extends Service {
 
     private final LocationListener fixListener = new LocationListener() {
         @Override
-        public void onLocationChanged(Location l) {
-            if (l == null || System.currentTimeMillis() - l.getTime() > 2 * 60 * 1000) {
+        public void onLocationChanged(Location loc) {
+            if (loc == null || System.currentTimeMillis() - loc.getTime() > 2 * 60 * 1000) {
                 return; // 2분 넘은 옛 위치(캐시)는 버림
             }
-            if (best == null || !best.hasAccuracy() || (l.hasAccuracy() && l.getAccuracy() < best.getAccuracy())) {
-                best = l;
+            if (best == null || !best.hasAccuracy() || (loc.hasAccuracy() && loc.getAccuracy() < best.getAccuracy())) {
+                best = loc;
             }
-            float acc = l.hasAccuracy() ? l.getAccuracy() : Float.MAX_VALUE;
+            float acc = loc.hasAccuracy() ? loc.getAccuracy() : Float.MAX_VALUE;
             if (acc <= GOOD_M || (System.currentTimeMillis() - fixStart >= OK_AFTER && acc <= OK_M)) {
                 finishFix(); // 충분히 정확하면 바로 사용
             }
         }
 
         @Override
-        public void onStatusChanged(String p, int s, Bundle b) {
+        public void onStatusChanged(String provider, int status, Bundle extras) {
         }
 
         @Override
-        public void onProviderEnabled(String p) {
+        public void onProviderEnabled(String provider) {
         }
 
         @Override
-        public void onProviderDisabled(String p) {
+        public void onProviderDisabled(String provider) {
         }
     };
 
@@ -1456,8 +1469,8 @@ public class HomeService extends Service {
 
         // 0) 1분 이내에 잰 위치가 '정확도 20 m 이내'이면 그대로 사용 (예전엔 정확도와 상관없이 써서 오차가 컸음)
         try {
-            for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                Location last = lm.getLastKnownLocation(p);
+            for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                Location last = lm.getLastKnownLocation(provider);
                 if (last != null && System.currentTimeMillis() - last.getTime() <= 60 * 1000
                         && last.hasAccuracy() && last.getAccuracy() <= GOOD_M) {
                     best = last;
@@ -1475,9 +1488,9 @@ public class HomeService extends Service {
         // 2) Play 서비스가 없는 폰: 안드로이드 기본 GPS·통신망 위치
         if (!any) {
             try {
-                for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                    if (lm.isProviderEnabled(p)) {
-                        lm.requestLocationUpdates(p, 1000, 0, fixListener, Looper.getMainLooper());
+                for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    if (lm.isProviderEnabled(provider)) {
+                        lm.requestLocationUpdates(provider, 1000, 0, fixListener, Looper.getMainLooper());
                         any = true;
                     }
                 }
@@ -1512,9 +1525,9 @@ public class HomeService extends Service {
                             .build();
             fusedCb = new com.google.android.gms.location.LocationCallback() {
                 @Override
-                public void onLocationResult(com.google.android.gms.location.LocationResult r) {
-                    for (Location l : r.getLocations()) {
-                        fixListener.onLocationChanged(l);
+                public void onLocationResult(com.google.android.gms.location.LocationResult result) {
+                    for (Location loc : result.getLocations()) {
+                        fixListener.onLocationChanged(loc);
                     }
                 }
             };
@@ -1538,13 +1551,13 @@ public class HomeService extends Service {
             fused.removeLocationUpdates(fusedCb);
             fusedCb = null;
         }
-        Location l = best;
-        if (l == null) { // 새 측정 실패 -> 마지막으로 알려진 위치라도 사용
+        Location fix = best;
+        if (fix == null) { // 새 측정 실패 -> 마지막으로 알려진 위치라도 사용
             try {
-                for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                    Location last = lm.getLastKnownLocation(p);
-                    if (last != null && (l == null || last.getTime() > l.getTime())) {
-                        l = last;
+                for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    Location last = lm.getLastKnownLocation(provider);
+                    if (last != null && (fix == null || last.getTime() > fix.getTime())) {
+                        fix = last;
                     }
                 }
             } catch (SecurityException ignored) {
@@ -1553,7 +1566,7 @@ public class HomeService extends Service {
         List<LocCallback> cbs = new ArrayList<>(waiting);
         waiting.clear();
         for (LocCallback cb : cbs) {
-            cb.done(l);
+            cb.done(fix);
         }
     }
 
@@ -1568,13 +1581,13 @@ public class HomeService extends Service {
 
     // ---------- 알람 (화면이 꺼진 절전 상태에서도 깨움) ----------
 
-    private static PendingIntent alarmIntent(Context c, String action) {
-        Intent i = new Intent(c, HomeService.class).setAction(action);
+    private static PendingIntent alarmIntent(Context ctx, String action) {
+        Intent intent = new Intent(ctx, HomeService.class).setAction(action);
         int req = ACTION_TG.equals(action) ? 1 : ACTION_KAKAO.equals(action) ? 2
                 : ACTION_KMAIL.equals(action) ? 4 : ACTION_SMS.equals(action) ? 5 : ACTION_SMSAUTO.equals(action) ? 9
                 : ACTION_SELF.equals(action) ? 6 : ACTION_CHECK.equals(action) ? 7
                 : ACTION_LATE.equals(action) ? 8 : 3;
-        return PendingIntent.getService(c, req, i,
+        return PendingIntent.getService(ctx, req, intent,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
@@ -1588,28 +1601,28 @@ public class HomeService extends Service {
         }
     }
 
-    private static void cancelAlarm(Context c, String action) {
-        ((AlarmManager) c.getSystemService(Context.ALARM_SERVICE)).cancel(alarmIntent(c, action));
+    private static void cancelAlarm(Context ctx, String action) {
+        ((AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE)).cancel(alarmIntent(ctx, action));
     }
 
     // ---------- 공용 도우미 ----------
 
     // 지금 연결된 공유기의 BSSID (소문자, 없거나 알 수 없으면 null)
-    static String connectedBssid(Context c) {
-        WifiManager wm = (WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+    static String connectedBssid(Context ctx) {
+        WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wm == null || !wm.isWifiEnabled()) {
             return null;
         }
         WifiInfo wi = wm.getConnectionInfo();
-        String b = wi == null ? null : wi.getBSSID();
-        if (b == null || b.equals("02:00:00:00:00:00")) {
+        String bssid = wi == null ? null : wi.getBSSID();
+        if (bssid == null || bssid.equals("02:00:00:00:00:00")) {
             return null; // 권한/위치 서비스가 없으면 가짜 값이 옴
         }
-        return b.toLowerCase(Locale.US);
+        return bssid.toLowerCase(Locale.US);
     }
 
-    static boolean locationOn(Context c) {
-        LocationManager lm = (LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
+    static boolean locationOn(Context ctx) {
+        LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
         if (Build.VERSION.SDK_INT >= 28) {
             return lm.isLocationEnabled();
         }
@@ -1696,13 +1709,13 @@ public class HomeService extends Service {
         }
         // 문자 / 본인 폰 알림
         String[][] jobs = {{PREF_SMS, "문자"}, {PREF_SMSAUTO, "문자(자동)"}, {PREF_SELF, "본인 알림"}};
-        for (String[] j : jobs) {
-            SharedPreferences s = getSharedPreferences(j[0], MODE_PRIVATE);
-            if (s.getBoolean("on", false)) {
+        for (String[] job : jobs) {
+            SharedPreferences prefs = getSharedPreferences(job[0], MODE_PRIVATE);
+            if (prefs.getBoolean("on", false)) {
                 if (text.length() > 0) {
                     text.append(" · ");
                 }
-                text.append(j[1]).append(" ").append(emailSchedule(s));
+                text.append(job[1]).append(" ").append(emailSchedule(prefs));
             }
         }
         if (awayOnly(this)) {
@@ -1713,14 +1726,14 @@ public class HomeService extends Service {
     }
 
     private Notification.Builder builder(String ch) {
-        Notification.Builder b = Build.VERSION.SDK_INT >= 26
+        Notification.Builder notif = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, ch) : new Notification.Builder(this);
         Intent open = new Intent(this, MainActivity.class)
                 .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        b.setSmallIcon(android.R.drawable.ic_dialog_info)
+        notif.setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentIntent(PendingIntent.getActivity(this, 0, open,
                         PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
-        return b;
+        return notif;
     }
 
     private Notification statusNotification(String title, String text) {
@@ -1736,14 +1749,14 @@ public class HomeService extends Service {
     }
 
     private void alertHomeBack(String ssid) {
-        Notification.Builder b = builder(CH_ALERT)
+        Notification.Builder notif = builder(CH_ALERT)
                 .setContentTitle("홈")
                 .setContentText("집에 도착했습니다" + (ssid == null || ssid.isEmpty() ? "" : " (" + ssid + ")"))
                 .setColor(0xFF2E7D32)
                 .setAutoCancel(true);
         if (Build.VERSION.SDK_INT < 26) {
-            b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
+            notif.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
         }
-        getSystemService(NotificationManager.class).notify(ID_ALERT, b.build());
+        getSystemService(NotificationManager.class).notify(ID_ALERT, notif.build());
     }
 }

@@ -65,15 +65,15 @@ public class GuardianActivity extends Activity {
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         root.addView(list);
-        for (String[] e : load()) {
-            addCard(e[0], e[1], e[2], e[3]);
+        for (String[] entry : load()) {
+            addCard(entry[0], entry[1], entry[2], entry[3]);
         }
         if (cards.isEmpty()) {
             addCard("", "", "", ""); // 처음엔 빈 카드 한 장
         }
         Button add = new Button(this);
         add.setText("+ 보호자 추가");
-        add.setOnClickListener(v -> addCard("", "", "", ""));
+        add.setOnClickListener(view -> addCard("", "", "", ""));
         root.addView(add, matchWrap());
 
         // ---------- 2) (예정) 추가 구역 자리 ----------
@@ -82,7 +82,7 @@ public class GuardianActivity extends Activity {
         Button close = new Button(this);
         close.setText("저장하고 닫기");
         close.setTypeface(null, Typeface.BOLD);
-        close.setOnClickListener(v -> finish()); // onPause 에서 저장
+        close.setOnClickListener(view -> finish()); // onPause 에서 저장
         LinearLayout.LayoutParams lp = matchWrap();
         lp.topMargin = 60;
         root.addView(close, lp);
@@ -102,28 +102,28 @@ public class GuardianActivity extends Activity {
     // ---------- 보호자 카드 ----------
 
     private void addCard(String name, String phone, String email, String relation) {
-        final Card c = new Card();
-        c.box = new LinearLayout(this);
-        c.box.setOrientation(LinearLayout.VERTICAL);
-        c.box.setPadding(30, 20, 30, 20);
-        c.box.setBackgroundColor(0x0F000000); // 카드 구분용 옅은 배경
+        final Card card = new Card();
+        card.box = new LinearLayout(this);
+        card.box.setOrientation(LinearLayout.VERTICAL);
+        card.box.setPadding(30, 20, 30, 20);
+        card.box.setBackgroundColor(0x0F000000); // 카드 구분용 옅은 배경
 
-        c.title = new TextView(this);
-        c.title.setTextSize(15);
-        c.title.setTypeface(null, Typeface.BOLD);
-        c.box.addView(c.title);
+        card.title = new TextView(this);
+        card.title.setTextSize(15);
+        card.title.setTypeface(null, Typeface.BOLD);
+        card.box.addView(card.title);
 
-        c.name = field(c.box, "이름 (예: 엄마)", name, InputType.TYPE_CLASS_TEXT);
+        card.name = field(card.box, "이름 (예: 엄마)", name, InputType.TYPE_CLASS_TEXT);
         TextView rl = new TextView(this);
         rl.setText("관계");
         rl.setTextSize(12);
         rl.setTextColor(Color.GRAY);
         rl.setPadding(0, 10, 0, 0);
-        c.box.addView(rl);
-        c.rel = relationButton(this, relation, null); // 화면을 벗어날 때 저장됨
-        c.box.addView(c.rel, matchWrap());
-        c.phone = field(c.box, "전화번호", phone, InputType.TYPE_CLASS_PHONE);
-        c.email = field(c.box, "이메일 (이메일로 위치 요청·회신)", email,
+        card.box.addView(rl);
+        card.rel = relationButton(this, relation, null); // 화면을 벗어날 때 저장됨
+        card.box.addView(card.rel, matchWrap());
+        card.phone = field(card.box, "전화번호", phone, InputType.TYPE_CLASS_PHONE);
+        card.email = field(card.box, "이메일 (이메일로 위치 요청·회신)", email,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
 
         LinearLayout row = new LinearLayout(this);
@@ -131,8 +131,8 @@ public class GuardianActivity extends Activity {
         Button pick = new Button(this);
         pick.setText("연락처에서 선택");
         pick.setTextSize(12);
-        pick.setOnClickListener(v -> {
-            pickTarget = c;
+        pick.setOnClickListener(view -> {
+            pickTarget = card;
             try {
                 startActivityForResult(new Intent(Intent.ACTION_PICK,
                         ContactsContract.CommonDataKinds.Phone.CONTENT_URI), REQ_PICK);
@@ -145,52 +145,52 @@ public class GuardianActivity extends Activity {
         Button test = new Button(this);
         test.setText("테스트");
         test.setTextSize(12);
-        test.setOnClickListener(v -> notifyGuardian(c, false));
+        test.setOnClickListener(view -> notifyGuardian(card, false));
         row.addView(test, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         // [삭제]: 확인(1101) 후 해제 안내 (이메일 + 문자) 보내고 카드 삭제
         Button del = new Button(this);
         del.setText("삭제");
         del.setTextSize(12);
-        del.setOnClickListener(v -> ScreenId.tag(new android.app.AlertDialog.Builder(this)
+        del.setOnClickListener(view -> ScreenId.tag(new android.app.AlertDialog.Builder(this)
                 .setTitle("보호자 삭제")
-                .setMessage(guardianName(c) + "님을 보호자에서 삭제할까요?\n"
+                .setMessage(guardianName(card) + "님을 보호자에서 삭제할까요?\n"
                         + "삭제 안내를 이메일로 보내고, 문자 앱을 엽니다. (등록된 것만)")
-                .setPositiveButton("삭제", (d, w) -> {
-                    notifyGuardian(c, true);
-                    cards.remove(c);
-                    list.removeView(c.box);
+                .setPositiveButton("삭제", (dialog, which) -> {
+                    notifyGuardian(card, true);
+                    cards.remove(card);
+                    list.removeView(card.box);
                     renumber();
                     save(); // 바로 저장 (삭제된 보호자의 위치 요청에는 더 이상 회신 안 함)
                 })
                 .setNegativeButton("취소", null)
                 .show(), "1101"));
         row.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        c.box.addView(row);
+        card.box.addView(row);
 
         LinearLayout.LayoutParams lp = matchWrap();
         lp.topMargin = 20;
-        list.addView(c.box, lp);
-        cards.add(c);
+        list.addView(card.box, lp);
+        cards.add(card);
         renumber();
     }
 
     // ---------- 보호자에게 안내: 이메일(사용자 Gmail 로 자동 발송) + 문자(문자 앱을 열어 수동 [전송]) ----------
 
-    private String guardianName(Card c) {
-        String nm = c.name.getText().toString().trim();
+    private String guardianName(Card card) {
+        String nm = card.name.getText().toString().trim();
         return nm.isEmpty() ? "보호자" : nm;
     }
 
     // removed=false: [테스트] 등록 안내, true: [삭제] 해제 안내
-    private void notifyGuardian(Card c, boolean removed) {
-        final String g = guardianName(c);
+    private void notifyGuardian(Card card, boolean removed) {
+        final String gname = guardianName(card);
         String me = TelegramSender.senderName(this);
         final String meName = me.isEmpty() ? "사용자" : me;
-        android.content.SharedPreferences u = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
-        final String from = u.getString("mail", "").trim();
-        final String pass = u.getString("mailPass", "");
-        final String mail = c.email.getText().toString().trim();
-        final String phone = c.phone.getText().toString().trim();
+        android.content.SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
+        final String from = user.getString("mail", "").trim();
+        final String pass = user.getString("mailPass", "");
+        final String mail = card.email.getText().toString().trim();
+        final String phone = card.phone.getText().toString().trim();
         boolean mailOk = android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches();
         boolean phoneOk = phone.replaceAll("[^0-9]", "").length() >= 3;
         if (!mailOk && !phoneOk) {
@@ -203,21 +203,21 @@ public class GuardianActivity extends Activity {
         final String sms;
         if (!removed) {
             subject = "[집에왔어요] 보호자 등록 안내 (테스트)";
-            body = "안녕하세요, " + g + "님.\n"
-                    + meName + "님이 '집에왔어요' 앱에 " + g + "님을 보호자로 등록했습니다.\n\n"
+            body = "안녕하세요, " + gname + "님.\n"
+                    + meName + "님이 '집에왔어요' 앱에 " + gname + "님을 보호자로 등록했습니다.\n\n"
                     + (from.isEmpty() ? ""
                     : "■ 위치가 궁금할 때\n   " + from + " 로 제목 #where 메일을 보내면, 앱이 현재 위치를 이메일로 회신합니다.\n\n")
                     + "■ 귀가·외출·SOS 알림을 이 주소로 받을 수 있습니다.\n\n"
                     + "이 메일은 연결 확인용 테스트입니다.";
-            sms = "[집에왔어요] " + meName + "님이 " + g + "님을 보호자로 등록했습니다."
+            sms = "[집에왔어요] " + meName + "님이 " + gname + "님을 보호자로 등록했습니다."
                     + (from.isEmpty() ? "" : " 위치가 궁금하면 " + from + " 로 제목 #where 메일을 보내세요.")
                     + " (테스트)";
         } else {
             subject = "[집에왔어요] 보호자 등록 해제 안내";
-            body = "안녕하세요, " + g + "님.\n"
-                    + meName + "님이 '집에왔어요' 앱의 보호자 목록에서 " + g + "님을 삭제했습니다.\n"
+            body = "안녕하세요, " + gname + "님.\n"
+                    + meName + "님이 '집에왔어요' 앱의 보호자 목록에서 " + gname + "님을 삭제했습니다.\n"
                     + "앞으로 위치 요청(#where)에 회신하지 않으며, 알림도 보내지 않습니다.";
-            sms = "[집에왔어요] " + meName + "님이 보호자 목록에서 " + g + "님을 삭제했습니다. "
+            sms = "[집에왔어요] " + meName + "님이 보호자 목록에서 " + gname + "님을 삭제했습니다. "
                     + "앞으로 위치 요청에 회신하지 않습니다.";
         }
 
@@ -255,25 +255,25 @@ public class GuardianActivity extends Activity {
     // ---------- 불러오기: "guardians"(이름·번호·이메일 JSON) 우선, 없으면 예전 "phones" ----------
 
     private List<String[]> load() {
-        List<String[]> r = new ArrayList<>();
+        List<String[]> rows = new ArrayList<>();
         String js = SosActivity.prefs(this).getString("guardians", "");
         if (!js.isEmpty()) {
             try {
-                org.json.JSONArray a = new org.json.JSONArray(js);
-                for (int i = 0; i < a.length(); i++) {
-                    org.json.JSONObject o = a.getJSONObject(i);
-                    r.add(new String[]{o.optString("name"), o.optString("phone"), o.optString("email"),
-                            o.optString("rel")});
+                org.json.JSONArray arr = new org.json.JSONArray(js);
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONObject item = arr.getJSONObject(i);
+                    rows.add(new String[]{item.optString("name"), item.optString("phone"), item.optString("email"),
+                            item.optString("rel")});
                 }
-                return r;
+                return rows;
             } catch (Exception ignored) {
-                r.clear();
+                rows.clear();
             }
         }
-        for (String[] e : SosActivity.entries(this)) {
-            r.add(new String[]{e[0], e[1], "", ""});
+        for (String[] entry : SosActivity.entries(this)) {
+            rows.add(new String[]{entry[0], entry[1], "", ""});
         }
-        return r;
+        return rows;
     }
 
     // ---------- 저장 ----------
@@ -284,10 +284,10 @@ public class GuardianActivity extends Activity {
         StringBuilder sb = new StringBuilder(), mails = new StringBuilder();
         org.json.JSONArray all = new org.json.JSONArray();
         int skipped = 0;
-        for (Card c : cards) {
-            String num = c.phone.getText().toString().trim();
-            String nm = c.name.getText().toString().replaceAll("[,;0-9+]", "").trim();
-            String em = c.email.getText().toString().trim();
+        for (Card card : cards) {
+            String num = card.phone.getText().toString().trim();
+            String nm = card.name.getText().toString().replaceAll("[,;0-9+]", "").trim();
+            String em = card.email.getText().toString().trim();
             boolean phoneOk = num.replaceAll("[^0-9]", "").length() >= 3;
             boolean mailOk = android.util.Patterns.EMAIL_ADDRESS.matcher(em).matches();
             if (!phoneOk && !mailOk) {
@@ -298,7 +298,7 @@ public class GuardianActivity extends Activity {
             }
             try {
                 all.put(new org.json.JSONObject().put("name", nm).put("phone", phoneOk ? num : "")
-                        .put("email", mailOk ? em : "").put("rel", relationOf(c.rel)));
+                        .put("email", mailOk ? em : "").put("rel", relationOf(card.rel)));
             } catch (Exception ignored) {
             }
             if (phoneOk) {
@@ -331,12 +331,12 @@ public class GuardianActivity extends Activity {
         if (req != REQ_PICK || result != RESULT_OK || data == null || data.getData() == null || pickTarget == null) {
             return;
         }
-        try (Cursor c = getContentResolver().query(data.getData(), new String[]{
+        try (Cursor cursor = getContentResolver().query(data.getData(), new String[]{
                 ContactsContract.CommonDataKinds.Phone.NUMBER,
                 ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME}, null, null, null)) {
-            if (c != null && c.moveToFirst()) {
-                pickTarget.phone.setText(c.getString(0));
-                String nm = c.getString(1);
+            if (cursor != null && cursor.moveToFirst()) {
+                pickTarget.phone.setText(cursor.getString(0));
+                String nm = cursor.getString(1);
                 if (nm != null && pickTarget.name.getText().toString().trim().isEmpty()) {
                     pickTarget.name.setText(nm);
                 }
@@ -354,27 +354,27 @@ public class GuardianActivity extends Activity {
             "형제자매", "친구", "연인", "자식", "조카", "의료진", "제자", "기타"};
 
     // [관계 버튼]: 누르면 목록 팝업, 고르면 버튼 글자가 바뀜. onChange 는 고른 뒤 할 일 (없으면 null)
-    static Button relationButton(final android.app.Activity a, String value, final Runnable onChange) {
-        final Button b = new Button(a);
-        b.setAllCaps(false);
-        b.setTextSize(14);
-        b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        setRelation(b, value);
-        b.setOnClickListener(v -> {
+    static Button relationButton(final android.app.Activity activity, String value, final Runnable onChange) {
+        final Button btn = new Button(activity);
+        btn.setAllCaps(false);
+        btn.setTextSize(14);
+        btn.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        setRelation(btn, value);
+        btn.setOnClickListener(view -> {
             String[] items = new String[RELATIONS.length + 1];
             items[0] = "(선택 안 함)";
             System.arraycopy(RELATIONS, 0, items, 1, RELATIONS.length);
             int cur = 0;
             for (int i = 0; i < RELATIONS.length; i++) {
-                if (RELATIONS[i].equals(relationOf(b))) {
+                if (RELATIONS[i].equals(relationOf(btn))) {
                     cur = i + 1;
                 }
             }
-            ScreenId.tag(new android.app.AlertDialog.Builder(a)
+            ScreenId.tag(new android.app.AlertDialog.Builder(activity)
                     .setTitle("관계")
-                    .setSingleChoiceItems(items, cur, (d, w) -> {
-                        setRelation(b, w == 0 ? "" : RELATIONS[w - 1]);
-                        d.dismiss();
+                    .setSingleChoiceItems(items, cur, (dialog, which) -> {
+                        setRelation(btn, which == 0 ? "" : RELATIONS[which - 1]);
+                        dialog.dismiss();
                         if (onChange != null) {
                             onChange.run();
                         }
@@ -382,45 +382,45 @@ public class GuardianActivity extends Activity {
                     .setNegativeButton("취소", null)
                     .show(), "1102");
         });
-        return b;
+        return btn;
     }
 
-    static void setRelation(Button b, String value) {
-        b.setTag(value == null ? "" : value);
-        b.setText((value == null || value.isEmpty() ? "관계 선택" : value) + "   ▼");
+    static void setRelation(Button btn, String value) {
+        btn.setTag(value == null ? "" : value);
+        btn.setText((value == null || value.isEmpty() ? "관계 선택" : value) + "   ▼");
     }
 
-    static String relationOf(Button b) {
-        Object t = b.getTag();
-        return t == null ? "" : t.toString();
+    static String relationOf(Button btn) {
+        Object tag = btn.getTag();
+        return tag == null ? "" : tag.toString();
     }
 
     // ---------- 화면 도우미 ----------
 
-    private void section(LinearLayout root, String s) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(17);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setTextColor(0xFF1976D2);
-        t.setPadding(0, 44, 0, 6);
-        root.addView(t);
+    private void section(LinearLayout root, String heading) {
+        TextView tv = new TextView(this);
+        tv.setText(heading);
+        tv.setTextSize(17);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(0xFF1976D2);
+        tv.setPadding(0, 44, 0, 6);
+        root.addView(tv);
     }
 
     private EditText field(LinearLayout parent, String label, String value, int type) {
-        TextView l = new TextView(this);
-        l.setText(label);
-        l.setTextSize(12);
-        l.setTextColor(Color.GRAY);
-        l.setPadding(0, 10, 0, 0);
-        parent.addView(l);
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setInputType(type);
-        e.setText(value);
-        e.setGravity(Gravity.START);
-        parent.addView(e);
-        return e;
+        TextView caption = new TextView(this);
+        caption.setText(label);
+        caption.setTextSize(12);
+        caption.setTextColor(Color.GRAY);
+        caption.setPadding(0, 10, 0, 0);
+        parent.addView(caption);
+        EditText edit = new EditText(this);
+        edit.setSingleLine(true);
+        edit.setInputType(type);
+        edit.setText(value);
+        edit.setGravity(Gravity.START);
+        parent.addView(edit);
+        return edit;
     }
 
     private static LinearLayout.LayoutParams matchWrap() {
