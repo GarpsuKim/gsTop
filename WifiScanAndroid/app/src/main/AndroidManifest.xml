@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 보호자 회신에 주변 블루투스 기기 목록 (Android 12 이상 "근처 기기" 권한, 위치 파악 용도라 neverForLocation 없음) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <!-- 텔레그램 자동 송신 (절전 중에도 정해진 간격으로 깨우기) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />

@@ -352,6 +352,42 @@ public class HomeService extends Service {
         return true;
     }
 
+    // ---------- 1040 공통 보내는 시각 (모든 채널이 함께 씀, 텔레그램 포함) ----------
+
+    // 공통 시각에 문제가 있으면 이유, 없으면 null
+    static String schedProblem(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(PREF_SCHED, MODE_PRIVATE);
+        if (!prefs.contains("mode")) {
+            return "(3) 위치 보내기 화면 맨 위 '보내는 시각'을 먼저 저장하세요.";
+        }
+        if ("times".equals(prefs.getString("mode", "")) && prefs.getString("times", "").trim().isEmpty()) {
+            return "(3) 위치 보내기 화면 맨 위 '보내는 시각'에 시각을 하나 이상 등록하세요.";
+        }
+        return null;
+    }
+
+    // 공통 시각을 한 채널 설정에 복사. start 면 다음 송신 시각도 다시 계산
+    // (지정 시각: 다음 시각에 / 일정 간격: 바로 1회 후 간격대로)
+    static void copySched(Context ctx, SharedPreferences.Editor ed, boolean start) {
+        SharedPreferences prefs = ctx.getSharedPreferences(PREF_SCHED, MODE_PRIVATE);
+        String mode = prefs.getString("mode", "times");
+        String tm = prefs.getString("times", "");
+        ed.putString("mode", mode).putString("times", tm).putInt("interval", prefs.getInt("interval", 60));
+        if (start) {
+            ed.putLong("next", "times".equals(mode) ? nextTime(tm, System.currentTimeMillis()) : 0);
+        }
+    }
+
+    // 텔레그램이 예전 '자체 간격'만 갖고 있으면 공통 시각으로 맞춤 (업데이트 직후 한 번)
+    static void tgFollowSched(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
+        if (!sp.contains("mode") && ctx.getSharedPreferences(PREF_SCHED, MODE_PRIVATE).contains("mode")) {
+            SharedPreferences.Editor ed = sp.edit();
+            copySched(ctx, ed, sp.getBoolean("on", false));
+            ed.apply();
+        }
+    }
+
     // 다음 송신 시각
     static long emailNext(SharedPreferences sp, long now) {
         return "times".equals(sp.getString("mode", "interval"))
@@ -913,7 +949,8 @@ public class HomeService extends Service {
         jobBusy.add(busy);
         fetchLocation(loc -> new Thread(() -> {
             String err = TelegramSender.send(token, cid, TelegramSender.statusLine(this)
-                    + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false));
+                    + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false)
+                    + "\n\n" + TelegramSender.btDetails(this)); // 주변 블루투스 (약 6초 검색)
             handler.post(() -> {
                 getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE).edit()
                         .putLong("remoteTime", System.currentTimeMillis())
@@ -1064,7 +1101,9 @@ public class HomeService extends Service {
             SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
             String err = EmailSender.send(user.getString("mail", ""), user.getString("mailPass", ""), to,
                     emailSubject(this) + " - 요청하신 위치",
-                    TelegramSender.statusLine(this) + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false));
+                    // 공유기 식별 정보(이름·별명·MAC·신호·채널·IP·주변 공유기)는 message() 끝에 들어 있음
+                    TelegramSender.statusLine(this) + "\n📨 요청하신 위치입니다\n\n" + TelegramSender.message(this, loc, false)
+                            + "\n\n" + TelegramSender.btDetails(this)); // 주변 블루투스 (약 6초 검색)
             handler.post(() -> {
                 user.edit().putLong("mailRemoteTime", System.currentTimeMillis())
                         .putString("mailRemoteResult", (err == null ? "회신 ✓" : "회신 실패: " + err) + " (" + to + ")")
@@ -1136,11 +1175,9 @@ public class HomeService extends Service {
 
     // 외출이 확정된 순간: '일정 간격' 전송들은 바로 한 번 보내고 그때부터 간격대로
     private void startSendingOnLeave() {
-        String[] interval = {TelegramSender.PREF};
-        for (String prefName : interval) {
-            getSharedPreferences(prefName, MODE_PRIVATE).edit().putLong("next", 0).apply();
-        }
-        for (String prefName : new String[]{PREF_EMAIL, PREF_KMAIL, PREF_KAKAO, PREF_SMS, PREF_SMSAUTO, PREF_SELF}) {
+        tgFollowSched(this); // 텔레그램도 공통 시각을 따름
+        for (String prefName : new String[]{TelegramSender.PREF, PREF_EMAIL, PREF_KMAIL, PREF_KAKAO, PREF_SMS,
+                PREF_SMSAUTO, PREF_SELF}) {
             SharedPreferences sp = getSharedPreferences(prefName, MODE_PRIVATE);
             if ("interval".equals(sp.getString("mode", ""))) {
                 sp.edit().putLong("next", 0).apply(); // 지정 시각 방식은 원래 시각대로
@@ -1157,18 +1194,20 @@ public class HomeService extends Service {
     // ---------- 2) 텔레그램 자동 송신 ----------
 
     // 보낼 때가 되었으면 보내고, 아니면 다음 송신 알람만 예약
+    // 보내는 시각은 1040 공통 설정 (지정 시각 / 일정 간격) - 예전의 텔레그램 자체 간격은 쓰지 않음
     private void scheduleTelegram(boolean tick) {
         SharedPreferences sp = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
         if (!sp.getBoolean("on", false)) {
             cancelAlarm(this, ACTION_TG);
             return;
         }
+        tgFollowSched(this);
         long next = sp.getLong("next", 0);
         if (!tick && System.currentTimeMillis() < next - 30 * 1000) {
             setAlarm(ACTION_TG, next);
             return;
         }
-        if (skipAtHome(sp, ACTION_TG, System.currentTimeMillis() + sp.getInt("interval", 10) * 60 * 1000L)) {
+        if (skipAtHome(sp, ACTION_TG, emailNext(sp, System.currentTimeMillis()))) {
             return;
         }
         if (tgBusy) {
@@ -1183,7 +1222,7 @@ public class HomeService extends Service {
                 String err = TelegramSender.send(token, chats, TelegramSender.message(this, loc));
                 handler.post(() -> {
                     long now = System.currentTimeMillis();
-                    long nx = now + sp.getInt("interval", 10) * 60 * 1000L;
+                    long nx = emailNext(sp, now); // 공통 시각: 다음 지정 시각 또는 간격 뒤
                     sp.edit().putLong("lastTime", now)
                             .putString("lastResult", err == null ? "성공" : "실패: " + err)
                             .putLong("next", nx)
@@ -1665,8 +1704,7 @@ public class HomeService extends Service {
             if (text.length() > 0) {
                 text.append(" · ");
             }
-            text.append("텔레그램 ").append(TelegramSender.intervalLabel(tg.getInt("interval", 10)))
-                    .append("마다");
+            text.append("텔레그램 ").append(emailSchedule(tg)); // "매일 08:00, 18:00" 또는 "5분마다"
             long last = tg.getLong("lastTime", 0);
             if (tgBusy) {
                 text.append(" (보내는 중...)");

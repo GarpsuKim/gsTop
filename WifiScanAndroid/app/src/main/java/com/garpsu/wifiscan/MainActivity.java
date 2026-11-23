@@ -251,10 +251,13 @@ public class MainActivity extends Activity {
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
+        // 탭 높이 통일: 글자 줄 수가 달라도 모든 탭이 가장 높은 탭 높이로 (위치도 글자 기준선 대신 위쪽 맞춤)
+        tabs.setBaselineAligned(false);
         for (int i = 0; i < TABS; i++) {
             final int idx = i;
             tabBtns[i] = addButton(tabs, names[i], view -> selectTab(idx));
             tabBtns[i].setTextSize(10); // 탭 6개라 글자를 작게
+            tabBtns[i].setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         }
         // (2) 현재 위치(1020)는 탭 메뉴에서 떼어 앱 시작 팝업으로 독립. 다른 탭 번호가 밀리지 않게 자리만 남기고 숨김
         tabBtns[1].setVisibility(View.GONE);
@@ -544,6 +547,7 @@ public class MainActivity extends Activity {
         renderBt(); // 블루투스 설정(페어링)에서 돌아왔을 때 목록 갱신
         updateRemoteInfo();
         updateSosInfo();
+        updateWardHead(); // 사용자 등록(1075)에서 이름을 바꾸고 돌아온 경우
         if (locPopupOpen() && hasPermission() && mode == MODE_LOC) {
             location(); // 다른 앱(지도·공유)에 갔다 오면 멈췄던 위치 갱신을 다시 시작
         }
@@ -1923,8 +1927,9 @@ public class MainActivity extends Activity {
         afterLocDone = true;
         if (loadRouters().isEmpty() && BtHome.registered(this).isEmpty()) {
             showIntro(); // 홈 공유기가 아직 없으면 안내 팝업 -> 닫으면 위치 권한 요청
-        } else {
-            ensurePermission(); // 위치 권한 요청 (공유기 연결 검사에 필요)
+        } else if (ensurePermission() && (HomeService.mailRemoteOn(this) || HomeService.remoteOn(this))) {
+            // 위치 권한이 이미 있고 원격 위치 요청을 받는 중이면: 회신에 넣을 주변 블루투스 검색 권한(근처 기기)
+            BtHome.requestScan(this);
         }
     }
 
@@ -2276,7 +2281,8 @@ public class MainActivity extends Activity {
     private String startProblem(String pref, SharedPreferences sp) {
         if (TelegramSender.PREF.equals(pref)) {
             return sp.getString("token", "").isEmpty() || sp.getString("chats", "").trim().isEmpty()
-                    ? "텔레그램 설정(봇 토큰·받는 사람)을 먼저 해 주세요." : null;
+                    ? "텔레그램 설정(봇 토큰·받는 사람)을 먼저 해 주세요."
+                    : schedProblem(); // 텔레그램도 1040 공통 '보내는 시각'을 씀
         }
         if (HomeService.PREF_KAKAO.equals(pref) && !kakaoInstalled()) {
             return "카카오톡이 설치되어 있지 않습니다.";
@@ -2324,14 +2330,10 @@ public class MainActivity extends Activity {
                     != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTI);
             }
-            if (TelegramSender.PREF.equals(pref)) {
-                sp.edit().putBoolean("on", true).putLong("next", 0).apply(); // 텔레그램은 자체 간격
-            } else {
-                // 1040 공통 보내는 시각을 복사 (지정 시각: 다음 시각부터 / 간격: 바로 1회 후 간격대로)
-                SharedPreferences.Editor ed = sp.edit().putBoolean("on", true);
-                copySched(ed, true);
-                ed.apply();
-            }
+            // 1040 공통 보내는 시각을 복사 (지정 시각: 다음 시각부터 / 간격: 바로 1회 후 간격대로). 텔레그램도 같음
+            SharedPreferences.Editor ed = sp.edit().putBoolean("on", true);
+            copySched(ed, true);
+            ed.apply();
         } else {
             sp.edit().putBoolean("on", false).apply();
         }
@@ -2362,22 +2364,45 @@ public class MainActivity extends Activity {
     private class ScheduleUi {
         final RadioButton rTimes = new RadioButton(MainActivity.this), rInterval = new RadioButton(MainActivity.this);
         final EditText times = new EditText(MainActivity.this);
-        final Spinner interval = new Spinner(MainActivity.this);
+        // 일정 간격: 리스트 박스(Spinner)는 기기 테마에 따라 고른 값이 안 보여서 [1시간 ▼] 버튼 + 고르기 팝업(1245)
+        final Button interval = new Button(MainActivity.this);
+        int intervalIdx;
+
+        // 줄 사이 간격 (예전보다 1.5배): 각 줄 위에 여백
+        private LinearLayout.LayoutParams gapLp() {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dpx(12);
+            return lp;
+        }
 
         ScheduleUi(LinearLayout form, SharedPreferences sp) {
-            label(form, "보내는 시각");
+            TextView title = label(form, "보내는 시각");
+            title.setPadding(0, dpx(12), 0, dpx(6));
             RadioGroup mode = new RadioGroup(MainActivity.this);
             rTimes.setText("지정 시각 (매일)");
             rTimes.setId(View.generateViewId());
             rInterval.setText("일정 간격");
             rInterval.setId(View.generateViewId());
+            for (RadioButton rb : new RadioButton[]{rTimes, rInterval}) {
+                rb.setTextSize(15);
+                rb.setPadding(rb.getPaddingLeft(), dpx(8), rb.getPaddingRight(), dpx(8)); // 줄 높이 1.5배
+            }
             mode.addView(rTimes);
-            mode.addView(rInterval);
-            form.addView(mode);
+            RadioGroup.LayoutParams second = new RadioGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            second.topMargin = dpx(6);
+            mode.addView(rInterval, second);
+            form.addView(mode, gapLp());
 
             final LinearLayout timesRow = new LinearLayout(MainActivity.this);
             timesRow.setOrientation(LinearLayout.HORIZONTAL);
+            timesRow.setGravity(Gravity.CENTER_VERTICAL);
             times.setSingleLine(true);
+            times.setTextSize(16);
+            times.setTextColor(Color.BLACK);      // 설정값이 테마 때문에 안 보이지 않게 글자색 고정
+            times.setHintTextColor(Color.GRAY);
+            times.setMinHeight(dpx(48));
             times.setHint("예: 08:00, 12:00, 18:00");
             times.setText(sp.getString("times", ""));
             Button addTime = new Button(MainActivity.this);
@@ -2391,17 +2416,30 @@ public class MainActivity extends Activity {
             }, 8, 0, true), "1240"));
             timesRow.addView(times, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             timesRow.addView(addTime);
-            form.addView(timesRow);
+            form.addView(timesRow, gapLp());
 
-            interval.setAdapter(new ArrayAdapter<>(MainActivity.this,
-                    android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
             int cur = sp.getInt("interval", 60);
+            intervalIdx = 0;
             for (int i = 0; i < TelegramSender.INTERVALS.length; i++) {
                 if (TelegramSender.INTERVALS[i] == cur) {
-                    interval.setSelection(i);
+                    intervalIdx = i;
                 }
             }
-            form.addView(interval);
+            interval.setAllCaps(false);
+            interval.setTextSize(16);
+            interval.setTextColor(Color.BLACK);
+            interval.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            interval.setText(TelegramSender.INTERVAL_LABELS[intervalIdx] + "   ▼");
+            interval.setOnClickListener(view -> ScreenId.tag(new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("일정 간격")
+                    .setSingleChoiceItems(TelegramSender.INTERVAL_LABELS, intervalIdx, (dialog, which) -> {
+                        intervalIdx = which;
+                        interval.setText(TelegramSender.INTERVAL_LABELS[which] + "   ▼");
+                        dialog.dismiss();
+                    })
+                    .setNegativeButton("취소", null)
+                    .show(), "1245"));
+            form.addView(interval, gapLp());
 
             mode.setOnCheckedChangeListener((group, id) -> {
                 timesRow.setVisibility(id == rTimes.getId() ? View.VISIBLE : View.GONE);
@@ -2419,7 +2457,7 @@ public class MainActivity extends Activity {
         }
 
         int minutes() {
-            return TelegramSender.INTERVALS[interval.getSelectedItemPosition()];
+            return TelegramSender.INTERVALS[intervalIdx];
         }
     }
 
@@ -2723,16 +2761,33 @@ public class MainActivity extends Activity {
     private final List<WardCard> wardCards = new ArrayList<>();
     private LinearLayout wardList;
 
+    private TextView wardHead; // 1058 첫 줄 안내 (사용자 등록 이름이 들어감)
+
+    // "이 화면에서는 현재 사용자(홍길동)가 …" - 이름은 사용자 등록(1075)의 이름
+    private void updateWardHead() {
+        if (wardHead == null) {
+            return;
+        }
+        String me = TelegramSender.senderName(this);
+        wardHead.setText("이 화면에서는 현재 사용자(" + (me.isEmpty() ? "이름 미등록" : me)
+                + ")가 보호자 자격으로 피보호자를 관리합니다.");
+    }
+
     private void buildWardTab(final LinearLayout body) {
-        TextView head = new TextView(this);
-        head.setText("이 화면에서는 사용자가 보호자 자격으로 피보호자를 관리합니다.");
-        head.setTextSize(16);
-        head.setTypeface(null, Typeface.BOLD);
-        head.setPadding(40, 36, 40, 8);
-        body.addView(head);
-        smallNote(body, "[지금 위치 확인]: 내 Gmail(사용자 등록)에서 피보호자 이메일로 \"#where\" 메일을 보냅니다. "
-                + "피보호자 폰의 집에왔어요가 위치를 내 Gmail 로 회신합니다.\n"
-                + "※ 피보호자 폰의 보호자 등록(1100)에 내 Gmail 주소가 적혀 있어야 합니다.");
+        wardHead = new TextView(this);
+        wardHead.setTextSize(16);
+        wardHead.setTypeface(null, Typeface.BOLD);
+        wardHead.setPadding(40, 36, 40, 8);
+        updateWardHead();
+        body.addView(wardHead);
+        // 안내문: '피보호자 폰' 은 굵은 빨간색
+        SpannableStringBuilder guide = new SpannableStringBuilder("이 기능이 정상 작동하려면, ");
+        append(guide, "피보호자 폰", C_BAD, true);
+        guide.append("에서 [나의 보호자 등록]을 먼저 하여야 합니다. 그리고, 이 화면에서 [등록]을 하세요.\n\n"
+                + "[지금 위치 확인] 버튼을 누르면, 시스템이 자동적으로 피보호자의 위치를 파악해서, "
+                + "2-3분 후에 보호자에게 이메일로 통보합니다.\n\n"
+                + "보호자께서는 자신의 메일함을 확인하세요.");
+        smallNote(body, "").setText(guide);
 
         wardList = new LinearLayout(this);
         wardList.setOrientation(LinearLayout.VERTICAL);
@@ -2771,7 +2826,7 @@ public class MainActivity extends Activity {
         body.addView(add, lp);
     }
 
-    // 카드 한 장:  < 피보호자 N >  이름 / 전화번호 [연락처에서 선택] / 이메일 + [테스트] [지금 위치 확인] / [등록] [삭제]
+    // 카드 한 장:  < 피보호자 N > / [지금 위치 확인] (좌우 긴 버튼) / 이름 / 관계 / 전화번호 [연락처에서 선택] / 이메일 / [등록] [테스트] [삭제]
     private WardCard addWardCard(String name, String phone, String email, String relation) {
         final WardCard card = new WardCard();
         card.box = new LinearLayout(this);
@@ -2783,6 +2838,17 @@ public class MainActivity extends Activity {
         card.title.setTextSize(15);
         card.title.setTypeface(null, Typeface.BOLD);
         card.box.addView(card.title);
+
+        // 제목 바로 아래 좌우로 긴 [지금 위치 확인]
+        Button locate = new Button(this);
+        locate.setText("지금 위치 확인");
+        locate.setTypeface(null, Typeface.BOLD);
+        locate.setOnClickListener(view -> wardMail(card, true));
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        llp.topMargin = 8;
+        llp.bottomMargin = 8;
+        card.box.addView(locate, llp);
 
         card.name = wardField(card.box, "이름 :", name, InputType.TYPE_CLASS_TEXT);
         card.rel = wardRelation(card.box, relation);
@@ -2801,21 +2867,17 @@ public class MainActivity extends Activity {
         ((LinearLayout) card.phone.getParent()).addView(pick);
         card.email = wardField(card.box, "이메일 :", email,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        // 이메일 칸 오른쪽은 좁아서 두 버튼은 바로 아래 줄 오른쪽에
-        LinearLayout mailBtns = new LinearLayout(this);
-        mailBtns.setOrientation(LinearLayout.HORIZONTAL);
-        mailBtns.setGravity(Gravity.END);
-        mailBtns.addView(smallBtn("테스트", view -> wardMail(card, false)));
-        mailBtns.addView(smallBtn("지금 위치 확인", view -> wardMail(card, true)));
-        card.box.addView(mailBtns, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        // 맨 아래 한 줄: [등록] [테스트] [삭제] - 같은 너비, 같은 간격
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button reg = new Button(this);
         reg.setText("등록");
         reg.setOnClickListener(view -> saveWards(true));
-        row.addView(reg, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(reg, wardBtnLp());
+        Button test = new Button(this);
+        test.setText("테스트");
+        test.setOnClickListener(view -> wardMail(card, false));
+        row.addView(test, wardBtnLp());
         Button del = new Button(this);
         del.setText("삭제");
         del.setOnClickListener(view -> ScreenId.tag(new AlertDialog.Builder(this)
@@ -2833,7 +2895,7 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("취소", null)
                 .show(), "1059"));
-        row.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(del, wardBtnLp());
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rlp.topMargin = 12;
@@ -2846,6 +2908,14 @@ public class MainActivity extends Activity {
         wardCards.add(card);
         renumberWards();
         return card;
+    }
+
+    // 카드 맨 아래 버튼 3개: 같은 너비(1:1:1) + 좌우 같은 여백
+    private LinearLayout.LayoutParams wardBtnLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        lp.leftMargin = dpx(4);
+        lp.rightMargin = dpx(4);
+        return lp;
     }
 
     private void renumberWards() {
@@ -2965,6 +3035,7 @@ public class MainActivity extends Activity {
     // ---------- (4) 응답 모드 탭 ----------
 
     private TextView remoteInfo, mailRemoteInfo;
+    private CheckBox tgRemoteCheck, mailAutoCheck; // (4) 응답 모드(1050) 체크박스
 
     private void buildGuardianTab(LinearLayout body) {
         final SharedPreferences tg = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
@@ -2979,6 +3050,7 @@ public class MainActivity extends Activity {
                 + "이 폰이 현재 위치를 자동으로 답장합니다. 이 폰을 만질 필요가 없습니다.\n"
                 + "※ 텔레그램 '받는 사람'으로 등록된 보호자만 요청할 수 있습니다.");
         final CheckBox remote = new CheckBox(this);
+        tgRemoteCheck = remote; // 다른 화면(1100)에서 바뀌면 onResume 에서 맞춤
         remote.setText("원격 위치 요청 받기");
         remote.setTextSize(15);
         remote.setTypeface(null, Typeface.BOLD);
@@ -2999,6 +3071,9 @@ public class MainActivity extends Activity {
                 }
             }
             tg.edit().putBoolean("remote", remote.isChecked()).apply();
+            if (remote.isChecked()) {
+                BtHome.requestScan(this); // 답장에 주변 블루투스 목록을 넣으려면 근처 기기 권한
+            }
             HomeService.refresh(this);
             Toast.makeText(this, remote.isChecked()
                     ? "켰습니다. 보호자가 봇에게 \"위치\"를 보내 보세요." : "껐습니다.", Toast.LENGTH_LONG).show();
@@ -3071,6 +3146,7 @@ public class MainActivity extends Activity {
                 + "※ 앱을 켤 때 받은편지함에 남아 있는 요청 메일도 찾아 처리합니다. 처리한 요청 메일은 삭제(휴지통)합니다.");
         final CheckBox on = new CheckBox(this);
         on.setText("이메일 위치 요청에 자동으로 회신응답");
+        mailAutoCheck = on; // 다른 화면(1100)에서 바뀌면 onResume 에서 맞춤
         on.setTextSize(15);
         on.setTypeface(null, Typeface.BOLD);
         on.setChecked(user.getBoolean("mailRemote", false));
@@ -3096,6 +3172,9 @@ public class MainActivity extends Activity {
                 }
             }
             user.edit().putBoolean("mailRemote", on.isChecked()).putString("mailRemoteErr", "").apply();
+            if (on.isChecked()) {
+                BtHome.requestScan(this); // 회신에 주변 블루투스 목록을 넣으려면 근처 기기 권한
+            }
             HomeService.refresh(this);
             Toast.makeText(this, on.isChecked()
                     ? "자동 회신을 켰습니다. 보호자가 \"#where\" 메일을 보내 보세요."
@@ -3154,6 +3233,15 @@ public class MainActivity extends Activity {
     }
 
     private void updateRemoteInfo() {
+        // 체크박스를 저장된 값에 맞춤 (나의 보호자 등록(1100)의 '자동 응답' 질문으로 바뀔 수 있음)
+        if (mailAutoCheck != null) {
+            mailAutoCheck.setChecked(getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE)
+                    .getBoolean("mailRemote", false));
+        }
+        if (tgRemoteCheck != null) {
+            tgRemoteCheck.setChecked(getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE)
+                    .getBoolean("remote", false));
+        }
         if (mailRemoteInfo != null) {
             SharedPreferences user = getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE);
             long time = user.getLong("mailRemoteTime", 0);
@@ -3417,8 +3505,8 @@ public class MainActivity extends Activity {
     private void buildSendTab(LinearLayout body) {
         // ---------- 맨 위: 공통 보내는 시각 (1140·1150·1170·1230·1235 가 함께 씀) + [저장] ----------
         sectionTitle(body, "■ 보내는 시각 (공통)");
-        smallNote(body, "아래 본인 폰 알림·일반 이메일·카톡 본인 메시지·일반 문자(수동·자동)가 모두 이 시각에 보냅니다. "
-                + "(텔레그램은 자체 간격)");
+        smallNote(body, "아래 본인 폰 알림·일반 이메일·카톡 본인 메시지·텔레그램·일반 문자(수동·자동)가 "
+                + "모두 이 시각에 보냅니다.");
         LinearLayout schBox = new LinearLayout(this);
         schBox.setOrientation(LinearLayout.VERTICAL);
         schBox.setPadding(40, 0, 40, 30);
@@ -3431,7 +3519,7 @@ public class MainActivity extends Activity {
         save.setOnClickListener(view -> saveSched(sch));
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        slp.topMargin = 20;
+        slp.topMargin = dpx(18); // 줄 사이 간격 1.5배
         schBox.addView(save, slp);
         body.addView(thickDivider(), thickDividerLp());
 
@@ -3490,8 +3578,9 @@ public class MainActivity extends Activity {
 
     // ---------- 공통 보내는 시각 (설정 이름 HomeService.PREF_SCHED) ----------
 
+    // 공통 보내는 시각을 쓰는 채널 (텔레그램도 포함 - 예전 '자체 간격'은 없앰)
     private static final String[] SCHED_JOBS = {HomeService.PREF_SELF, HomeService.PREF_EMAIL,
-            HomeService.PREF_KAKAO, HomeService.PREF_SMS, HomeService.PREF_SMSAUTO};
+            HomeService.PREF_KAKAO, TelegramSender.PREF, HomeService.PREF_SMS, HomeService.PREF_SMSAUTO};
 
     private SharedPreferences sched() {
         return getSharedPreferences(HomeService.PREF_SCHED, MODE_PRIVATE);
@@ -3504,7 +3593,8 @@ public class MainActivity extends Activity {
         }
         for (String prefName : SCHED_JOBS) {
             SharedPreferences sp = getSharedPreferences(prefName, MODE_PRIVATE);
-            if (sp.contains("mode") && !(prefName.equals(HomeService.PREF_KAKAO))) {
+            if (sp.contains("mode") && !(prefName.equals(HomeService.PREF_KAKAO))
+                    && !prefName.equals(TelegramSender.PREF)) {
                 sched().edit().putString("mode", sp.getString("mode", "times"))
                         .putString("times", sp.getString("times", ""))
                         .putInt("interval", sp.getInt("interval", 60)).apply();
@@ -3515,26 +3605,13 @@ public class MainActivity extends Activity {
 
     // 공통 시각이 준비되지 않았으면 이유, 됐으면 null
     private String schedProblem() {
-        SharedPreferences prefs = sched();
-        if (!prefs.contains("mode")) {
-            return "(3) 위치 보내기 화면 맨 위 '보내는 시각'을 먼저 저장하세요.";
-        }
-        if ("times".equals(prefs.getString("mode", "")) && prefs.getString("times", "").trim().isEmpty()) {
-            return "(3) 위치 보내기 화면 맨 위 '보내는 시각'에 시각을 하나 이상 등록하세요.";
-        }
-        return null;
+        return HomeService.schedProblem(this); // 텔레그램 설정 도우미(1070)와 같이 쓰려고 HomeService 로 옮김
     }
 
     // 공통 시각을 한 채널 설정에 복사. start 면 다음 송신 시각도 다시 계산
     // (지정 시각: 다음 시각에 / 일정 간격: 바로 1회 후 간격대로)
     private void copySched(SharedPreferences.Editor ed, boolean start) {
-        SharedPreferences prefs = sched();
-        String mode = prefs.getString("mode", "times");
-        String tm = prefs.getString("times", "");
-        ed.putString("mode", mode).putString("times", tm).putInt("interval", prefs.getInt("interval", 60));
-        if (start) {
-            ed.putLong("next", "times".equals(mode) ? HomeService.nextTime(tm, System.currentTimeMillis()) : 0);
-        }
+        HomeService.copySched(this, ed, start);
     }
 
     // 팝업 안내: 보내는 시각은 1040 공통 설정
@@ -3628,8 +3705,8 @@ public class MainActivity extends Activity {
     private void updateTgButton() {
         SharedPreferences sp = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
         boolean on = sp.getBoolean("on", false);
-        setJobText(tgBtn, "텔레그램 (자동)",
-                on ? TelegramSender.intervalLabel(sp.getInt("interval", 10)) + "마다" : null);
+        HomeService.tgFollowSched(this); // 예전 자체 간격만 있으면 공통 시각으로 맞춤
+        setJobText(tgBtn, "텔레그램 (자동)", on ? HomeService.emailSchedule(sp) : null); // 공통 보내는 시각
         tgBtn.setTextColor(on ? 0xFF2E7D32 : Color.BLACK);
         syncCheck(TelegramSender.PREF, on);
     }
@@ -3711,17 +3788,8 @@ public class MainActivity extends Activity {
         form.addView(shareBot, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        label(form, "자동 송신 간격");
-        final Spinner interval = new Spinner(this);
-        interval.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
-        int cur = sp.getInt("interval", 10);
-        for (int i = 0; i < TelegramSender.INTERVALS.length; i++) {
-            if (TelegramSender.INTERVALS[i] == cur) {
-                interval.setSelection(i);
-            }
-        }
-        form.addView(interval);
+        // 보내는 시각: 텔레그램도 1040 공통 설정을 씀 (예전 '자동 송신 간격' 칸은 없앰)
+        schedNote(form);
 
         final CheckBox on = new CheckBox(this);
         on.setText("자동송신시작");
@@ -3761,7 +3829,6 @@ public class MainActivity extends Activity {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
                 String tk = token.getText().toString().trim();
                 String ch = chats.getText().toString().trim();
-                int min = TelegramSender.INTERVALS[interval.getSelectedItemPosition()];
                 boolean start = on.isChecked();
                 if (start && (tk.isEmpty() || ch.isEmpty())) {
                     Toast.makeText(this, "봇 토큰과 받는 사람을 입력하세요.", Toast.LENGTH_SHORT).show();
@@ -3772,13 +3839,16 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "위치 권한을 허용한 뒤 다시 저장하세요.", Toast.LENGTH_LONG).show();
                     return;
                 }
-                boolean changed = start && (!sp.getBoolean("on", false) || sp.getInt("interval", 10) != min
+                if (start && schedProblem() != null) {
+                    Toast.makeText(this, schedProblem(), Toast.LENGTH_LONG).show();
+                    return;
+                }
+                boolean changed = start && (!sp.getBoolean("on", false)
                         || !tk.equals(sp.getString("token", "")) || !ch.equals(sp.getString("chats", "")));
                 SharedPreferences.Editor ed = sp.edit().putString("token", tk).putString("chats", ch)
-                        .putInt("interval", min).putBoolean("on", start);
-                if (changed) {
-                    ed.putLong("next", 0); // 시작하거나 설정이 바뀌면 바로 1회 전송 후 간격대로
-                }
+                        .putBoolean("on", start);
+                // 공통 보내는 시각 복사. 시작하거나 설정이 바뀌면 다음 송신 시각도 다시 계산
+                copySched(ed, changed);
                 ed.apply();
                 if (start && Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
                         Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -3787,7 +3857,7 @@ public class MainActivity extends Activity {
                 HomeService.refresh(this);
                 updateTgButton();
                 Toast.makeText(this, start
-                        ? "저장했습니다. (켜져 있음 · " + TelegramSender.intervalLabel(min) + "마다)"
+                        ? "저장했습니다. (켜져 있음 · " + HomeService.emailSchedule(sched()) + ")"
                         : "저장했습니다.", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
             });

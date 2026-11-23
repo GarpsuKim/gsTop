@@ -44,6 +44,205 @@ final class TelegramSender {
      *   🚶 외출
      *   ❔ 상태 확인 불가 (이유)
      */
+    /*
+     * 보호자 회신용 공유기 식별 정보 (등록 안 된 공유기도 최대한 자세히, 별명 줄은 항상 표시)
+     * ■ 연결된 공유기
+     *    이름(SSID): MyHome
+     *    별명: 우리집 거실            (없으면 "(없음)")
+     *    등록: 홈 / 기타 / 등록 안 됨
+     *    MAC(BSSID): AA:BB:CC:DD:EE:01
+     *    신호: -45 dBm (강) · 5GHz 36번 채널 (5180 MHz) · 연결 속도 866 Mbps
+     *    폰 IP: 192.168.0.12 · 게이트웨이: 192.168.0.1
+     * ■ 주변 공유기 (신호 센 순, 최대 5개)
+     *    1) Cafe_WiFi · 별명 (없음) · 등록 안 됨
+     *       AA:BB:.. · -60 dBm · 2.4GHz 6번 채널
+     */
+    @SuppressWarnings("deprecation")
+    static String wifiDetails(Context ctx) {
+        StringBuilder sb = new StringBuilder();
+        android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
+                ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (wm == null || !wm.isWifiEnabled()) {
+            return "■ 연결된 공유기\n   Wi-Fi 꺼짐";
+        }
+        String conn = null;
+        try {
+            conn = HomeService.connectedBssid(ctx);
+            android.net.wifi.WifiInfo wi = wm.getConnectionInfo();
+            sb.append("■ 연결된 공유기\n");
+            if (conn == null || wi == null) {
+                sb.append("   연결 없음\n");
+            } else {
+                String ssid = wi.getSSID();
+                if (ssid != null && ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) {
+                    ssid = ssid.substring(1, ssid.length() - 1);
+                }
+                if (ssid == null || ssid.isEmpty() || ssid.equals("<unknown ssid>")) {
+                    ssid = "<숨김>";
+                }
+                String alias = MainActivity.routerAlias(ctx, conn);
+                sb.append("   이름(SSID): ").append(ssid).append('\n')
+                        .append("   별명: ").append(alias.isEmpty() ? "(없음)" : alias).append('\n')
+                        .append("   등록: ").append(routerKind(ctx, conn)).append('\n')
+                        .append("   MAC(BSSID): ").append(conn.toUpperCase(Locale.US)).append('\n')
+                        .append("   신호: ").append(wi.getRssi()).append(" dBm (").append(strength(wi.getRssi())).append(")");
+                int freq = wi.getFrequency();
+                if (freq > 0) {
+                    sb.append(" · ").append(band(freq));
+                }
+                if (wi.getLinkSpeed() > 0) {
+                    sb.append(" · 연결 속도 ").append(wi.getLinkSpeed()).append(" Mbps");
+                }
+                sb.append('\n');
+                int ip = wi.getIpAddress();
+                android.net.DhcpInfo dhcp = wm.getDhcpInfo();
+                if (ip != 0) {
+                    sb.append("   폰 IP: ").append(ipText(ip));
+                    if (dhcp != null && dhcp.gateway != 0) {
+                        sb.append(" · 게이트웨이: ").append(ipText(dhcp.gateway));
+                    }
+                    sb.append('\n');
+                }
+            }
+        } catch (Exception e) {
+            sb.append("   (확인 실패)\n");
+        }
+        // 주변 공유기: 마지막 검색 결과에서 신호 센 순으로 (연결된 공유기는 빼고)
+        try {
+            List<android.net.wifi.ScanResult> list = new java.util.ArrayList<>(wm.getScanResults());
+            java.util.Collections.sort(list, (left, right) -> right.level - left.level);
+            int count = 0;
+            StringBuilder near = new StringBuilder();
+            for (android.net.wifi.ScanResult scan : list) {
+                String mac = scan.BSSID == null ? "" : scan.BSSID.toLowerCase(Locale.US);
+                if (mac.isEmpty() || mac.equals(conn)) {
+                    continue;
+                }
+                count++;
+                String alias = MainActivity.routerAlias(ctx, mac);
+                near.append("   ").append(count).append(") ")
+                        .append(scan.SSID == null || scan.SSID.isEmpty() ? "<숨김>" : scan.SSID)
+                        .append(" · 별명 ").append(alias.isEmpty() ? "(없음)" : alias)
+                        .append(" · ").append(routerKind(ctx, mac)).append('\n')
+                        .append("      ").append(mac.toUpperCase(Locale.US))
+                        .append(" · ").append(scan.level).append(" dBm · ").append(band(scan.frequency)).append('\n');
+                if (count >= 5) {
+                    break;
+                }
+            }
+            if (count > 0) {
+                sb.append("\n■ 주변 공유기 (신호 센 순, 최대 5개)\n").append(near);
+            }
+        } catch (Exception ignored) {
+        }
+        return sb.toString().trim();
+    }
+
+    /*
+     * 보호자 회신(이메일·텔레그램)용 주변 블루투스 (약 6초 검색, 신호 센 순, 최대 10개)
+     * ■ 주변 블루투스 (6초 검색 · 12개 발견)
+     *    1) GARPSU-PC · 별명 거실 PC · 홈
+     *       11:22:33:44:55:66 · -52 dBm
+     *    2) (이름 없음) · 별명 (없음) · 등록 안 됨
+     *       5A:3C:..:.. · -70 dBm
+     * 오래 걸림(검색 시간) -> 작업 스레드에서 호출
+     */
+    static String btDetails(Context ctx) {
+        String problem = BtHome.scanProblem(ctx);
+        if (problem != null) {
+            return "■ 주변 블루투스\n   " + problem;
+        }
+        List<String[]> list = BtHome.scanNearby(ctx, 6000);
+        if (list == null) {
+            return "■ 주변 블루투스\n   검색 실패";
+        }
+        StringBuilder sb = new StringBuilder("■ 주변 블루투스 (6초 검색 · ").append(list.size()).append("개 발견)");
+        if (list.isEmpty()) {
+            sb.append("\n   찾은 기기 없음");
+        }
+        int count = 0;
+        for (String[] dev : list) {
+            count++;
+            String alias = BtHome.alias(ctx, dev[0]);
+            sb.append("\n   ").append(count).append(") ").append(dev[1].isEmpty() ? "(이름 없음)" : dev[1])
+                    .append(" · 별명 ").append(alias.isEmpty() ? "(없음)" : alias)
+                    .append(" · ").append(BtHome.kindOf(ctx, dev[0]))
+                    .append("\n      ").append(dev[0]).append(" · ").append(dev[2]).append(" dBm");
+            if (count >= 10) {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    // 짧은 문자용 공유기 한 줄: "📶 MyHome (AA:BB:CC:DD:EE:01) 별명 우리집 거실 · 홈"
+    @SuppressWarnings("deprecation")
+    static String wifiShortLine(Context ctx) {
+        try {
+            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
+                    ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wm == null || !wm.isWifiEnabled()) {
+                return "📶 Wi-Fi 꺼짐";
+            }
+            String conn = HomeService.connectedBssid(ctx);
+            android.net.wifi.WifiInfo wi = wm.getConnectionInfo();
+            if (conn == null || wi == null) {
+                return "📶 공유기 연결 없음";
+            }
+            String ssid = wi.getSSID();
+            if (ssid != null && ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) {
+                ssid = ssid.substring(1, ssid.length() - 1);
+            }
+            if (ssid == null || ssid.isEmpty() || ssid.equals("<unknown ssid>")) {
+                ssid = "<숨김>";
+            }
+            String alias = MainActivity.routerAlias(ctx, conn);
+            return "📶 " + ssid + " (" + conn.toUpperCase(Locale.US) + ") 별명 "
+                    + (alias.isEmpty() ? "(없음)" : alias) + " · " + routerKind(ctx, conn);
+        } catch (Exception e) {
+            return "📶 공유기 확인 실패";
+        }
+    }
+
+    // 등록 상태: 홈 / 기타 / 등록 안 됨
+    private static String routerKind(Context ctx, String bssid) {
+        for (String entry : ctx.getSharedPreferences("home", Context.MODE_PRIVATE)
+                .getStringSet("routers", new java.util.HashSet<String>())) {
+            if (entry.split("\\|", 2)[0].equals(bssid)) {
+                return MainActivity.routerIsHome(ctx, bssid) ? "홈" : "기타";
+            }
+        }
+        return "등록 안 됨";
+    }
+
+    private static String strength(int rssi) {
+        return rssi >= -55 ? "강" : rssi >= -67 ? "중" : rssi >= -78 ? "약" : "매우 약";
+    }
+
+    // 주파수 -> "5GHz 36번 채널 (5180 MHz)"
+    private static String band(int freq) {
+        int ch;
+        String name;
+        if (freq >= 2400 && freq < 2500) {
+            name = "2.4GHz";
+            ch = freq == 2484 ? 14 : (freq - 2407) / 5;
+        } else if (freq >= 4900 && freq < 5900) {
+            name = "5GHz";
+            ch = (freq - 5000) / 5;
+        } else if (freq >= 5925 && freq < 7125) {
+            name = "6GHz";
+            ch = (freq - 5950) / 5;
+        } else {
+            return freq + " MHz";
+        }
+        return name + " " + ch + "번 채널 (" + freq + " MHz)";
+    }
+
+    // Android 가 주는 IPv4 정수(작은 자리부터) -> "192.168.0.12"
+    private static String ipText(int ip) {
+        return (ip & 0xFF) + "." + ((ip >> 8) & 0xFF) + "." + ((ip >> 16) & 0xFF) + "." + ((ip >> 24) & 0xFF);
+    }
+
     static String statusLine(Context ctx) {
         android.content.SharedPreferences prefs = ctx.getSharedPreferences("home", Context.MODE_PRIVATE);
         java.util.Set<String> routers = prefs.getStringSet("routers", new java.util.HashSet<String>());
@@ -133,7 +332,7 @@ final class TelegramSender {
         sb.append(who.isEmpty() ? "" : who + " ").append("위치 ")
                 .append(new SimpleDateFormat("MM-dd HH:mm", Locale.KOREA).format(new Date()));
         if (loc == null) {
-            return sb.append("\n위치를 확인할 수 없습니다.").toString();
+            return sb.append("\n위치를 확인할 수 없습니다.\n").append(wifiShortLine(ctx)).toString();
         }
         try {
             if (Geocoder.isPresent()) {
@@ -146,6 +345,7 @@ final class TelegramSender {
             }
         } catch (Exception ignored) {
         }
+        sb.append('\n').append(wifiShortLine(ctx)); // 공유기 한 줄 (이름·MAC·별명·등록)
         sb.append("\nhttps://maps.google.com/?q=")
                 .append(String.format(Locale.US, "%.6f,%.6f", loc.getLatitude(), loc.getLongitude()));
         return sb.toString();
@@ -183,6 +383,7 @@ final class TelegramSender {
                 .append(new SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA).format(new Date())).append(")");
         if (loc == null) {
             sb.append("\n\n■ 위치를 확인할 수 없습니다.\n   (위치 서비스가 켜져 있는지 확인하세요)");
+            sb.append("\n\n").append(wifiDetails(ctx)); // 위치를 못 잡아도 공유기 정보는 단서가 됨
             return sb.toString();
         }
         if (addr != null && !addr.isEmpty()) {
@@ -197,6 +398,8 @@ final class TelegramSender {
         sb.append("\n\n■ 측정 시각: ")
                 .append(new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date(loc.getTime())));
         sb.append("\n\n").append(mapLinks(loc.getLatitude(), loc.getLongitude()));
+        // 모든 위치 메시지 끝: 공유기 식별 정보 (등록 안 된 공유기도 자세히, 별명 줄은 항상)
+        sb.append("\n\n").append(wifiDetails(ctx));
         return sb.toString();
     }
 

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.ContactsContract;
 import android.text.InputType;
@@ -82,7 +83,10 @@ public class GuardianActivity extends Activity {
         Button close = new Button(this);
         close.setText("저장하고 닫기");
         close.setTypeface(null, Typeface.BOLD);
-        close.setOnClickListener(view -> finish()); // onPause 에서 저장
+        close.setOnClickListener(view -> {
+            save(); // 기존 처리(저장) 마무리
+            askAutoReply(); // 그다음 자동 응답 여부를 묻고 닫음 (팝업 1103)
+        });
         LinearLayout.LayoutParams lp = matchWrap();
         lp.topMargin = 60;
         root.addView(close, lp);
@@ -91,6 +95,55 @@ public class GuardianActivity extends Activity {
         sv.addView(root);
         setContentView(sv);
         ScreenId.tag(this, "1100"); // 화면 번호
+    }
+
+    // [저장하고 닫기] 뒤: "보호자로부터 위치 질문을 받으면 자동으로 응답합니까?" (팝업 1103)
+    //  Yes -> (4) 응답 모드(1050) 의 '이메일 위치 요청에 자동으로 회신응답' 켬
+    //         + 텔레그램 봇이 설정돼 있으면 '원격 위치 요청 받기'도 켬
+    //  No  -> 자동 회신 끔 (요청이 오면 회신할지 물어봄), 텔레그램 원격 위치 요청 받기도 끔
+    private void askAutoReply() {
+        ScreenId.tag(new android.app.AlertDialog.Builder(this)
+                .setTitle("위치 질문 자동 응답")
+                .setMessage("보호자로부터 위치 질문을 받으면 자동으로 응답합니까?")
+                .setPositiveButton("Yes", (dialog, which) -> {
+                    setAutoReply(true);
+                    // 회신에 주변 블루투스 목록을 넣으려면 근처 기기 권한 (Android 12 이상). 답을 받은 뒤 닫음
+                    if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+                            != PackageManager.PERMISSION_GRANTED) {
+                        finishAfterScanPerm = true;
+                        BtHome.requestScan(this);
+                    } else {
+                        finish();
+                    }
+                })
+                .setNegativeButton("No", (dialog, which) -> {
+                    setAutoReply(false);
+                    finish();
+                })
+                .setCancelable(false)
+                .show(), "1103");
+    }
+
+    private boolean finishAfterScanPerm;
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        if (code == BtHome.REQ_SCAN && finishAfterScanPerm) {
+            finish(); // 허용·거부와 상관없이 닫음 (거부하면 회신에 블루투스 목록만 빠짐)
+        }
+    }
+
+    private void setAutoReply(boolean on) {
+        getSharedPreferences(UserActivity.PREF_USER, MODE_PRIVATE).edit()
+                .putBoolean("mailRemote", on).putString("mailRemoteErr", "").apply();
+        android.content.SharedPreferences tg = getSharedPreferences(TelegramSender.PREF, MODE_PRIVATE);
+        boolean tgReady = !tg.getString("token", "").isEmpty() && !tg.getString("chats", "").trim().isEmpty();
+        tg.edit().putBoolean("remote", on && tgReady).apply();
+        HomeService.refresh(this);
+        Toast.makeText(this, on
+                ? "자동 응답을 켰습니다. (응답 모드: 이메일 자동 회신" + (tgReady ? " · 텔레그램 원격 위치 요청" : "") + ")"
+                : "자동 응답을 껐습니다. 위치 질문이 오면 회신할지 물어봅니다.", Toast.LENGTH_LONG).show();
     }
 
     @Override

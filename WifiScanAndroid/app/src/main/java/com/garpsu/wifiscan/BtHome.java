@@ -35,6 +35,123 @@ final class BtHome {
     private BtHome() {
     }
 
+    // ---------- 주변 블루투스 검색 (보호자 회신에 넣는 식별 정보) ----------
+
+    static final int REQ_SCAN = 7; // 근처 기기(블루투스 검색) 권한 요청 번호
+
+    // 검색할 수 없으면 이유, 할 수 있으면 null
+    static String scanProblem(Context ctx) {
+        BluetoothAdapter ad = adapter(ctx);
+        if (ad == null) {
+            return "이 폰에는 블루투스가 없습니다";
+        }
+        if (!ad.isEnabled()) {
+            return "블루투스 꺼짐";
+        }
+        if (Build.VERSION.SDK_INT >= 31) {
+            if (ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                return "근처 기기 권한이 없어 검색 못 함 (앱 설정에서 허용)";
+            }
+        } else if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return "위치 권한이 없어 검색 못 함";
+        }
+        return null;
+    }
+
+    // 근처 기기 권한이 없으면 요청 (Android 12 이상). 위치 권한 요청과 겹치지 않게 부르는 쪽에서 순서를 맞춤
+    static void requestScan(android.app.Activity activity) {
+        if (Build.VERSION.SDK_INT >= 31
+                && activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+            activity.requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_CONNECT}, REQ_SCAN);
+        }
+    }
+
+    /**
+     * 주변 블루투스(BLE) 기기를 millis 동안 검색해서 {MAC, 이름, 신호 dBm} 목록 (신호 센 순).
+     * 검색할 수 없으면 null. 오래 걸림 -> 반드시 작업 스레드에서 호출.
+     */
+    @SuppressWarnings("MissingPermission")
+    static List<String[]> scanNearby(Context ctx, long millis) {
+        if (scanProblem(ctx) != null) {
+            return null;
+        }
+        final java.util.Map<String, String[]> found = new java.util.HashMap<>();
+        android.bluetooth.le.BluetoothLeScanner scanner;
+        android.bluetooth.le.ScanCallback callback = new android.bluetooth.le.ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, android.bluetooth.le.ScanResult result) {
+                add(result);
+            }
+
+            @Override
+            public void onBatchScanResults(List<android.bluetooth.le.ScanResult> results) {
+                for (android.bluetooth.le.ScanResult result : results) {
+                    add(result);
+                }
+            }
+
+            private void add(android.bluetooth.le.ScanResult result) {
+                if (result == null || result.getDevice() == null) {
+                    return;
+                }
+                String mac = result.getDevice().getAddress().toUpperCase(Locale.US);
+                String name = null;
+                if (result.getScanRecord() != null) {
+                    name = result.getScanRecord().getDeviceName();
+                }
+                if (name == null) {
+                    try {
+                        name = result.getDevice().getName();
+                    } catch (SecurityException ignored) {
+                    }
+                }
+                synchronized (found) { // 같은 기기가 여러 번 잡히면: 가장 센 신호, 알게 된 이름 유지
+                    String[] old = found.get(mac);
+                    int rssi = old == null ? result.getRssi() : Math.max(result.getRssi(), Integer.parseInt(old[2]));
+                    String label = name != null ? name : (old == null ? "" : old[1]);
+                    found.put(mac, new String[]{mac, label, String.valueOf(rssi)});
+                }
+            }
+        };
+        try {
+            scanner = adapter(ctx).getBluetoothLeScanner();
+            if (scanner == null) {
+                return null;
+            }
+            android.bluetooth.le.ScanSettings settings = new android.bluetooth.le.ScanSettings.Builder()
+                    .setScanMode(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY).build();
+            scanner.startScan(null, settings, callback);
+        } catch (Exception e) {
+            return null;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ignored) {
+        }
+        try {
+            scanner.stopScan(callback);
+        } catch (Exception ignored) {
+        }
+        List<String[]> list;
+        synchronized (found) {
+            list = new ArrayList<>(found.values());
+        }
+        java.util.Collections.sort(list, (left, right) ->
+                Integer.parseInt(right[2]) - Integer.parseInt(left[2]));
+        return list;
+    }
+
+    // 등록 상태: 홈 / 기타 / 등록 안 됨
+    static String kindOf(Context ctx, String mac) {
+        for (String entry : registered(ctx)) {
+            if (entry.split("\\|", 2)[0].equalsIgnoreCase(mac)) {
+                return isHome(ctx, mac) ? "홈" : "기타";
+            }
+        }
+        return "등록 안 됨";
+    }
+
     // Android 12 이상은 '근처 기기' 권한 필요
     static boolean hasPerm(Context ctx) {
         return Build.VERSION.SDK_INT < 31

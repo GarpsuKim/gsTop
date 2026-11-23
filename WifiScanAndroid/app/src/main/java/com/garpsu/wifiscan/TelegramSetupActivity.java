@@ -199,20 +199,18 @@ public class TelegramSetupActivity extends Activity {
         senderName.setHint("예: 할머니, 민준이, 아빠");
         senderName.setText(TelegramSender.senderName(this));
         s6.addView(senderName);
-        TextView il = note("보내는 간격");
+        // 보내는 시각: 텔레그램도 1040 공통 설정을 씀 (예전 '보내는 간격' 칸은 없앰)
+        TextView il = note("보내는 시각");
         il.setTypeface(null, Typeface.BOLD);
         s6.addView(il);
-        final Spinner interval = new Spinner(this);
-        interval.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_dropdown_item, TelegramSender.INTERVAL_LABELS));
-        int cur = sp.getInt("interval", 10);
-        for (int i = 0; i < TelegramSender.INTERVALS.length; i++) {
-            if (TelegramSender.INTERVALS[i] == cur) {
-                interval.setSelection(i);
-            }
-        }
-        s6.addView(interval);
-        Button go = button("시작하기", view -> start(TelegramSender.INTERVALS[interval.getSelectedItemPosition()]));
+        String problem = HomeService.schedProblem(this);
+        TextView schedInfo = note(problem == null
+                ? HomeService.emailSchedule(getSharedPreferences(HomeService.PREF_SCHED, MODE_PRIVATE))
+                + "\n(앱의 (3) 위치 보내기 화면 맨 위 '보내는 시각'을 함께 씁니다)"
+                : "아직 없음 - " + problem);
+        schedInfo.setTextColor(problem == null ? Color.DKGRAY : 0xFFC62828);
+        s6.addView(schedInfo);
+        Button go = button("시작하기", view -> start());
         go.setTypeface(null, Typeface.BOLD);
         s6.addView(go);
         root.addView(button("닫기 (나중에 하기)", view -> finish())); // 토큰 전에도 누를 수 있게 단계 밖에 둠
@@ -541,7 +539,12 @@ public class TelegramSetupActivity extends Activity {
 
     // ---------- 6단계: 자동 송신 시작 ----------
 
-    private void start(int min) {
+    private void start() {
+        String problem = HomeService.schedProblem(this); // 보내는 시각은 1040 공통 설정
+        if (problem != null) {
+            Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+            return;
+        }
         if (chatIds().isEmpty()) {
             Toast.makeText(this, "등록된 받는 사람이 없습니다. 3·4단계를 먼저 하세요.", Toast.LENGTH_LONG).show();
             return;
@@ -557,9 +560,12 @@ public class TelegramSetupActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2);
         }
         TelegramSender.setSenderName(this, senderName.getText().toString());
-        sp.edit().putInt("interval", min).putBoolean("on", true).putLong("next", 0).apply();
+        SharedPreferences.Editor ed = sp.edit().putBoolean("on", true);
+        HomeService.copySched(this, ed, true); // 공통 보내는 시각 + 다음 송신 시각
+        ed.apply();
         HomeService.refresh(this);
-        Toast.makeText(this, "텔레그램 자동 송신을 시작합니다 (" + TelegramSender.intervalLabel(min) + "마다)",
+        Toast.makeText(this, "텔레그램 자동 송신을 시작합니다 ("
+                        + HomeService.emailSchedule(getSharedPreferences(HomeService.PREF_SCHED, MODE_PRIVATE)) + ")",
                 Toast.LENGTH_LONG).show();
         finish();
     }
