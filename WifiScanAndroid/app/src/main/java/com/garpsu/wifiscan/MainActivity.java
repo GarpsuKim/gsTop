@@ -358,6 +358,17 @@ public class MainActivity extends Activity {
 
             panels[i] = new LinearLayout(this);
             panels[i].setOrientation(LinearLayout.VERTICAL);
+            // 내용 영역 첫 줄: 탭 제목을 좌우로 긴 파란 바(흰 글씨)로 한 번 더 (선택된 탭 색과 같음)
+            TextView titleBar = new TextView(this);
+            titleBar.setText(names[i]);
+            titleBar.setTextSize(17);
+            titleBar.setTypeface(null, Typeface.BOLD);
+            titleBar.setTextColor(Color.WHITE);
+            titleBar.setBackgroundColor(0xFF1976D2);
+            titleBar.setGravity(Gravity.CENTER);
+            titleBar.setPadding(dpx(12), dpx(10), dpx(12), dpx(10));
+            panels[i].addView(titleBar, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             if (actions.getChildCount() > 0) { // (3)·(4) 탭은 위쪽 버튼 줄 없음
                 panels[i].addView(actions, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
