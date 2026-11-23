@@ -2270,7 +2270,7 @@ public class MainActivity extends Activity {
         if (HomeService.PREF_KAKAO.equals(pref) && !kakaoInstalled()) {
             return "카카오톡이 설치되어 있지 않습니다.";
         }
-        // 그 밖: 1040 맨 아래 공통 '보내는 시각'이 저장되어 있어야 함
+        // 그 밖: 1040 맨 위 공통 '보내는 시각'이 저장되어 있어야 함
         if (schedProblem() != null) {
             return schedProblem();
         }
@@ -2495,7 +2495,7 @@ public class MainActivity extends Activity {
             form.addView(fmt);
         }
 
-        // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀 (이 팝업에서는 입력하지 않음)
+        // 보내는 시각은 1040 화면 맨 위 공통 설정을 씀 (이 팝업에서는 입력하지 않음)
         schedNote(form);
 
         TextView last = new TextView(this);
@@ -3404,6 +3404,26 @@ public class MainActivity extends Activity {
 
     // (3) 위치 보내기 탭: 정해진 시각 위치 보내기 (보내는 사람 별명 + 채널별 줄)
     private void buildSendTab(LinearLayout body) {
+        // ---------- 맨 위: 공통 보내는 시각 (1140·1150·1170·1230·1235 가 함께 씀) + [저장] ----------
+        sectionTitle(body, "■ 보내는 시각 (공통)");
+        smallNote(body, "아래 본인 폰 알림·일반 이메일·카톡 본인 메시지·일반 문자(수동·자동)가 모두 이 시각에 보냅니다. "
+                + "(텔레그램은 자체 간격)");
+        LinearLayout schBox = new LinearLayout(this);
+        schBox.setOrientation(LinearLayout.VERTICAL);
+        schBox.setPadding(40, 0, 40, 30);
+        body.addView(schBox);
+        seedSched();
+        final ScheduleUi sch = new ScheduleUi(schBox, sched());
+        Button save = new Button(this);
+        save.setText("저장");
+        save.setTypeface(null, Typeface.BOLD);
+        save.setOnClickListener(view -> saveSched(sch));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = 20;
+        schBox.addView(save, slp);
+        body.addView(thickDivider(), thickDividerLp());
+
         sectionTitle(body, "■ 정해진 시각 위치 보내기");
 
         // 외출 중에만 보내기: 집에 있으면 보내지 않고, 외출(2분 넘게 밖)이 확인되면 그때부터 보냄
@@ -3455,26 +3475,6 @@ public class MainActivity extends Activity {
         smsBtn = msgRow(HomeService.PREF_SMS);     // 일반 문자 (수동: 알림 -> 문자 앱)
         smsAutoBtn = msgRow(HomeService.PREF_SMSAUTO); // 일반 문자 (자동: 솔라피로 바로 발송)
         refreshMsgButtons();
-
-        // ---------- 맨 끝: 공통 보내는 시각 (1140·1150·1170·1230·1235 가 함께 씀) + [저장] ----------
-        body.addView(thickDivider(), thickDividerLp());
-        sectionTitle(body, "■ 보내는 시각 (공통)");
-        smallNote(body, "위 본인 폰 알림·일반 이메일·카톡 본인 메시지·일반 문자(수동·자동)가 모두 이 시각에 보냅니다. "
-                + "(텔레그램은 자체 간격)");
-        LinearLayout schBox = new LinearLayout(this);
-        schBox.setOrientation(LinearLayout.VERTICAL);
-        schBox.setPadding(40, 0, 40, 30);
-        body.addView(schBox);
-        seedSched();
-        final ScheduleUi sch = new ScheduleUi(schBox, sched());
-        Button save = new Button(this);
-        save.setText("저장");
-        save.setTypeface(null, Typeface.BOLD);
-        save.setOnClickListener(view -> saveSched(sch));
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        slp.topMargin = 20;
-        schBox.addView(save, slp);
     }
 
     // ---------- 공통 보내는 시각 (설정 이름 HomeService.PREF_SCHED) ----------
@@ -3506,10 +3506,10 @@ public class MainActivity extends Activity {
     private String schedProblem() {
         SharedPreferences prefs = sched();
         if (!prefs.contains("mode")) {
-            return "(3) 위치 보내기 화면 맨 아래 '보내는 시각'을 먼저 저장하세요.";
+            return "(3) 위치 보내기 화면 맨 위 '보내는 시각'을 먼저 저장하세요.";
         }
         if ("times".equals(prefs.getString("mode", "")) && prefs.getString("times", "").trim().isEmpty()) {
-            return "(3) 위치 보내기 화면 맨 아래 '보내는 시각'에 시각을 하나 이상 등록하세요.";
+            return "(3) 위치 보내기 화면 맨 위 '보내는 시각'에 시각을 하나 이상 등록하세요.";
         }
         return null;
     }
@@ -3531,7 +3531,7 @@ public class MainActivity extends Activity {
         TextView tv = new TextView(this);
         String problem = schedProblem();
         tv.setText("보내는 시각: " + (problem == null ? HomeService.emailSchedule(sched()) : "아직 없음")
-                + "\n((3) 위치 보내기 화면 맨 아래에서 바꿉니다)");
+                + "\n((3) 위치 보내기 화면 맨 위에서 바꿉니다)");
         tv.setTextColor(problem == null ? Color.DKGRAY : 0xFFC62828);
         tv.setPadding(0, 24, 0, 0);
         form.addView(tv);
@@ -3971,7 +3971,7 @@ public class MainActivity extends Activity {
         info.setPadding(0, 16, 0, 0);
         form.addView(info);
 
-        // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀
+        // 보내는 시각은 1040 화면 맨 위 공통 설정을 씀
         schedNote(form);
 
         TextView last = new TextView(this);
@@ -4129,7 +4129,7 @@ public class MainActivity extends Activity {
             form.addView(tos[i]);
         }
 
-        // 보내는 시각은 1040 화면 맨 아래 공통 설정을 씀
+        // 보내는 시각은 1040 화면 맨 위 공통 설정을 씀
         schedNote(form);
 
         final TextView last = new TextView(this);
