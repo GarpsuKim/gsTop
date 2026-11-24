@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 시스템 시계 앱의 알람 화면을 여는 데 필요 (일반 권한, 사용자 동의 창 없음) -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- 유튜브 영상 배경 재생 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Clock">
+        <!-- singleTask: 유튜브에서 공유하면 새 화면을 만들지 않고 떠 있는 시계 화면으로 돌아옴 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 유튜브 앱 등에서 "공유 → 시계" 로 영상 주소를 받음 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- 파일 앱 등에서 음악을 "공유 → 시계" 로 보내면 바로 재생 (한 곡 / 여러 곡) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

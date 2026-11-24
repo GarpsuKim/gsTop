@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 앱 바탕은 항상 검정: 시작할 때 흰 화면이 번쩍이지 않도록 창 바탕도 검정 -->
+    <style name="Theme.Clock" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
