@@ -35,6 +35,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -236,13 +240,39 @@ fun YouTubeButton(
         }
     }
 
-    TextButton(
-        onClick = { open = true },
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(Icons.Filled.SmartDisplay, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.youtube), style = MaterialTheme.typography.labelMedium)
+    // 유튜브가 꺼져 있으면 바로 주소 입력 창, 켜져 있으면 메뉴: [유튜브 주소 입력…] [끄기]
+    val active = url.isNotBlank()
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        TextButton(
+            onClick = { if (active) menu = true else open = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Icon(Icons.Filled.SmartDisplay, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.youtube), style = MaterialTheme.typography.labelMedium)
+            if (active) {
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+        }
+        InlineDropdown(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.youtube_change), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = { Icon(Icons.Filled.SmartDisplay, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                onClick = {
+                    menu = false
+                    open = true
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.youtube_off), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                onClick = {
+                    menu = false
+                    onChange("", sound)
+                },
+            )
+        }
     }
 
     if (open) {

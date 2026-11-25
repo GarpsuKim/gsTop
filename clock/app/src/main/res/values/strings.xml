@@ -13,6 +13,10 @@
     <string name="show_seconds">초침</string>
     <string name="alarm">알람</string>
     <string name="calendar">달력</string>
+    <string name="calendar_menu">달력...</string>
+    <string name="weather">날씨</string>
+    <string name="sunrise_sunset">일출일몰</string>
+    <string name="world_time">세계시</string>
     <string name="calendar_not_found">인터넷 페이지를 열 수 있는 브라우저가 없습니다</string>
     <string name="youtube">유튜브</string>
     <string name="youtube_title">유튜브 배경</string>
@@ -30,7 +34,7 @@
     <string name="music_pause">일시정지</string>
     <string name="music_next">다음 곡</string>
     <string name="music_pick_other">다른 음악 선택</string>
-    <string name="music_stop">정지</string>
+    <string name="music_stop">끄기</string>
     <string name="music_failed">음악을 재생할 수 없습니다</string>
     <string name="transparency">투명도</string>
     <string name="power_advanced">고급 모드</string>
@@ -50,6 +54,8 @@
     <string name="background_slideshow">사진 %1$d장 슬라이드쇼</string>
     <string name="image_repeat">무한 반복</string>
     <string name="background_black">검은색</string>
+    <string name="image_off">끄기</string>
+    <string name="youtube_change">유튜브 주소 입력…</string>
     <string name="background_failed">사진을 불러오지 못했습니다</string>
     <string name="alarm_not_found">알람을 열 수 있는 시계 앱이 없습니다</string>
     <string name="digital_bold">굵게</string>

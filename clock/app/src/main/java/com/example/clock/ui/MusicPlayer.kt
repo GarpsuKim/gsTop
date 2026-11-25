@@ -5,7 +5,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
-import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -22,7 +20,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import com.example.clock.R
@@ -84,6 +81,17 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
 
     fun next() {
         if (tracks.isNotEmpty()) startAt((index + 1) % tracks.size, failures = 0)
+    }
+
+    /** 현재 곡의 재생 위치 (밀리초, 준비 전이면 0). */
+    fun positionMs(): Long = if (prepared) player?.currentPosition?.toLong() ?: 0L else 0L
+
+    /** 현재 곡의 길이 (밀리초, 모르면 0). */
+    fun durationMs(): Long = if (prepared) player?.duration?.toLong()?.coerceAtLeast(0L) ?: 0L else 0L
+
+    /** 현재 곡의 [ms] 위치로 이동. */
+    fun seekTo(ms: Long) {
+        if (prepared) player?.seekTo(ms.toInt())
     }
 
     /** 재생을 멈추고 곡 목록을 비운다. */
@@ -154,12 +162,7 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
         prepared = false
     }
 
-    private fun displayName(uri: Uri): String =
-        runCatching {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) it.getString(0) else null
-            }
-        }.getOrNull()?.substringBeforeLast('.') ?: uri.lastPathSegment.orEmpty()
+    private fun displayName(uri: Uri): String = queryDisplayName(context, uri)
 
     override fun onCleared() {
         release()
@@ -169,7 +172,7 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
 /**
  * [♪ 음악] 버튼.
  * 곡이 없으면 바로 파일 선택(여러 곡 가능), 재생 중이면 메뉴:
- * 현재 곡 / 재생·일시정지 / 다음 곡 / 다른 음악 선택 / 정지.
+ * 현재 곡 + 재생 위치 슬라이더 / 재생·일시정지 / 다음 곡 / 다른 음악 선택 / 끄기.
  */
 @Composable
 fun MusicButton(music: MusicViewModel) {
@@ -197,18 +200,15 @@ fun MusicButton(music: MusicViewModel) {
         }
         InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
             music.tracks.getOrNull(music.index)?.let { track ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            "${music.index + 1}/${music.tracks.size}  ${track.name}",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 220.dp),
-                        )
-                    },
-                    onClick = {},
-                    enabled = false,
-                )
+                CurrentFileItem(music.index, music.tracks.size, track.name)
+                // 재생 위치 슬라이더 (곡이 바뀌면 새로 읽도록 곡 번호를 키로)
+                androidx.compose.runtime.key(music.index) {
+                    PlaybackSlider(
+                        positionMs = music::positionMs,
+                        durationMs = music::durationMs,
+                        onSeek = music::seekTo,
+                    )
+                }
             }
             DropdownMenuItem(
                 text = { Text(stringResource(if (music.isPlaying) R.string.music_pause else R.string.music_play)) },
@@ -234,7 +234,7 @@ fun MusicButton(music: MusicViewModel) {
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.music_stop)) },
-                leadingIcon = { Icon(Icons.Filled.Stop, contentDescription = null) },
+                leadingIcon = { Icon(Icons.Filled.MusicOff, contentDescription = null) },
                 onClick = {
                     expanded = false
                     music.stop()

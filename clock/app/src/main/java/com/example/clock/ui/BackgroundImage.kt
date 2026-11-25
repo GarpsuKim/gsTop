@@ -44,6 +44,7 @@ private const val SLIDE_FADE_MS = 1_000
  */
 object BackgroundStore {
     private const val MAX_SIDE = 2560
+    private const val NAMES_FILE = "names.txt"
 
     private fun dir(context: Context) = File(context.filesDir, "backgrounds")
     private fun legacyFile(context: Context) = File(context.filesDir, "background.jpg") // 예전 1장짜리
@@ -58,6 +59,7 @@ object BackgroundStore {
             mkdirs()
         }
         var saved = 0
+        val names = mutableListOf<String>()
         uris.forEach { uri ->
             runCatching {
                 val bitmap = decodeScaled(context, uri) ?: return@runCatching
@@ -65,10 +67,13 @@ object BackgroundStore {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)
                 }
                 bitmap.recycle()
+                names += queryDisplayName(context, uri).replace('\n', ' ')
                 saved++
             }
         }
         if (saved > 0) {
+            // 복사본 이름은 000.jpg… 이므로 원본 파일 이름을 따로 기록 (메뉴에 표시)
+            runCatching { File(tmp, NAMES_FILE).writeText(names.joinToString("\n")) }
             clear(context)
             tmp.renameTo(dir(context))
         } else {
@@ -87,6 +92,14 @@ object BackgroundStore {
         val list = dir(context).listFiles { f -> f.extension == "jpg" }?.sortedBy { it.name }.orEmpty()
         list.ifEmpty { listOfNotNull(legacyFile(context).takeIf { it.exists() }) }
     }
+
+    /** 저장된 사진들의 원본 파일 이름 (사진 순서대로). 기록이 없으면 빈 목록. */
+    suspend fun names(context: Context): List<String> = withContext(Dispatchers.IO) {
+        runCatching { File(dir(context), NAMES_FILE).readLines() }.getOrDefault(emptyList())
+    }
+
+    /** 슬라이드쇼에서 지금 보이는 사진 번호 (메뉴에 파일 이름 표시용). */
+    var shownIndex by mutableIntStateOf(0)
 
     suspend fun load(file: File): ImageBitmap? = withContext(Dispatchers.IO) {
         runCatching { BitmapFactory.decodeFile(file.path)?.asImageBitmap() }.getOrNull()
@@ -132,6 +145,7 @@ fun BackgroundSlideshow(version: Long, repeat: Boolean, modifier: Modifier = Mod
     var current by remember(files) { mutableStateOf<ImageBitmap?>(null) }
     // 지금 보이는 사진 번호: 반복 설정을 바꿔도 처음으로 돌아가지 않고 이어서 진행
     var index by remember(files) { mutableIntStateOf(0) }
+    LaunchedEffect(files, index) { BackgroundStore.shownIndex = index }
 
     LaunchedEffect(files, repeat) {
         if (files.isEmpty()) return@LaunchedEffect

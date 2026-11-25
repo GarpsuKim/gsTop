@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
                         incomingYouTube = sharedYouTube,
                         onIncomingYouTubeConsumed = { sharedYouTube = null },
                         music = music,
+                        video = videoBackground,
                     )
                 }
                 }

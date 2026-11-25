@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -39,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.AndroidViewModel
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -53,9 +55,20 @@ class VideoBackgroundViewModel(app: Application) : AndroidViewModel(app) {
     private var exo: ExoPlayer? = null
     private var current: List<String> = emptyList()
 
+    /** 지금 나오는 동영상 번호 (메뉴에 파일 이름 표시용). */
+    var currentIndex by mutableIntStateOf(0)
+        private set
+
     /** 재생기 (처음 쓸 때 만든다). */
     val player: ExoPlayer
-        get() = exo ?: ExoPlayer.Builder(getApplication()).build().also { exo = it }
+        get() = exo ?: ExoPlayer.Builder(getApplication()).build().also { p ->
+            exo = p
+            p.addListener(object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    currentIndex = p.currentMediaItemIndex
+                }
+            })
+        }
 
     /**
      * 목록이 바뀌었을 때만 처음부터 다시 재생 (회전 등으로 다시 불려도 이어서 재생).
@@ -66,6 +79,7 @@ class VideoBackgroundViewModel(app: Application) : AndroidViewModel(app) {
         p.repeatMode = if (repeat) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
         if (uris != current) {
             current = uris
+            currentIndex = 0
             p.setMediaItems(uris.map { MediaItem.fromUri(it) })
             p.prepare()
             p.playWhenReady = true
@@ -75,6 +89,19 @@ class VideoBackgroundViewModel(app: Application) : AndroidViewModel(app) {
             p.play()
         }
         p.volume = if (sound) 1f else 0f
+    }
+
+    /** 지금 재생 중인 동영상의 위치 (밀리초). */
+    fun positionMs(): Long = exo?.currentPosition ?: 0L
+
+    /** 지금 재생 중인 동영상의 길이 (밀리초, 모르면 0). */
+    fun durationMs(): Long = exo?.duration?.takeIf { it != C.TIME_UNSET && it > 0L } ?: 0L
+
+    /** 지금 동영상의 [ms] 위치로 이동 (끝까지 재생돼 멈춘 상태였으면 다시 재생). */
+    fun seekTo(ms: Long) {
+        val p = exo ?: return
+        p.seekTo(ms)
+        p.play()
     }
 
     /** 배경(동영상)이 화면에 없을 때: 멈추고 목록 비우기. */
@@ -123,14 +150,21 @@ fun VideoBackground(
 }
 
 /**
- * [🎬 배경(동영상) ▾] 메뉴: 동영상 선택(여러 개 = 연속 재생) / 소리 켜기 / 끄기.
+ * [🎬 배경(동영상) ▾] 메뉴: 재생 위치 슬라이더 / 동영상 선택(여러 개 = 연속 재생) / 무한 반복 / 소리 켜기 / 끄기.
  * 고른 동영상은 복사하지 않고 원본 읽기 권한만 저장 (앱을 다시 켜도 유지).
+ * [vm]: 재생 위치 슬라이더용 재생기 (null 이면 슬라이더 없음).
  */
 @Composable
-fun VideoBackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
+fun VideoBackgroundMenu(
+    settings: ClockSettings,
+    onSettingsChange: (ClockSettings) -> Unit,
+    vm: VideoBackgroundViewModel? = null,
+) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     val active = settings.videoUris.isNotEmpty()
+    // 유튜브가 켜져 있으면 동영상은 화면에 없고 재생도 멈춰 있음
+    val playing = active && parseYouTube(settings.youtubeUrl) == null
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult // 선택 취소
@@ -163,6 +197,22 @@ fun VideoBackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSetting
             Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
         }
         InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // 지금(가장 최근) 동영상 파일 이름
+            if (active) {
+                val names = remember(settings.videoUris) {
+                    settings.videoUris.map { queryDisplayName(context, Uri.parse(it)) }
+                }
+                val i = (vm?.currentIndex ?: 0).coerceIn(0, names.lastIndex)
+                CurrentFileItem(i, names.size, names[i])
+            }
+            // 재생 위치 슬라이더 (여러 동영상이면 지금 나오는 동영상 기준)
+            if (playing && vm != null) {
+                PlaybackSlider(
+                    positionMs = vm::positionMs,
+                    durationMs = vm::durationMs,
+                    onSeek = vm::seekTo,
+                )
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.video_pick), style = MaterialTheme.typography.bodyMedium) },
                 leadingIcon = { Icon(Icons.Filled.VideoLibrary, contentDescription = null, modifier = Modifier.size(18.dp)) },
@@ -208,22 +258,24 @@ fun VideoBackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSetting
                     } else null,
                     onClick = { onSettingsChange(settings.copy(videoSound = !settings.videoSound)) },
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.video_off), style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = { Icon(Icons.Filled.VideocamOff, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    onClick = {
-                        expanded = false
-                        settings.videoUris.forEach {
-                            runCatching {
-                                context.contentResolver.releasePersistableUriPermission(
-                                    Uri.parse(it), Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                                )
-                            }
-                        }
-                        onSettingsChange(settings.copy(videoUris = emptyList()))
-                    },
-                )
             }
+            // 끄기 (항상 표시, 동영상이 없으면 흐리게)
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.video_off), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = { Icon(Icons.Filled.VideocamOff, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                enabled = active,
+                onClick = {
+                    expanded = false
+                    settings.videoUris.forEach {
+                        runCatching {
+                            context.contentResolver.releasePersistableUriPermission(
+                                Uri.parse(it), Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                            )
+                        }
+                    }
+                    onSettingsChange(settings.copy(videoUris = emptyList()))
+                },
+            )
         }
     }
 }

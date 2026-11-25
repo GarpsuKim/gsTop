@@ -9,8 +9,13 @@ import android.provider.AlarmClock
 import android.widget.Toast
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.WbTwilight
+import androidx.compose.ui.graphics.vector.ImageVector
 import android.net.Uri
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Bolt
@@ -28,6 +33,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
@@ -246,6 +252,8 @@ fun ClockScreen(
     onIncomingYouTubeConsumed: () -> Unit = {},
     /** 음악 재생기 (화면 회전에도 유지되도록 액티비티의 ViewModel). */
     music: MusicViewModel? = null,
+    /** 배경(동영상) 재생기 (재생 위치 슬라이더용). */
+    video: VideoBackgroundViewModel? = null,
 ) {
     val theme = settings.theme
     val animation = settings.animation
@@ -382,7 +390,7 @@ fun ClockScreen(
                 // [🖼 배경 ▾] → 사진 선택 / 검은색 (모든 모드 공통)
                 BackgroundMenu(settings, onSettingsChange)
                 // [🎬 배경(동영상) ▾] → 동영상 여러 개 연속 재생 (모든 모드 공통)
-                VideoBackgroundMenu(settings, onSettingsChange)
+                VideoBackgroundMenu(settings, onSettingsChange, video)
                 // [▶ 유튜브] → 유튜브 영상을 배경으로 (모든 모드 공통)
                 YouTubeButton(
                     url = settings.youtubeUrl,
@@ -433,7 +441,8 @@ fun ClockScreen(
             TransparencySlider(
                 value = settings.blackTransparency,
                 onValueChange = { onSettingsChange(settings.copy(blackTransparency = it)) },
-                modifier = if (landscape) Modifier.padding(top = 4.dp) else Modifier.padding(end = 4.dp),
+                // 가로: 상단 버튼 한 줄(약 44dp) 아래로 내려서 버튼과 겹치지 않게
+                modifier = if (landscape) Modifier.padding(top = 48.dp) else Modifier.padding(end = 4.dp),
                 horizontal = landscape,
             )
         }
@@ -529,6 +538,14 @@ private fun BackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSett
         }
         InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
             val hasImage = settings.backgroundVersion != 0L
+            // 지금(가장 최근) 사진 파일 이름 (이름 기록이 없는 예전 사진이면 표시 안 함)
+            val names by produceState(emptyList<String>(), settings.backgroundVersion) {
+                value = if (hasImage) BackgroundStore.names(context) else emptyList()
+            }
+            if (hasImage && names.isNotEmpty()) {
+                val i = BackgroundStore.shownIndex.coerceIn(0, names.lastIndex)
+                CurrentFileItem(i, names.size, names[i])
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.background_pick), style = MaterialTheme.typography.bodyMedium) },
                 leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp)) },
@@ -567,6 +584,17 @@ private fun BackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSett
                     onSettingsChange(settings.copy(backgroundVersion = 0L))
                 },
             )
+            // 끄기: 고른 사진을 지우고 검은 배경으로 (사진이 없으면 흐리게)
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.image_off), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = { Icon(Icons.Filled.HideImage, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                enabled = hasImage,
+                onClick = {
+                    expanded = false
+                    BackgroundStore.clear(context)
+                    onSettingsChange(settings.copy(backgroundVersion = 0L))
+                },
+            )
         }
     }
 }
@@ -582,28 +610,49 @@ private fun ColorDot(color: Color) {
     )
 }
 
-/** 달력 페이지 주소. */
-private const val CALENDAR_URL = "https://garpsukim.github.io/Calendar_Lunar_-_HTML/m_calendar.html"
+/** [달력...] 목록에 나오는 웹 페이지들 (이름, 아이콘, 주소). */
+private enum class WebLink(@StringRes val label: Int, val icon: ImageVector, val url: String) {
+    Calendar(R.string.calendar, Icons.Filled.CalendarMonth, "https://garpsukim.github.io/Calendar_Lunar_-_HTML/m_calendar.html"),
+    Weather(R.string.weather, Icons.Filled.Cloud, "https://www.weather.go.kr/w/index.do"),
+    Sunrise(R.string.sunrise_sunset, Icons.Filled.WbTwilight, "https://astro.kasi.re.kr"),
+    WorldTime(R.string.world_time, Icons.Filled.Public, "https://vclock.kr/time"),
+}
 
-/** 기본 브라우저로 달력 페이지를 연다. 브라우저가 없으면 안내 메시지만 띄운다. */
+/**
+ * [달력...] 버튼: 누르면 달력 / 날씨 / 일출일몰 / 세계시 목록을 보여 주고,
+ * 고른 페이지를 기본 브라우저로 연다. 브라우저가 없으면 안내 메시지만 띄운다.
+ */
 @Composable
 private fun CalendarButton() {
     val context = LocalContext.current
-    TextButton(
-        onClick = {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(CALENDAR_URL))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            try {
-                context.startActivity(intent)
-            } catch (e: ActivityNotFoundException) {
-                Toast.makeText(context, R.string.calendar_not_found, Toast.LENGTH_SHORT).show()
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.calendar_menu), style = MaterialTheme.typography.labelMedium)
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            WebLink.entries.forEach { link ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(link.label), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { Icon(link.icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    onClick = {
+                        expanded = false
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link.url))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: ActivityNotFoundException) {
+                            Toast.makeText(context, R.string.calendar_not_found, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
             }
-        },
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.calendar), style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 
