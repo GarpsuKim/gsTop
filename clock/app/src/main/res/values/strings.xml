@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">KJA시계</string>
+    <string name="app_name">영원한 시계</string>
     <string name="theme_default">기본</string>
     <string name="theme_rainbow">무지개</string>
     <string name="theme_neon">네온</string>
