@@ -25,8 +25,8 @@ import androidx.compose.ui.unit.dp
 import com.example.clock.split.SplitSide
 import kotlin.math.roundToInt
 
-/** 손가락으로 잡는 폭 (보이는 선보다 넓게). */
-private val DividerTouch = 28.dp
+/** 손가락으로 잡는 폭 (보이는 선보다 넓게). 양쪽 영역에 8dp 씩만 걸쳐서 옆 버튼·앱 아이콘을 덜 가림. */
+private val DividerTouch = 16.dp
 
 /**
  * 자체 화면 분할의 가운데 구분선: 끌어서 시계 / 앱 목록 비율 조절, 두 번 누르면 반반으로.
