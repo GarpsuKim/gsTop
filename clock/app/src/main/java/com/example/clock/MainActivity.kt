@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalConfiguration
@@ -90,10 +89,10 @@ class MainActivity : ComponentActivity() {
 
             // 자체 화면 분할: 시계(배경 포함)를 고른 절반에만 그리고, 나머지 절반은 투명 → 폰 배경화면이 보임.
             // 화면을 돌리면 左↔上, 右↔下 로 자리를 맞춤. 축소 화면(PIP)에서는 분할하지 않음.
-            var split by rememberSaveable { mutableStateOf<SplitSide?>(null) }
+            // 고른 자리는 설정에 저장 → 앱을 다시 열어도 분할된 채로 시작 ([초기화] 하면 분할 해제)
             val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
             // 시스템 화면 분할로 다른 앱과 나란히 떠 있으면(앱 목록에서 연 앱이 옆에 열린 경우 등) 자체 분할은 하지 않음
-            val activeSplit = if (inPip || inMultiWindow) null else split?.forOrientation(landscape)
+            val activeSplit = if (inPip || inMultiWindow) null else settings.splitSide?.forOrientation(landscape)
 
             val showWallpaper = transparency > 0f || activeSplit != null
             LaunchedEffect(showWallpaper) { setWallpaperVisible(showWallpaper) }
@@ -174,7 +173,10 @@ class MainActivity : ComponentActivity() {
                         onEnterPip = ::enterPip,
                         fullscreenRequest = widgetLaunch,
                         split = activeSplit,
-                        onSplitChange = { split = it },
+                        onSplitChange = {
+                            settings = settings.copy(splitSide = it)
+                            saveClockSettings(context, settings)
+                        },
                         inSystemSplit = inMultiWindow,
                     )
                 }

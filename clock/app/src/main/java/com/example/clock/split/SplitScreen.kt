@@ -7,6 +7,7 @@ import com.example.clock.R
  * 자체 화면 분할: 시계 앱 화면 안에서 시계를 절반 자리에만 그리고, 나머지 절반은 투명(폰 배경화면이 보임).
  * 가로 화면 = 左/右, 세로 화면 = 上/下.
  */
+// 순서 = 설정 저장값(ordinal). 새 항목은 끝에 추가할 것.
 enum class SplitSide(@StringRes val label: Int) {
     Left(R.string.split_left),
     Right(R.string.split_right),

@@ -153,6 +153,7 @@ private const val KEY_AUTO_CLOSE = "auto_close"
 private const val KEY_DIAL_NUMBERS = "dial_numbers"
 private const val KEY_DIGITAL_DATE = "digital_date"
 private const val KEY_DIGITAL_DATE_COLOR = "digital_date_color"
+private const val KEY_SPLIT_SIDE = "split_side"
 
 /** 아날로그·하이브리드 시계판 숫자. 순서 = 저장값(ordinal) → 새 항목은 끝에 추가할 것. */
 enum class DialNumbers(@StringRes val label: Int) {
@@ -246,6 +247,8 @@ data class ClockSettings(
     val digitalDate: DigitalDate = DigitalDate.Off,
     /** 디지털 날짜·요일 줄 글자색 (날짜를 켰을 때만 [날짜색] 버튼이 보임). */
     val digitalDateColor: DigitalColor = DigitalColor.White,
+    /** 자체 화면 분할: 시계 자리 (null = 분할 안 함). 앱을 다시 열어도 유지. */
+    val splitSide: SplitSide? = null,
 ) {
     /** 이미지·동영상·유튜브 배경이 모두 꺼진 검은 배경인지. */
     val isBlackBackground: Boolean
@@ -307,6 +310,7 @@ fun loadClockSettings(context: Context): ClockSettings {
         dialNumbers = DialNumbers.entries.getOrElse(p.getInt(KEY_DIAL_NUMBERS, d.dialNumbers.ordinal)) { d.dialNumbers },
         digitalDate = DigitalDate.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE, d.digitalDate.ordinal)) { d.digitalDate },
         digitalDateColor = DigitalColor.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE_COLOR, d.digitalDateColor.ordinal)) { d.digitalDateColor },
+        splitSide = SplitSide.entries.getOrNull(p.getInt(KEY_SPLIT_SIDE, -1)), // -1 = 분할 안 함
     )
 }
 
@@ -333,6 +337,7 @@ fun saveClockSettings(context: Context, s: ClockSettings) {
         putInt(KEY_DIAL_NUMBERS, s.dialNumbers.ordinal)
         putInt(KEY_DIGITAL_DATE, s.digitalDate.ordinal)
         putInt(KEY_DIGITAL_DATE_COLOR, s.digitalDateColor.ordinal)
+        putInt(KEY_SPLIT_SIDE, s.splitSide?.ordinal ?: -1)
     }
 }
 
