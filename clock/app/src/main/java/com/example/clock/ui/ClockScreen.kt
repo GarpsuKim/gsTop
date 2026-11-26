@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Schedule
@@ -75,6 +76,9 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
@@ -461,6 +465,9 @@ fun ClockScreen(
     // 축소 화면(PIP) 중에는 작은 창에 시계만 보이도록 버튼을 모두 숨김
     val showControls = controlsVisible && !inPip
 
+    // 우하단 버튼 줄의 높이 (px): 세로 화면 투명도 슬라이더를 그 위 빈 칸에 놓기 위해
+    var bottomControlsPx by remember { mutableIntStateOf(0) }
+
     val menuHost = remember { InlineMenuHost() }
     // 버튼을 숨기면 열려 있던 메뉴도 함께 사라지도록 (숨겨진 버튼의 메뉴가 남지 않게)
     LaunchedEffect(showControls) { if (!showControls) menuHost.current = null }
@@ -647,7 +654,7 @@ fun ClockScreen(
         }
 
         // 버튼 묶음 A (좌상단): [모드 ▾](표시 방식·초기화·사용자 등록)
-        //                      + 디지털 → [☑ 굵게] [☑ 네온사인] [날짜 ▾]  + [⏱ 초침 ▾] [⧉ 화면 ▾]
+        //                      + 디지털 → [글자 ▾](굵게·네온사인·글자색) [날짜 ▾]  + [⏱ 초침 ▾] [⧉ 화면 ▾]
         val modeControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.Start) { // 왼쪽부터, 좁으면 다음 줄로
                 // [모드 ▾] → 아날로그 / 하이브리드 / 디지털 + 구분선 + 초기화 / 사용자 등록
@@ -658,16 +665,8 @@ fun ClockScreen(
                     onUserRegister = { userDialog = true },
                 )
                 if (digitalOnly) {
-                    SmallCheck(
-                        label = stringResource(R.string.digital_bold),
-                        checked = settings.digitalBold,
-                        onCheckedChange = { onSettingsChange(settings.copy(digitalBold = it)) },
-                    )
-                    SmallCheck(
-                        label = stringResource(R.string.digital_neon),
-                        checked = settings.digitalNeon,
-                        onCheckedChange = { onSettingsChange(settings.copy(digitalNeon = it)) },
-                    )
+                    // [글자 ▾] → ☑ 굵게 / ☑ 네온사인 / (구분선) 글자색
+                    DigitalTextMenu(settings, onSettingsChange)
                     // [날짜 ▾] → 위치 (끔 / 상 / 하) + 구분선 + 날짜색 을 한 메뉴에서
                     DigitalDateMenu(settings, onSettingsChange)
                 }
@@ -683,7 +682,7 @@ fun ClockScreen(
             }
         }
 
-        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [🎨 디자인 ▾](테마·애니메이션·숫자),  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘)
+        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [🎨 디자인 ▾](테마·애니메이션·숫자),  디지털 → [스크롤 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘)
         val styleControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.End) { // 좁으면 다음 줄로
                 if (digitalOnly) {
@@ -692,13 +691,6 @@ fun ClockScreen(
                         items = DigitalScroll.entries,
                         label = { stringResource(it.label) },
                         onSelect = { onSettingsChange(settings.copy(digitalScroll = it)) },
-                    )
-                    SmallMenu(
-                        selected = settings.digitalColor,
-                        items = DigitalColor.entries,
-                        label = { stringResource(it.label) },
-                        icon = { ColorSwatch(it) },
-                        onSelect = { onSettingsChange(settings.copy(digitalColor = it)) },
                     )
                 } else {
                     // [🎨 디자인 ▾] → 테마 / 애니메이션 / 숫자 를 한 메뉴에서
@@ -737,25 +729,49 @@ fun ClockScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomEnd),
         ) {
-            Box(Modifier.padding(bottom = 4.dp, start = 8.dp, end = 8.dp)) { styleControls() }
+            Box(
+                Modifier
+                    .onSizeChanged { bottomControlsPx = it.height } // 투명도 슬라이더 자리 계산용
+                    .padding(bottom = 4.dp, start = 8.dp, end = 8.dp),
+            ) { styleControls() }
         }
 
         // 검은 배경일 때만 투명도 슬라이더 (폰 배경화면이 비침)
-        // 세로 화면 → 오른쪽 가운데에 세로로 (위로 = 투명), 가로 화면 → 상단 가운데에 가로로 (오른쪽 = 투명)
+        //  가로 화면 → 오른쪽에 세로로 (위로 = 투명), 아래 버튼 줄 위쪽 공간의 가운데
+        //  세로 화면 → 하단에 가로로 (오른쪽 = 투명), 시계 아래 끝과 아래 버튼 줄 사이 빈 칸의 가운데
         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         AnimatedVisibility(
             visible = showControls && settings.isBlackBackground,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(if (landscape) Alignment.TopCenter else Alignment.CenterEnd),
+            modifier = Modifier.fillMaxSize(),
         ) {
-            TransparencySlider(
-                value = settings.blackTransparency,
-                onValueChange = { onSettingsChange(settings.copy(blackTransparency = it)) },
-                // 가로: 상단 버튼 한 줄(약 44dp) 아래로 내려서 버튼과 겹치지 않게
-                modifier = if (landscape) Modifier.padding(top = 48.dp) else Modifier.padding(end = 4.dp),
-                horizontal = landscape,
-            )
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val bottomControls = with(LocalDensity.current) { bottomControlsPx.toDp() }
+                val slider: @Composable (Modifier) -> Unit = { m ->
+                    TransparencySlider(
+                        value = settings.blackTransparency,
+                        onValueChange = { onSettingsChange(settings.copy(blackTransparency = it)) },
+                        modifier = m,
+                        horizontal = !landscape,
+                    )
+                }
+                if (landscape) {
+                    Box(
+                        Modifier.fillMaxSize().padding(bottom = bottomControls),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) { slider(Modifier.padding(end = 4.dp)) }
+                } else {
+                    // 시계는 화면 가운데, 폭에 꽉 찬 정사각형 (AnalogClockArea·BigDigitalClock 과 같은 여백)
+                    val clock = minOf(maxWidth, maxHeight) - DialPadding * 2
+                    val clockBottom = maxHeight / 2 + clock / 2
+                    val gap = (maxHeight - bottomControls - clockBottom).coerceAtLeast(48.dp)
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = clockBottom).height(gap),
+                        contentAlignment = Alignment.Center,
+                    ) { slider(Modifier) }
+                }
+            }
         }
 
         // 열린 목록 메뉴는 별도 창이 아니라 이 화면 맨 위에 그림 (터치가 뒤로 새지 않도록)
@@ -1380,10 +1396,16 @@ private fun AnalogClockArea(
                 .padding(DialPadding),
             contentAlignment = Alignment.Center,
         ) {
-            val dialSize = minOf(maxWidth, maxHeight)
+            val fullSize = minOf(maxWidth, maxHeight)
+            // [숫자 전부]: 숫자를 시계판 바깥 테두리에 붙여 놓으므로, 숫자 자리만큼 시계판을 줄임
+            val outsideNumbers = settings.dialNumbers == DialNumbers.All
+            val dialSize = if (outsideNumbers) fullSize / OutsideNumbersScale else fullSize
+            if (outsideNumbers) {
+                DialNumberLayer(style, settings.dialNumbers, outside = true, modifier = Modifier.size(fullSize))
+            }
             Box(modifier = Modifier.size(dialSize), contentAlignment = Alignment.Center) {
                 DialFace(style, Modifier.fillMaxSize())
-                DialNumberLayer(style, settings.dialNumbers, Modifier.fillMaxSize())
+                if (!outsideNumbers) DialNumberLayer(style, settings.dialNumbers, outside = false, modifier = Modifier.fillMaxSize())
                 if (settings.mode == DisplayMode.Hybrid) {
                     // 시계판 안쪽: 위에 요일(AM/PM), 아래에 년월일
                     val amPm = if (now.hour < 12) "AM" else "PM"
@@ -1408,48 +1430,87 @@ private fun AnalogClockArea(
     }
 }
 
-/** 작은 체크박스 + 글자 (글자까지 눌러도 토글). */
+/**
+ * 디지털 [🔤 글자 ▾] 버튼 (한 단계 목록, 버튼에는 지금 글자색 견본):
+ *  ☑ 굵게 / ☑ 네온사인   ← 누를 때마다 켜기·끄기
+ *  ── 구분선 ──
+ *  글자색: 흰색 / 빨강 / … / 무지개 (지금 값에 ✓)
+ * 무엇을 눌러도 목록은 열려 있어서 바로 바뀐 모습을 보며 여러 개를 고를 수 있음.
+ */
 @Composable
-private fun SmallCheck(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun DigitalTextMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
+    @Composable
+    fun CheckItem(@StringRes label: Int, checked: Boolean, onToggle: (Boolean) -> Unit) {
+        DropdownMenuItem(
+            text = { Text(stringResource(label), style = MaterialTheme.typography.bodyMedium) },
+            leadingIcon = { Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.size(20.dp)) },
+            onClick = { onToggle(!checked) },
+        )
+    }
+    FlatMenuButton(
+        button = {
+            Icon(Icons.Filled.TextFields, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.digital_text_menu), style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.width(6.dp))
+            ColorSwatch(settings.digitalColor)
+        },
     ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = null,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 6.dp),
-        )
+        CheckItem(R.string.digital_bold, settings.digitalBold) { onSettingsChange(settings.copy(digitalBold = it)) }
+        CheckItem(R.string.digital_neon, settings.digitalNeon) { onSettingsChange(settings.copy(digitalNeon = it)) }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        MenuSectionTitle(R.string.digital_text_color)
+        DigitalColor.entries.forEach { c ->
+            DropdownMenuItem(
+                text = { Text(stringResource(c.label), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = { ColorSwatch(c) },
+                trailingIcon = if (c == settings.digitalColor) {
+                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else null,
+                onClick = { onSettingsChange(settings.copy(digitalColor = c)) },
+            )
+        }
     }
 }
 
+/** [숫자 전부] 의 바깥 숫자 크기 (시계판 반지름 대비). */
+private const val OutsideNumberFont = 0.13f
+/** [숫자 전부] 의 시계판 테두리와 숫자 사이 틈 (시계판 반지름 대비). */
+private const val OutsideNumberGap = 0.02f
+/** [숫자 전부]: (시계판 + 바깥 숫자) 전체 크기 ÷ 시계판 크기. 숫자 한 줄 높이(글자 크기의 약 1.2배)까지 들어가게. */
+private const val OutsideNumbersScale = 1f + OutsideNumberGap + OutsideNumberFont * 1.25f
+
 /**
- * 시계판 숫자: 긴 눈금(3·6·9·12) 바로 안쪽 원 위에. 크기는 시계판에 비례, 색은 테마 글자색.
- * 하이브리드의 요일·날짜 글자(중심에서 위아래 0.44r)와 겹치지 않는 위치·크기.
+ * 시계판 숫자. 색은 테마 글자색, 크기는 시계판에 비례.
+ *  - [outside] = false ([숫자 3·6·9·12]): 긴 눈금(3·6·9·12) 바로 안쪽 원 위에.
+ *    하이브리드의 요일·날짜 글자(중심에서 위아래 0.44r)와 겹치지 않는 위치·크기.
+ *  - [outside] = true ([숫자 전부]): 시계판 바깥 테두리에 딱 붙여서 (이 층은 [OutsideNumbersScale] 만큼 큰 상자).
+ *    숫자마다 글자 상자의 시계판 쪽 끝이 테두리에서 [OutsideNumberGap] 만큼만 떨어지도록.
  */
 @Composable
-private fun DialNumberLayer(style: DialStyle, numbers: DialNumbers, modifier: Modifier = Modifier) {
+private fun DialNumberLayer(style: DialStyle, numbers: DialNumbers, outside: Boolean, modifier: Modifier = Modifier) {
     if (numbers == DialNumbers.Off) return
     val measurer = rememberTextMeasurer()
     val hours = if (numbers == DialNumbers.Quarters) listOf(12, 3, 6, 9) else (1..12).toList()
     Canvas(modifier) {
-        val radius = size.minDimension / 2f
-        val fontPx = radius * 0.15f
+        val radius = if (outside) size.minDimension / 2f / OutsideNumbersScale else size.minDimension / 2f
+        val fontPx = radius * if (outside) OutsideNumberFont else 0.15f
         val textStyle = TextStyle(fontSize = fontPx.toSp(), fontWeight = FontWeight.Bold)
-        // 눈금 바깥 끝(DialFace 와 같은 계산) → 긴 눈금 길이 → 조금 띄우고 → 글자 반 높이만큼 안쪽
+        // 안쪽: 눈금 바깥 끝(DialFace 와 같은 계산) → 긴 눈금 길이 → 조금 띄우고 → 글자 반 높이만큼 안쪽
         val tickOuter = radius - radius * 0.035f - radius * 0.025f
-        val r = tickOuter - radius * 0.18f - radius * 0.04f - fontPx * 0.55f
+        val insideR = tickOuter - radius * 0.18f - radius * 0.04f - fontPx * 0.55f
         for (h in hours) {
             val layout = measurer.measure(h.toString(), textStyle)
-            val c = center + polar(Math.toRadians(h * 30.0 - 90.0), r)
+            val angle = Math.toRadians(h * 30.0 - 90.0)
+            val r = if (outside) {
+                // 그 방향으로 본 글자 상자의 반 폭 (상자 가운데 → 시계판 쪽 끝까지의 거리)
+                val half = abs(cos(angle)).toFloat() * layout.size.width / 2f +
+                    abs(sin(angle)).toFloat() * layout.size.height / 2f
+                radius + radius * OutsideNumberGap + half
+            } else {
+                insideR
+            }
+            val c = center + polar(angle, r)
             drawText(
                 textLayoutResult = layout,
                 brush = style.textBrush,

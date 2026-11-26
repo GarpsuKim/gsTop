@@ -70,6 +70,8 @@
     <string name="alarm_not_found">알람을 열 수 있는 시계 앱이 없습니다</string>
     <string name="digital_bold">굵게</string>
     <string name="digital_neon">네온사인</string>
+    <string name="digital_text_menu">글자</string>
+    <string name="digital_text_color">글자색</string>
     <string name="widget_color_title">위젯 설정</string>
     <string name="widget_line_time">시각</string>
     <string name="widget_line_date">날짜·요일</string>
