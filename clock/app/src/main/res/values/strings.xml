@@ -68,7 +68,12 @@
     <string name="widget_line_date">날짜·요일</string>
     <string name="widget_line_name">성명</string>
     <string name="widget_seconds">초 표시</string>
-    <string name="date_color">날짜 %1$s</string>
+    <string name="date_section_position">위치</string>
+    <string name="date_section_color">날짜색</string>
+    <string name="background_menu">배경</string>
+    <string name="chime_ring_silent">진동·무음 모드에서도 울리기</string>
+    <string name="chime_ring_silent_desc">끄면 소리 모드일 때만 울립니다. 켜면 미디어 음량으로 울립니다</string>
+    <string name="music_pick">음악 선택</string>
     <string name="date_off">날짜 끔</string>
     <string name="date_top">날짜(상)</string>
     <string name="date_bottom">날짜(하)</string>
@@ -76,6 +81,13 @@
     <string name="numbers_quarters">숫자 3·6·9·12</string>
     <string name="numbers_all">숫자 전부</string>
     <string name="split">화면분할</string>
+    <string name="screen_menu">화면</string>
+    <string name="chime_alarm">시보·알람</string>
+    <string name="chime_settings_item">시보 설정</string>
+    <string name="chime_state_on">켜짐</string>
+    <string name="chime_state_off">꺼짐</string>
+    <string name="alarm_open">알람 열기</string>
+    <string name="pip_item">작은 창으로 축소</string>
     <string name="split_left">左 분할</string>
     <string name="split_right">右 분할</string>
     <string name="split_top">上 분할</string>

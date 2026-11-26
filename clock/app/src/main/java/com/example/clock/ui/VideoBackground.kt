@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -150,22 +151,14 @@ fun VideoBackground(
 }
 
 /**
- * [🎬 배경(동영상) ▾] 메뉴: 재생 위치 슬라이더 / 동영상 선택(여러 개 = 연속 재생) / 무한 반복 / 소리 켜기 / 끄기.
- * 고른 동영상은 복사하지 않고 원본 읽기 권한만 저장 (앱을 다시 켜도 유지).
- * [vm]: 재생 위치 슬라이더용 재생기 (null 이면 슬라이더 없음).
+ * 배경 동영상 고르기 창 (여러 개 = 연속 재생). 고른 동영상은 복사하지 않고 원본 읽기 권한만 저장 (앱을 다시 켜도 유지).
+ * 메뉴가 닫혀도 결과를 받을 수 있도록, 메뉴 바깥(버튼 쪽)에서 만들어 둔다. 돌려주는 함수를 부르면 창이 열림.
  */
 @Composable
-fun VideoBackgroundMenu(
-    settings: ClockSettings,
-    onSettingsChange: (ClockSettings) -> Unit,
-    vm: VideoBackgroundViewModel? = null,
-) {
+fun rememberVideoPicker(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit): () -> Unit {
     val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
-    val active = settings.videoUris.isNotEmpty()
-    // 유튜브가 켜져 있으면 동영상은 화면에 없고 재생도 멈춰 있음
-    val playing = active && parseYouTube(settings.youtubeUrl) == null
-
+    val latestSettings by rememberUpdatedState(settings)
+    val latestOnChange by rememberUpdatedState(onSettingsChange)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult // 선택 취소
         val resolver = context.contentResolver
@@ -175,28 +168,36 @@ fun VideoBackgroundMenu(
                 resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }.isSuccess
         }
-        settings.videoUris.map(Uri::parse).filter { it !in kept }.forEach { old ->
+        latestSettings.videoUris.map(Uri::parse).filter { it !in kept }.forEach { old ->
             runCatching { resolver.releasePersistableUriPermission(old, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         }
         if (kept.isEmpty()) {
             Toast.makeText(context, R.string.video_failed, Toast.LENGTH_SHORT).show()
         } else {
             // 동영상을 고르면 그보다 위에 있는 유튜브 배경은 끔 (고른 동영상이 바로 보이게)
-            onSettingsChange(settings.copy(videoUris = kept.map(Uri::toString), youtubeUrl = ""))
+            latestOnChange(latestSettings.copy(videoUris = kept.map(Uri::toString), youtubeUrl = ""))
         }
     }
+    return remember(picker) { { picker.launch(arrayOf("video/*")) } }
+}
 
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(Icons.Filled.VideoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.video_background), style = MaterialTheme.typography.labelMedium)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+/**
+ * [배경 ▾] 메뉴의 "동영상" 구역: 지금 파일 / 재생 위치 슬라이더 / 동영상 선택 / 무한 반복 / 소리 / 끄기.
+ * [vm]: 재생 위치 슬라이더용 재생기 (null 이면 슬라이더 없음). [onPick]: 고르기 창 열기. [close]: 메뉴 닫기.
+ */
+@Composable
+fun VideoBackgroundItems(
+    settings: ClockSettings,
+    onSettingsChange: (ClockSettings) -> Unit,
+    vm: VideoBackgroundViewModel?,
+    onPick: () -> Unit,
+    close: () -> Unit,
+) {
+    val context = LocalContext.current
+    val active = settings.videoUris.isNotEmpty()
+    // 유튜브가 켜져 있으면 동영상은 화면에 없고 재생도 멈춰 있음
+    val playing = active && parseYouTube(settings.youtubeUrl) == null
+    run {
             // 지금(가장 최근) 동영상 파일 이름
             if (active) {
                 val names = remember(settings.videoUris) {
@@ -220,8 +221,8 @@ fun VideoBackgroundMenu(
                     { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 } else null,
                 onClick = {
-                    expanded = false
-                    picker.launch(arrayOf("video/*"))
+                    close()
+                    onPick()
                 },
             )
             // 무한 반복 On/Off (동영상을 고르기 전에도 정할 수 있게 항상 표시)
@@ -265,7 +266,7 @@ fun VideoBackgroundMenu(
                 leadingIcon = { Icon(Icons.Filled.VideocamOff, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 enabled = active,
                 onClick = {
-                    expanded = false
+                    close()
                     settings.videoUris.forEach {
                         runCatching {
                             context.contentResolver.releasePersistableUriPermission(
@@ -276,6 +277,5 @@ fun VideoBackgroundMenu(
                     onSettingsChange(settings.copy(videoUris = emptyList()))
                 },
             )
-        }
     }
 }

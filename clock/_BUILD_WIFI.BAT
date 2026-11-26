@@ -1,16 +1,18 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-rem 와이파이(adb) 설치용 빌드 - _RUN_WIFI.BAT 이 부름
-rem 사용법: _BUILD_WIFI.BAT          (직접 실행, 끝나면 pause)
-rem         _BUILD_WIFI.BAT nopause  (다른 bat에서 call 할 때)
-
-rem 설치된 화면(홈 화면 아이콘 아래, 위젯 목록)에 보이는 앱 이름
-rem 이 줄은 app/build.gradle.kts 가 이 파일에서 직접 읽음 (아래 -PappNameBat 로 이 파일 이름을 알려 줌)
-rem 형식 그대로 유지: set "AppIcon=이름"
+rem WIFI(adb) build - called by _RUN_WIFI.BAT
+rem usage: _BUILD_WIFI.BAT          (run directly, pause at end)
+rem        _BUILD_WIFI.BAT nopause  (when called from another bat)
+rem
+rem AppIcon     = app name shown on the home screen / widget list
+rem AppIdSuffix = added after com.example.clock (empty = com.example.clock)
+rem app/build.gradle.kts reads these two lines from this file (UTF-8),
+rem because this bat passes its own file name with -PappNameBat.
+rem Keep the format: set "AppIcon=name"
+rem NOTE: keep comments ASCII only. Korean text in rem lines after chcp 65001
+rem       can make cmd misread the file ("'D_WIFI.BAT' is not recognized").
 set "AppIcon=영원한_시계"
-
-rem 앱 ID 꼬리: 비움 = com.example.clock (_RUN_WIFI.BAT, _DUMP_PREFS.BAT 이 이 ID 를 씀)
 set "AppIdSuffix="
 
 echo 앱 이름: %AppIcon%

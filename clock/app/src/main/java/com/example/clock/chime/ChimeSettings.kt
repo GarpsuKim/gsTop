@@ -37,6 +37,8 @@ data class ChimeSettings(
     val minute: Int = 0,
     /** 울리지 않을 시각 (0~23시). 비트 n 이 1 이면 n시는 건너뜀. 기본: 1·2·3·4·5시 (새벽). */
     val skipHours: Int = 0b111110,
+    /** true = 진동·무음 모드에서도 울림 (미디어 음량으로). false = 소리 모드일 때만. */
+    val ringWhenSilent: Boolean = false,
 ) {
     fun isSkipped(hour: Int): Boolean = (skipHours shr hour) and 1 == 1
 
@@ -64,6 +66,7 @@ object ChimeStore {
     private const val KEY_LENGTH = "length"
     private const val KEY_MINUTE = "minute"
     private const val KEY_SKIP_HOURS = "skip_hours"
+    private const val KEY_RING_WHEN_SILENT = "ring_when_silent"
 
     fun load(context: Context): ChimeSettings {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -75,6 +78,7 @@ object ChimeStore {
             length = ChimeLength.entries.getOrElse(p.getInt(KEY_LENGTH, d.length.ordinal)) { d.length },
             minute = p.getInt(KEY_MINUTE, d.minute).coerceIn(0, 59),
             skipHours = p.getInt(KEY_SKIP_HOURS, d.skipHours),
+            ringWhenSilent = p.getBoolean(KEY_RING_WHEN_SILENT, d.ringWhenSilent),
         )
     }
 
@@ -87,6 +91,7 @@ object ChimeStore {
             putInt(KEY_LENGTH, s.length.ordinal)
             putInt(KEY_MINUTE, s.minute)
             putInt(KEY_SKIP_HOURS, s.skipHours)
+            putBoolean(KEY_RING_WHEN_SILENT, s.ringWhenSilent)
         }
         ChimeScheduler.update(context)
     }

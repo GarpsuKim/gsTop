@@ -1,17 +1,21 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-rem 텔레그램 전송용 빌드 - _RUN_TELEGRAM.BAT 이 부름
-rem 사용법: _BUILD_Telegram.BAT          (직접 실행, 끝나면 pause)
-rem         _BUILD_Telegram.BAT nopause  (다른 bat에서 call 할 때)
-
-rem 설치된 화면(홈 화면 아이콘 아래, 위젯 목록)에 보이는 앱 이름
-rem 이 줄은 app/build.gradle.kts 가 이 파일에서 직접 읽음 (아래 -PappNameBat 로 이 파일 이름을 알려 줌)
-rem 형식 그대로 유지: set "AppIcon=이름"
+rem Telegram build - called by _RUN_TELEGRAM.BAT
+rem usage: _BUILD_Telegram.BAT          (run directly, pause at end)
+rem        _BUILD_Telegram.BAT nopause  (when called from another bat)
+rem
+rem AppIcon     = app name shown on the home screen / widget list
+rem AppIdSuffix = added after com.example.clock -> a separate app from the WIFI build,
+rem               so both can be installed on one phone.
+rem               lowercase letter first, then lowercase letters / digits / _ only.
+rem               empty = same app as the WIFI build (overwrites it)
+rem app/build.gradle.kts reads these two lines from this file (UTF-8),
+rem because this bat passes its own file name with -PappNameBat.
+rem Keep the format: set "AppIcon=name"
+rem NOTE: keep comments ASCII only. Korean text in rem lines after chcp 65001
+rem       can make cmd misread the file.
 set "AppIcon=KJA시계"
-
-rem 앱 ID 꼬리: com.example.clock 뒤에 붙음 → 와이파이 빌드(꼬리 없음)와 다른 앱으로 한 폰에 따로 설치됨
-rem 영문 소문자로 시작, 영문 소문자·숫자·_ 만. 비우면 와이파이 빌드와 같은 앱(덮어쓰기)
 set "AppIdSuffix=.kja"
 
 echo 앱 이름: %AppIcon%

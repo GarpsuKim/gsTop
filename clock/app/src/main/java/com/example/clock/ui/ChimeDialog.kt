@@ -9,6 +9,9 @@ import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
+import android.provider.AlarmClock
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material3.HorizontalDivider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -65,25 +69,69 @@ import com.example.clock.chime.ChimeSettings
 import com.example.clock.chime.ChimeStore
 import java.time.format.DateTimeFormatter
 
-/** [🔔 시보] 버튼: 누르면 시보 설정 창 (켜기/끄기, 음악 파일, 연주 시간). */
+/**
+ * [🔔 시보·알람 ▾] 버튼: 시보와 알람을 한 메뉴에서, 구분선으로 나눠서.
+ *  - 시보: [시보 설정] → 시보 설정 창 (켜기/끄기, 음악 파일, 연주 시간 …). 오른쪽에 켜짐/꺼짐 표시
+ *  - 알람: [알람 열기] → 시스템 시계 앱의 알람 화면
+ * 버튼 아이콘으로 시보 켜짐/꺼짐 표시 (설정 창을 닫을 때 다시 읽음).
+ */
 @Composable
-fun ChimeButton() {
+fun ChimeAlarmButton() {
     val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
-    // 버튼 아이콘으로 켜짐/꺼짐 표시 (창을 닫을 때 다시 읽음)
+    var expanded by remember { mutableStateOf(false) }
     var enabled by remember { mutableStateOf(ChimeStore.load(context).enabled) }
 
-    TextButton(
-        onClick = { open = true },
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(
-            if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.chime), style = MaterialTheme.typography.labelMedium)
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Icon(
+                if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.chime_alarm), style = MaterialTheme.typography.labelMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // ── 시보 ──
+            MenuSectionTitle(R.string.chime)
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.chime_settings_item), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = {
+                    Icon(
+                        if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                trailingIcon = {
+                    Text(
+                        stringResource(if (enabled) R.string.chime_state_on else R.string.chime_state_off),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    open = true
+                },
+            )
+            // ── 알람 ──
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.alarm)
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.alarm_open), style = MaterialTheme.typography.bodyMedium) },
+                leadingIcon = { Icon(Icons.Filled.Alarm, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                onClick = {
+                    expanded = false
+                    openSystemAlarms(context)
+                },
+            )
+        }
     }
 
     if (open) {
@@ -91,6 +139,16 @@ fun ChimeButton() {
             open = false
             enabled = ChimeStore.load(context).enabled
         })
+    }
+}
+
+/** 시스템 시계 앱의 알람 화면 열기. 시계 앱이 없으면 안내만. */
+private fun openSystemAlarms(context: Context) {
+    val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, R.string.alarm_not_found, Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -179,6 +237,28 @@ private fun ChimeDialog(onDismiss: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = if (next == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     )
+                }
+                // 진동·무음 모드에서도 울리기 (끄면: 소리 모드일 때만 울림)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .toggleable(
+                            value = s.ringWhenSilent,
+                            role = Role.Checkbox,
+                            onValueChange = { update(s.copy(ringWhenSilent = it)) },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = s.ringWhenSilent, onCheckedChange = null) // 줄 전체를 눌러도 체크
+                    Column(Modifier.padding(start = 4.dp)) {
+                        Text(stringResource(R.string.chime_ring_silent), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(R.string.chime_ring_silent_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 Spacer(Modifier.height(16.dp))
 

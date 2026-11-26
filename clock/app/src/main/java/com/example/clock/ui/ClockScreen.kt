@@ -48,6 +48,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.annotation.StringRes
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -611,13 +613,8 @@ fun ClockScreen(
                         checked = settings.digitalNeon,
                         onCheckedChange = { onSettingsChange(settings.copy(digitalNeon = it)) },
                     )
-                    // [날짜 ▾] → 끔 / 날짜(상) / 날짜(하)
-                    SmallMenu(
-                        selected = settings.digitalDate,
-                        items = DigitalDate.entries,
-                        label = { stringResource(it.label) },
-                        onSelect = { onSettingsChange(settings.copy(digitalDate = it)) },
-                    )
+                    // [날짜 ▾] → 위치 (끔 / 상 / 하) + 구분선 + 날짜색 을 한 메뉴에서
+                    DigitalDateMenu(settings, onSettingsChange)
                 } else {
                     SmallCheck(
                         label = stringResource(R.string.show_seconds),
@@ -647,15 +644,18 @@ fun ClockScreen(
                     onSelect = { onSettingsChange(settings.copy(powerMode = it)) },
                 )
                 // [↺ 초기화] → 확인 후 모든 설정을 처음 상태로
-                // [⧉ 축소] → 다른 앱 위에 작은 창으로 (화면 속 화면)
-                if (onEnterPip != null) PipButton(onClick = { onEnterPip(digitalOnly) })
-                // [⧉ 화면분할 ▾] → 가로: 左/右 분할, 세로: 上/下 분할 (+ 분할 중이면 분할 해제)
-                if (!inPip && onSplitChange != null) SplitButton(split, inSystemSplit, onSplitChange)
+                // [⧉ 화면 ▾] → 축소(화면 속 화면) + 구분선 + 화면 분할 (가로: 左/右, 세로: 上/下, 분할 중이면 분할 해제)
+                ScreenMenu(
+                    onEnterPip = onEnterPip?.let { pip -> { pip(digitalOnly) } },
+                    current = split,
+                    systemSplit = inSystemSplit,
+                    onSplitChange = if (inPip) null else onSplitChange,
+                )
                 ResetButton(onReset = { onSettingsChange(ClockSettings()) })
             }
         }
 
-        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경(이미지) ▾] [🎬 배경(동영상) ▾] [▶ 유튜브] [♪ 음악] [📅 달력] [⏰ 알람]
+        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악) [▶ 유튜브] [📅 달력] [🔔 시보·알람 ▾] [⏱ 닫힘 ▾] [👤 사용자]
         val styleControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.End) { // 좁으면 다음 줄로
                 if (digitalOnly) {
@@ -672,16 +672,6 @@ fun ClockScreen(
                         icon = { ColorSwatch(it) },
                         onSelect = { onSettingsChange(settings.copy(digitalColor = it)) },
                     )
-                    // [날짜 ● ▾] → 날짜·요일 줄 글자색 (날짜를 켰을 때만)
-                    if (settings.digitalDate != DigitalDate.Off) {
-                        SmallMenu(
-                            selected = settings.digitalDateColor,
-                            items = DigitalColor.entries,
-                            label = { stringResource(R.string.date_color, stringResource(it.label)) },
-                            icon = { ColorSwatch(it) },
-                            onSelect = { onSettingsChange(settings.copy(digitalDateColor = it)) },
-                        )
-                    }
                 } else {
                     SmallMenu(
                         selected = animation,
@@ -696,10 +686,8 @@ fun ClockScreen(
                         onSelect = { onSettingsChange(settings.copy(theme = it)) },
                     )
                 }
-                // [🖼 배경 ▾] → 사진 선택 / 검은색 (모든 모드 공통)
-                BackgroundMenu(settings, onSettingsChange)
-                // [🎬 배경(동영상) ▾] → 동영상 여러 개 연속 재생 (모든 모드 공통)
-                VideoBackgroundMenu(settings, onSettingsChange, video)
+                // [🖼 배경 ▾] → 이미지 / 동영상 / 음악 을 구분선으로 나눈 한 메뉴 (모든 모드 공통)
+                BackgroundButton(settings, onSettingsChange, video, music)
                 // [▶ 유튜브] → 유튜브 영상을 배경으로 (모든 모드 공통)
                 YouTubeButton(
                     url = settings.youtubeUrl,
@@ -710,12 +698,10 @@ fun ClockScreen(
                     incoming = incomingYouTube,
                     onIncomingConsumed = onIncomingYouTubeConsumed,
                 )
-                // [♪ 음악] → 시계 앱이 직접 재생 (모든 모드 공통)
-                if (music != null) MusicButton(music)
                 // [📅 달력] → 기본 브라우저로 음력 달력 페이지 (모든 모드 공통)
                 CalendarButton()
-                // [🔔 시보] → 매시 정각 음악 연주 설정 (모든 모드 공통, 앱이 꺼져 있어도 울림)
-                ChimeButton()
+                // [🔔 시보·알람 ▾] → 시보 설정 (매시 정각 연주, 앱이 꺼져 있어도 울림) + 구분선 + 시스템 알람 화면 (모든 모드 공통)
+                ChimeAlarmButton()
                 // [⏱ 닫힘: 무한 ▾] → 시계 닫히는 시간 (모든 모드 공통)
                 SmallMenu(
                     selected = settings.autoClose,
@@ -725,8 +711,6 @@ fun ClockScreen(
                 )
                 // [👤 사용자 등록] → 성명 + 긴급 연락처 (모든 모드 공통)
                 UserButton(onClick = { userDialog = true })
-                // 마지막: [⏰ 알람] → 시스템 시계 앱의 알람 화면 (모든 모드 공통)
-                AlarmButton()
             }
         }
 
@@ -780,12 +764,21 @@ fun ClockScreen(
 private val TwoFingerSwipeMin = 80.dp
 
 /**
- * [화면분할 ▾] 버튼: 자체 화면 분할. 시계를 고른 절반 자리에만 그리고 나머지 절반은 투명(폰 배경화면).
- * 가로 화면 → [左 분할] [右 분할], 세로 화면 → [上 분할] [下 분할].
- * 이미 분할된 상태(자체 분할 또는 시스템 분할)면 [분할 해제] 만.
+ * [⧉ 화면 ▾] 버튼: 축소 화면과 화면 분할을 한 메뉴에서, 구분선으로 나눠서.
+ *  - 축소: [작은 창으로 축소] → 다른 앱 위에 작은 창으로 (화면 속 화면, PIP)
+ *  - 화면 분할 (자체 분할: 시계를 고른 쪽에, 나머지는 앱 목록)
+ *      가로 화면 → [左 분할] [右 분할], 세로 화면 → [上 분할] [下 분할]
+ *      이미 분할된 상태(자체 분할 또는 시스템 분할)면 [분할 해제] 만
+ * [onEnterPip] / [onSplitChange] 가 null 이면 그 구역은 없음. 둘 다 없으면 버튼도 없음.
  */
 @Composable
-private fun SplitButton(current: SplitSide?, systemSplit: Boolean, onChange: (SplitSide?) -> Unit) {
+private fun ScreenMenu(
+    onEnterPip: (() -> Unit)?,
+    current: SplitSide?,
+    systemSplit: Boolean,
+    onSplitChange: ((SplitSide?) -> Unit)?,
+) {
+    if (onEnterPip == null && onSplitChange == null) return
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -800,9 +793,29 @@ private fun SplitButton(current: SplitSide?, systemSplit: Boolean, onChange: (Sp
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.split), style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.screen_menu), style = MaterialTheme.typography.labelMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
         }
         InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // ── 축소 ──
+            if (onEnterPip != null) {
+                MenuSectionTitle(R.string.pip)
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.pip_item), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = {
+                        Icon(Icons.Filled.PictureInPictureAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = {
+                        expanded = false
+                        onEnterPip()
+                    },
+                )
+            }
+            // ── 화면 분할 ──
+            if (onSplitChange == null) return@InlineDropdown
+            if (onEnterPip != null) HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.split)
+            val onChange = onSplitChange
             if (current != null || systemSplit) {
                 // 이미 분할됨 → [분할 해제] 만
                 DropdownMenuItem(
@@ -820,6 +833,13 @@ private fun SplitButton(current: SplitSide?, systemSplit: Boolean, onChange: (Sp
                 SplitSide.sides(landscape).forEach { side ->
                     DropdownMenuItem(
                         text = { Text(stringResource(side.label), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = {
+                            Icon(
+                                if (landscape) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
                         onClick = {
                             expanded = false
                             onChange(side)
@@ -828,19 +848,6 @@ private fun SplitButton(current: SplitSide?, systemSplit: Boolean, onChange: (Sp
                 }
             }
         }
-    }
-}
-
-/** [⧉ 축소] 버튼: 축소 화면(화면 속 화면)으로 전환. */
-@Composable
-private fun PipButton(onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(Icons.Filled.PictureInPictureAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.pip), style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -881,9 +888,20 @@ private fun ResetButton(onReset: () -> Unit) {
     }
 }
 
-/** 배경: 사진 한 장을 골라 검은 바탕 대신 쓰거나, 다시 검은색으로. */
+/**
+ * [🖼 배경 ▾] 버튼: 배경(이미지) / 배경(동영상) / 음악 을 한 메뉴에서, 구분선으로 나눠서.
+ *  - 이미지: 지금 사진 / 사진 선택(여러 장 = 슬라이드쇼) / 무한 반복 / 검은색 / 끄기
+ *  - 동영상: 지금 파일 / 재생 위치 / 동영상 선택 / 무한 반복 / 소리 / 끄기   ([VideoBackgroundItems])
+ *  - 음악:   현재 곡 / 재생 위치 / 재생·일시정지 / 다음 곡 / 다른 음악 / 끄기 ([MusicItems])
+ * 고르기 창(사진·동영상·음악)은 메뉴가 닫혀도 결과를 받을 수 있도록 메뉴 바깥(이 버튼)에 만들어 둔다.
+ */
 @Composable
-private fun BackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
+private fun BackgroundButton(
+    settings: ClockSettings,
+    onSettingsChange: (ClockSettings) -> Unit,
+    video: VideoBackgroundViewModel?,
+    music: MusicViewModel?,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // 사진을 복사하는 동안 설정이 바뀌어도 최신 값에 반영되도록
@@ -917,6 +935,10 @@ private fun BackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSett
         }
     }
 
+    val pickVideo = rememberVideoPicker(settings, onSettingsChange)
+    val pickMusic = if (music != null) rememberMusicPicker(music) else null
+    val close = { expanded = false }
+
     Box {
         TextButton(
             onClick = { expanded = true },
@@ -924,10 +946,17 @@ private fun BackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSett
         ) {
             Icon(Icons.Filled.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.background), style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.background_menu), style = MaterialTheme.typography.labelMedium)
+            // 음악이 나오는 중이면 버튼에도 표시
+            if (music?.isPlaying == true) {
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.Filled.MusicNote, contentDescription = null, modifier = Modifier.size(14.dp))
+            }
             Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
         }
         InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // ── 이미지 ──
+            MenuSectionTitle(R.string.background)
             val hasImage = settings.backgroundVersion != 0L
             // 지금(가장 최근) 사진 파일 이름 (이름 기록이 없는 예전 사진이면 표시 안 함)
             val names by produceState(emptyList<String>(), settings.backgroundVersion) {
@@ -986,8 +1015,83 @@ private fun BackgroundMenu(settings: ClockSettings, onSettingsChange: (ClockSett
                     onSettingsChange(settings.copy(backgroundVersion = 0L))
                 },
             )
+
+            // ── 동영상 ──
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.video_background)
+            VideoBackgroundItems(settings, onSettingsChange, video, onPick = pickVideo, close = close)
+
+            // ── 음악 ──
+            if (music != null && pickMusic != null) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                MenuSectionTitle(R.string.music)
+                MusicItems(music, onPick = pickMusic, close = close)
+            }
         }
     }
+}
+
+/**
+ * 디지털 [날짜 ▾] 버튼: 한 메뉴에서 구분선으로 나눠
+ *  - 위치: 날짜 끔 / 날짜(상) / 날짜(하)
+ *  - 날짜색: 흰색 ~ 무지개 (날짜를 켰을 때만 고를 수 있음, 끄면 흐리게)
+ * 버튼에는 지금 위치와, 날짜를 켰으면 날짜색 동그라미를 표시.
+ * 위치·색을 골라도 메뉴는 열려 있어서 바로 이어서 고를 수 있음.
+ */
+@Composable
+private fun DigitalDateMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val dateOn = settings.digitalDate != DigitalDate.Off
+    val checkIcon: @Composable () -> Unit = {
+        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+    }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            if (dateOn) {
+                ColorSwatch(settings.digitalDateColor)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(stringResource(settings.digitalDate.label), style = MaterialTheme.typography.labelMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // ── 위치 ──
+            MenuSectionTitle(R.string.date_section_position)
+            DigitalDate.entries.forEach { d ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(d.label), style = MaterialTheme.typography.bodyMedium) },
+                    trailingIcon = if (d == settings.digitalDate) checkIcon else null,
+                    onClick = { onSettingsChange(settings.copy(digitalDate = d)) },
+                )
+            }
+            // ── 날짜색 ──
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.date_section_color)
+            DigitalColor.entries.forEach { c ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(c.label), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { ColorSwatch(c) },
+                    trailingIcon = if (dateOn && c == settings.digitalDateColor) checkIcon else null,
+                    enabled = dateOn,
+                    onClick = { onSettingsChange(settings.copy(digitalDateColor = c)) },
+                )
+            }
+        }
+    }
+}
+
+/** 메뉴 안 구역 제목 (작은 흐린 글자). [배경], [날짜], [화면], [시보·알람] 메뉴가 함께 씀. */
+@Composable
+internal fun MenuSectionTitle(@StringRes title: Int) {
+    Text(
+        stringResource(title),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 2.dp),
+    )
 }
 
 /** 검은 바탕 항목 표시용: 테두리 있는 검은 동그라미. */
@@ -1044,29 +1148,6 @@ private fun CalendarButton() {
                 )
             }
         }
-    }
-}
-
-/** 시스템 시계 앱의 알람 목록을 연다. 처리할 앱이 없으면 안내 메시지만 띄운다. */
-@Composable
-private fun AlarmButton(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    TextButton(
-        onClick = {
-            val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            try {
-                context.startActivity(intent)
-            } catch (e: ActivityNotFoundException) {
-                Toast.makeText(context, R.string.alarm_not_found, Toast.LENGTH_SHORT).show()
-            }
-        },
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(Icons.Filled.Alarm, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.alarm), style = MaterialTheme.typography.labelMedium)
     }
 }
 

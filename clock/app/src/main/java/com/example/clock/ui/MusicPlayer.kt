@@ -170,35 +170,36 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
 }
 
 /**
- * [♪ 음악] 버튼.
- * 곡이 없으면 바로 파일 선택(여러 곡 가능), 재생 중이면 메뉴:
- * 현재 곡 + 재생 위치 슬라이더 / 재생·일시정지 / 다음 곡 / 다른 음악 선택 / 끄기.
+ * 음악 고르기 창 (여러 곡 가능). 메뉴가 닫혀도 결과를 받을 수 있도록 메뉴 바깥(버튼 쪽)에서 만들어 둔다.
+ * 돌려주는 함수를 부르면 창이 열림.
  */
 @Composable
-fun MusicButton(music: MusicViewModel) {
-    var expanded by remember { mutableStateOf(false) }
+fun rememberMusicPicker(music: MusicViewModel): () -> Unit {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        music.play(uris)
+        if (uris.isNotEmpty()) music.play(uris)
     }
-    val hasTracks = music.tracks.isNotEmpty()
+    return remember(picker) { { picker.launch("audio/*") } }
+}
 
-    Box {
-        TextButton(
-            onClick = { if (hasTracks) expanded = true else picker.launch("audio/*") },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(
-                if (music.isPlaying) Icons.Filled.MusicNote else Icons.Filled.LibraryMusic,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.music), style = MaterialTheme.typography.labelMedium)
-            if (hasTracks) {
-                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+/**
+ * [배경 ▾] 메뉴의 "음악" 구역.
+ * 곡이 없으면 [음악 선택] 만, 있으면 현재 곡 + 재생 위치 슬라이더 / 재생·일시정지 / 다음 곡 / 다른 음악 선택 / 끄기.
+ * [onPick]: 고르기 창 열기. [close]: 메뉴 닫기.
+ */
+@Composable
+fun MusicItems(music: MusicViewModel, onPick: () -> Unit, close: () -> Unit) {
+    if (music.tracks.isEmpty()) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.music_pick)) },
+            leadingIcon = { Icon(Icons.Filled.LibraryMusic, contentDescription = null) },
+            onClick = {
+                close()
+                onPick()
+            },
+        )
+        return
+    }
+    run {
             music.tracks.getOrNull(music.index)?.let { track ->
                 CurrentFileItem(music.index, music.tracks.size, track.name)
                 // 재생 위치 슬라이더 (곡이 바뀌면 새로 읽도록 곡 번호를 키로)
@@ -228,18 +229,17 @@ fun MusicButton(music: MusicViewModel) {
                 text = { Text(stringResource(R.string.music_pick_other)) },
                 leadingIcon = { Icon(Icons.Filled.LibraryMusic, contentDescription = null) },
                 onClick = {
-                    expanded = false
-                    picker.launch("audio/*")
+                    close()
+                    onPick()
                 },
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.music_stop)) },
                 leadingIcon = { Icon(Icons.Filled.MusicOff, contentDescription = null) },
                 onClick = {
-                    expanded = false
+                    close()
                     music.stop()
                 },
             )
-        }
     }
 }

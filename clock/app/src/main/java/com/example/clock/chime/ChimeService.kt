@@ -29,7 +29,8 @@ import com.example.clock.R
 /**
  * 시보 연주 (이 앱이 직접 재생). 정해진 연주 시간이 지나거나 곡이 끝나면 멈추고 스스로 종료.
  * 앱이 꺼져 있어도 재생되도록 포그라운드 서비스(미디어 재생)로 동작하며, 알림에 [정지] 버튼이 있음.
- *  - 무음·진동 모드이거나 통화 중이면 울리지 않음
+ *  - 무음·진동 모드면 울리지 않음 (단, 설정의 [진동·무음 모드에서도 울리기] 를 켜면 미디어 음량으로 울림)
+ *  - 통화 중이면 울리지 않음
  *  - 다른 소리(음악 등)는 시보 동안 잠시 작아졌다가 돌아옴
  *  - 곡은 반복하지 않음: 연주 시간보다 짧은 곡은 곡이 끝나면 멈춤
  */
@@ -73,7 +74,8 @@ class ChimeService : Service() {
         val uri = s.fileUri
         val am = audioManager
         val silent = am?.ringerMode != AudioManager.RINGER_MODE_NORMAL
-        if ((uri == null && !s.isBuiltinBell) || am == null || (silent && !preview)) {
+        // 무음·진동 모드: [진동·무음 모드에서도 울리기] 를 켰거나 [들어보기] 면 그래도 울림 (미디어 음량)
+        if ((uri == null && !s.isBuiltinBell) || am == null || (silent && !preview && !s.ringWhenSilent)) {
             stopAll() // 파일 없음 / 무음·진동 모드
             return
         }
