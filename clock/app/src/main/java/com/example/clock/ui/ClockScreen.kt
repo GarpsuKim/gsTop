@@ -154,6 +154,7 @@ private const val KEY_DIAL_NUMBERS = "dial_numbers"
 private const val KEY_DIGITAL_DATE = "digital_date"
 private const val KEY_DIGITAL_DATE_COLOR = "digital_date_color"
 private const val KEY_SPLIT_SIDE = "split_side"
+private const val KEY_SPLIT_RATIO = "split_ratio"
 
 /** 아날로그·하이브리드 시계판 숫자. 순서 = 저장값(ordinal) → 새 항목은 끝에 추가할 것. */
 enum class DialNumbers(@StringRes val label: Int) {
@@ -249,6 +250,8 @@ data class ClockSettings(
     val digitalDateColor: DigitalColor = DigitalColor.White,
     /** 자체 화면 분할: 시계 자리 (null = 분할 안 함). 앱을 다시 열어도 유지. */
     val splitSide: SplitSide? = null,
+    /** 자체 화면 분할: 시계가 차지하는 비율 (구분선을 끌어 조절, 두 번 누르면 반반). */
+    val splitRatio: Float = SplitSide.DEFAULT_RATIO,
 ) {
     /** 이미지·동영상·유튜브 배경이 모두 꺼진 검은 배경인지. */
     val isBlackBackground: Boolean
@@ -311,6 +314,7 @@ fun loadClockSettings(context: Context): ClockSettings {
         digitalDate = DigitalDate.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE, d.digitalDate.ordinal)) { d.digitalDate },
         digitalDateColor = DigitalColor.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE_COLOR, d.digitalDateColor.ordinal)) { d.digitalDateColor },
         splitSide = SplitSide.entries.getOrNull(p.getInt(KEY_SPLIT_SIDE, -1)), // -1 = 분할 안 함
+        splitRatio = p.getFloat(KEY_SPLIT_RATIO, d.splitRatio).coerceIn(SplitSide.MIN_RATIO, SplitSide.MAX_RATIO),
     )
 }
 
@@ -338,6 +342,7 @@ fun saveClockSettings(context: Context, s: ClockSettings) {
         putInt(KEY_DIGITAL_DATE, s.digitalDate.ordinal)
         putInt(KEY_DIGITAL_DATE_COLOR, s.digitalDateColor.ordinal)
         putInt(KEY_SPLIT_SIDE, s.splitSide?.ordinal ?: -1)
+        putFloat(KEY_SPLIT_RATIO, s.splitRatio)
     }
 }
 

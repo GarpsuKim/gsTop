@@ -24,6 +24,11 @@ enum class SplitSide(@StringRes val label: Int) {
     }
 
     companion object {
+        /** 시계가 차지하는 비율: 기본 반반, 구분선을 끌어 25% ~ 75% 사이로. */
+        const val DEFAULT_RATIO = 0.5f
+        const val MIN_RATIO = 0.25f
+        const val MAX_RATIO = 0.75f
+
         /** 가로 화면 → 左/右, 세로 화면 → 上/下. */
         fun sides(landscape: Boolean): List<SplitSide> =
             if (landscape) listOf(Left, Right) else listOf(Top, Bottom)

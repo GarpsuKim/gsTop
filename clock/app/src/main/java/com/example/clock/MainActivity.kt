@@ -23,6 +23,9 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalConfiguration
 import com.example.clock.split.SplitSide
 import com.example.clock.ui.AppListPanel
+import com.example.clock.ui.SplitDivider
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -97,25 +100,30 @@ class MainActivity : ComponentActivity() {
             val showWallpaper = transparency > 0f || activeSplit != null
             LaunchedEffect(showWallpaper) { setWallpaperVisible(showWallpaper) }
 
+            // 시계 / 앱 목록 비율: 구분선을 끄는 동안은 이 값만 바뀌고, 손을 떼면 설정에 저장
+            var liveRatio by remember(settings.splitRatio) { mutableFloatStateOf(settings.splitRatio) }
+
             ClockTheme(darkTheme = true) {
-                Box(Modifier.fillMaxSize()) {
-                // 빈 절반: 앱 목록 (누르면 그 앱을 엶)
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                val clockPart = liveRatio
+                val listPart = 1f - liveRatio
+                // 빈 쪽: 앱 목록 (누르면 그 앱을 엶)
                 val appListArea = when (activeSplit) {
                     null -> null
-                    SplitSide.Left -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd)
-                    SplitSide.Right -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterStart)
-                    SplitSide.Top -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.BottomCenter)
-                    SplitSide.Bottom -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.TopCenter)
+                    SplitSide.Left -> Modifier.fillMaxHeight().fillMaxWidth(listPart).align(Alignment.CenterEnd)
+                    SplitSide.Right -> Modifier.fillMaxHeight().fillMaxWidth(listPart).align(Alignment.CenterStart)
+                    SplitSide.Top -> Modifier.fillMaxWidth().fillMaxHeight(listPart).align(Alignment.BottomCenter)
+                    SplitSide.Bottom -> Modifier.fillMaxWidth().fillMaxHeight(listPart).align(Alignment.TopCenter)
                 }
                 if (appListArea != null) {
                     AppListPanel(appListArea.windowInsetsPadding(WindowInsets.safeDrawing))
                 }
                 val clockArea = when (activeSplit) {
                     null -> Modifier.fillMaxSize()
-                    SplitSide.Left -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterStart)
-                    SplitSide.Right -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd)
-                    SplitSide.Top -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.TopCenter)
-                    SplitSide.Bottom -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.BottomCenter)
+                    SplitSide.Left -> Modifier.fillMaxHeight().fillMaxWidth(clockPart).align(Alignment.CenterStart)
+                    SplitSide.Right -> Modifier.fillMaxHeight().fillMaxWidth(clockPart).align(Alignment.CenterEnd)
+                    SplitSide.Top -> Modifier.fillMaxWidth().fillMaxHeight(clockPart).align(Alignment.TopCenter)
+                    SplitSide.Bottom -> Modifier.fillMaxWidth().fillMaxHeight(clockPart).align(Alignment.BottomCenter)
                 }
                 Box(
                     clockArea
@@ -180,6 +188,25 @@ class MainActivity : ComponentActivity() {
                         inSystemSplit = inMultiWindow,
                     )
                 }
+                }
+                // 시계와 앱 목록 사이 구분선: 끌어서 비율 조절, 두 번 누르면 반반
+                if (activeSplit != null) {
+                    val vertical = activeSplit == SplitSide.Left || activeSplit == SplitSide.Right
+                    SplitDivider(
+                        side = activeSplit,
+                        ratio = liveRatio,
+                        totalPx = (if (vertical) constraints.maxWidth else constraints.maxHeight).toFloat(),
+                        onRatioChange = { liveRatio = it },
+                        onDragEnd = {
+                            settings = settings.copy(splitRatio = liveRatio)
+                            saveClockSettings(context, settings)
+                        },
+                        onReset = {
+                            liveRatio = SplitSide.DEFAULT_RATIO
+                            settings = settings.copy(splitRatio = SplitSide.DEFAULT_RATIO)
+                            saveClockSettings(context, settings)
+                        },
+                    )
                 }
                 }
             }
