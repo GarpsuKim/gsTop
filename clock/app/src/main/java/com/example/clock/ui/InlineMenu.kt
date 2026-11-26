@@ -1,5 +1,6 @@
 package com.example.clock.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -101,6 +102,9 @@ fun BoxScope.InlineDropdown(
 fun InlineMenuLayer(host: InlineMenuHost, modifier: Modifier = Modifier) {
     val entry = host.current ?: return
     var origin by remember { mutableStateOf(Offset.Zero) }
+
+    // [뒤로] 버튼: 열린 메뉴만 닫음 (같은 화면 안에 그린 메뉴라, 이게 없으면 [뒤로] 가 앱을 닫아 버림)
+    BackHandler { entry.onDismiss() }
 
     Box(
         modifier

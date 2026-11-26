@@ -12,6 +12,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -82,6 +83,12 @@ class MainActivity : ComponentActivity() {
             receiveWidget(intent) // 앱이 꺼져 있을 때 위젯을 눌러 시작된 경우
         }
         setContent {
+            // [뒤로] 버튼으로는 앱을 닫지 않음. 앱이 닫히는 경우는 두 가지뿐:
+            //  1) 두 손가락 스와이프 (세로 화면 →, 가로 화면 ↑)   2) [닫힘] 시간이 다 됨
+            // 메뉴가 열려 있으면 그 메뉴의 [뒤로] 처리(InlineMenuLayer)가 나중에 등록되어 먼저 받음 → 메뉴만 닫힘.
+            // 설정 창(AlertDialog 등)은 별도 창이라 창이 먼저 받음 → 창만 닫힘.
+            BackHandler { /* 아무것도 하지 않음 = 앱을 닫지 않음 */ }
+
             var settings by remember { mutableStateOf(loadClockSettings(this)) }
 
             val context = this
