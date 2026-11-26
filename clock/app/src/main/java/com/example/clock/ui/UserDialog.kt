@@ -43,19 +43,6 @@ import com.example.clock.UserInfo
 import com.example.clock.UserStore
 import com.example.clock.readPickedPhone
 
-/** [👤 사용자 등록] 버튼: 누르면 사용자 등록 창. */
-@Composable
-fun UserButton(onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.user_register), style = MaterialTheme.typography.labelMedium)
-    }
-}
-
 /** 시스템 연락처 앱에서 "전화번호 하나" 를 고름. 고른 한 건만 읽을 수 있으므로 연락처 권한이 필요 없음. */
 private class PickPhoneNumber : ActivityResultContract<Unit, Uri?>() {
     override fun createIntent(context: Context, input: Unit) =

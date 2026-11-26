@@ -42,6 +42,11 @@
     <string name="power_saving">전원 절약</string>
     <string name="power_section">전원</string>
     <string name="show_seconds_item">초침 표시</string>
+    <string name="show_seconds_on">초침 켜기</string>
+    <string name="show_seconds_off">초침 끄기 (1분에 한 번만 갱신)</string>
+    <string name="split_system">시스템 분할</string>
+    <string name="music_state_playing">재생 중</string>
+    <string name="music_state_paused">일시정지</string>
     <string name="reset">초기화</string>
     <string name="pip">축소</string>
     <string name="pip_failed">축소 화면을 쓸 수 없습니다. 설정 → 애플리케이션 → %1$s → 화면 속 화면 허용을 확인하세요</string>
@@ -85,8 +90,14 @@
     <string name="split">화면분할</string>
     <string name="screen_menu">화면</string>
     <string name="design_menu">디자인</string>
+    <string name="mode_menu">모드</string>
+    <string name="mode_section_display">표시 방식</string>
     <string name="design_section_theme">테마</string>
     <string name="design_section_animation">애니메이션</string>
+    <string name="design_section_numbers">숫자</string>
+    <string name="second_hand_off">off (강한 절전)</string>
+    <string name="second_hand_tick">1초 간격 (보통 절전)</string>
+    <string name="second_hand_smooth">부드럽게 (절전 없음)</string>
     <string name="chime_alarm">시보·알람</string>
     <string name="chime_settings_item">시보 설정</string>
     <string name="chime_state_on">켜짐</string>

@@ -71,90 +71,48 @@ import com.example.clock.chime.ChimeStore
 import java.time.format.DateTimeFormatter
 
 /**
- * [🔔 시보·알람 ▾] 버튼: 시보와 알람을 한 메뉴에서, 구분선으로 나눠서.
- *  - 시보: [시보 설정] → 시보 설정 창 (켜기/끄기, 음악 파일, 연주 시간 …). 오른쪽에 켜짐/꺼짐 표시
- *  - 알람: [알람 열기] → 시스템 시계 앱의 알람 화면
- *  - 닫힘: [닫힘 설정] → 닫힘 설정 창 ([AutoCloseDialog]). 오른쪽에 지금 값 ("무한", "30분" …) 표시
+ * [🔔 시보·알람 ▾] 버튼 (2단계 메뉴, [SectionedMenuButton]). 영역 목록:
+ *  - 시보 (켜짐/꺼짐) → 바로 시보 설정 창 (켜기/끄기, 음악 파일, 연주 시간 …)
+ *  - 알람            → 바로 시스템 시계 앱의 알람 화면
+ *  - 닫힘 (무한/30분 …) → 바로 닫힘 설정 창 ([AutoCloseDialog])
+ * 영역마다 할 일이 하나뿐이라 영역 팝업 없이 바로 실행.
  * 버튼 아이콘으로 시보 켜짐/꺼짐 표시 (설정 창을 닫을 때 다시 읽음).
  */
 @Composable
 fun ChimeAlarmButton(autoClose: AutoClose, onAutoCloseChange: (AutoClose) -> Unit) {
     val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(false) }
     var autoCloseOpen by remember { mutableStateOf(false) }
     var enabled by remember { mutableStateOf(ChimeStore.load(context).enabled) }
 
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(
-                if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.chime_alarm), style = MaterialTheme.typography.labelMedium)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // ── 시보 ──
-            MenuSectionTitle(R.string.chime)
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.chime_settings_item), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = {
-                    Icon(
-                        if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                trailingIcon = {
-                    Text(
-                        stringResource(if (enabled) R.string.chime_state_on else R.string.chime_state_off),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    open = true
-                },
-            )
-            // ── 알람 ──
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.alarm)
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.alarm_open), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { Icon(Icons.Filled.Alarm, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                onClick = {
-                    expanded = false
-                    openSystemAlarms(context)
-                },
-            )
-            // ── 닫힘 ──
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.auto_close_section)
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.auto_close_settings_item), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { Icon(Icons.Filled.Timer, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                // 오른쪽에 지금 값 ("무한", "30분" …)
-                trailingIcon = {
-                    Text(
-                        autoCloseValue(autoClose),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (autoClose != AutoClose.Off) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    autoCloseOpen = true
-                },
-            )
-        }
+    SectionedMenuButton(
+        sections = listOf(
+            MenuSection(
+                title = R.string.chime,
+                icon = if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                value = { stringResource(if (enabled) R.string.chime_state_on else R.string.chime_state_off) },
+                action = { open = true },
+            ),
+            MenuSection(
+                title = R.string.alarm,
+                icon = Icons.Filled.Alarm,
+                action = { openSystemAlarms(context) },
+            ),
+            MenuSection(
+                title = R.string.auto_close_section,
+                icon = Icons.Filled.Timer,
+                value = { autoCloseValue(autoClose) },
+                action = { autoCloseOpen = true },
+            ),
+        ),
+    ) {
+        Icon(
+            if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(stringResource(R.string.chime_alarm), style = MaterialTheme.typography.labelMedium)
     }
 
     if (autoCloseOpen) {

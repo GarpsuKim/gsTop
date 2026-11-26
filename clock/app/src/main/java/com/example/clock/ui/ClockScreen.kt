@@ -51,6 +51,13 @@ import androidx.annotation.StringRes
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Pin
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -70,6 +77,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -485,6 +494,7 @@ fun ClockScreen(
     val latestLandscape by rememberUpdatedState(screenLandscape)
     // 분할 중(자체 분할 또는 시스템 분할)에는 두 손가락 스와이프로 분할하지 않음
     val latestSplitting by rememberUpdatedState(split != null || inSystemSplit)
+    val latestDigitalOnly by rememberUpdatedState(settings.mode == DisplayMode.Digital)
 
     // OLED 번인 방지: 3분마다 시계 화면 전체를 4dp 씩 옮김 (가운데 → 8방향, 27분에 한 바퀴. 눈에 거의 안 띔)
     var burnInStep by remember { mutableIntStateOf(0) }
@@ -516,8 +526,40 @@ fun ClockScreen(
                     }
                 }
             }
+            // 아날로그·하이브리드: 한 손가락 오른쪽 스와이프 → 앱 종료.
+            // 화면을 지나가는 손가락을 보기만 하고 소비하지 않음 (누르기 = 버튼 보이기/숨기기 는 그대로).
+            // 다른 것이 이미 소비한 끌기 (투명도 슬라이더, 메뉴 스크롤, 두 손가락 스와이프) 는 무시.
+            .pointerInput(inPip, digitalOnly) {
+                if (inPip || digitalOnly) return@pointerInput
+                val minPx = OneFingerSwipeMin.toPx()
+                awaitPointerEventScope {
+                    while (true) {
+                        var e = awaitPointerEvent()
+                        if (e.type != PointerEventType.Press || e.changes.count { it.pressed } != 1) continue
+                        val id = e.changes.first { it.pressed }.id
+                        var dx = 0f
+                        var dy = 0f
+                        var valid = true
+                        while (true) {
+                            e = awaitPointerEvent()
+                            if (e.changes.count { it.pressed } > 1) valid = false // 두 손가락이 됨
+                            val c = e.changes.firstOrNull { it.id == id } ?: break
+                            if (c.pressed && c.previousPressed) {
+                                if (c.isConsumed) valid = false
+                                dx += c.position.x - c.previousPosition.x
+                                dy += c.position.y - c.previousPosition.y
+                            }
+                            if (!c.pressed) break
+                        }
+                        if (valid && abs(dx) > abs(dy) && dx >= minPx) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            activity?.finish()
+                        }
+                    }
+                }
+            }
             // 두 손가락 스와이프 → 화면 분할 / 앱 종료 (한 손가락 끌기·누르기는 그대로 아래로 전달)
-            //  가로 화면: → 右 분할, ← 左 분할, ↑ 앱 종료
+            //  가로 화면: → 右 분할 (아날로그·하이브리드는 앱 종료), ← 左 분할, ↑ 앱 종료
             //  세로 화면: ↑ 上 분할, ↓ 下 분할, → 앱 종료
             //  분할은 분할 중에는 동작 안 함, 앱 종료는 언제나 동작
             .pointerInput(inPip) {
@@ -541,12 +583,10 @@ fun ClockScreen(
                             e = awaitPointerEvent(PointerEventPass.Initial)
                         }
                         val landscape = latestLandscape
-                        // 앱 종료: 세로 화면 → 오른쪽으로, 가로 화면 → 위로 (분할 중에도 동작)
-                        val exit = if (landscape) {
-                            abs(dy) > abs(dx) && dy <= -minPx
-                        } else {
-                            abs(dx) > abs(dy) && dx >= minPx
-                        }
+                        // 앱 종료 (분할 중에도 동작): 오른쪽으로 (가로 화면 디지털은 제외 = 右 분할), 가로 화면은 위로도
+                        val right = abs(dx) > abs(dy) && dx >= minPx
+                        val up = abs(dy) > abs(dx) && dy <= -minPx
+                        val exit = (right && (!landscape || !latestDigitalOnly)) || (landscape && up)
                         if (exit) {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             activity?.finish()
@@ -606,14 +646,16 @@ fun ClockScreen(
             AnalogClockArea(settings, style, now, today)
         }
 
-        // 버튼 묶음 A (좌상단): [표시 방식 ▾] + 아날로그/하이브리드 → [☑ 초침],  디지털 → [☑ 굵게] [☑ 네온사인]  + [↺ 초기화]
+        // 버튼 묶음 A (좌상단): [모드 ▾](표시 방식·초기화·사용자 등록)
+        //                      + 디지털 → [☑ 굵게] [☑ 네온사인] [날짜 ▾]  + [⏱ 초침 ▾] [⧉ 화면 ▾]
         val modeControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.Start) { // 왼쪽부터, 좁으면 다음 줄로
-                SmallMenu(
-                    selected = settings.mode,
-                    items = DisplayMode.entries,
-                    label = { stringResource(it.label) },
-                    onSelect = { onSettingsChange(settings.copy(mode = it)) },
+                // [모드 ▾] → 아날로그 / 하이브리드 / 디지털 + 구분선 + 초기화 / 사용자 등록
+                ModeMenu(
+                    mode = settings.mode,
+                    onModeChange = { onSettingsChange(settings.copy(mode = it)) },
+                    onReset = { onSettingsChange(ClockSettings()) },
+                    onUserRegister = { userDialog = true },
                 )
                 if (digitalOnly) {
                     SmallCheck(
@@ -628,30 +670,20 @@ fun ClockScreen(
                     )
                     // [날짜 ▾] → 위치 (끔 / 상 / 하) + 구분선 + 날짜색 을 한 메뉴에서
                     DigitalDateMenu(settings, onSettingsChange)
-                } else {
-                    // [숫자 ▾] → 끔 / 3·6·9·12 / 전부
-                    SmallMenu(
-                        selected = settings.dialNumbers,
-                        items = DialNumbers.entries,
-                        label = { stringResource(it.label) },
-                        onSelect = { onSettingsChange(settings.copy(dialNumbers = it)) },
-                    )
                 }
-                // [⚡ 고급 모드 ▾] / [🔋 전원 절약 ▾] → 전원 모드 + (아날로그·하이브리드) 구분선 + 초침
-                PowerMenu(settings, onSettingsChange, showSecondsItem = !digitalOnly)
-                // [↺ 초기화] → 확인 후 모든 설정을 처음 상태로
-                // [⧉ 화면 ▾] → 축소(화면 속 화면) + 구분선 + 화면 분할 (가로: 左/右, 세로: 上/下, 분할 중이면 분할 해제)
+                // [⏱ 초침 ▾] → off(강한 절전) / 1초 간격(보통 절전) / 부드럽게(절전 없음)  (디지털은 off 없음)
+                SecondHandMenu(settings, onSettingsChange, allowOff = !digitalOnly)
+                // [⧉ 화면 ▾] → 축소 / 上 분할 / 下 분할 (가로: 左/右, 분할 중이면 분할 해제)
                 ScreenMenu(
                     onEnterPip = onEnterPip?.let { pip -> { pip(digitalOnly) } },
                     current = split,
                     systemSplit = inSystemSplit,
                     onSplitChange = if (inPip) null else onSplitChange,
                 )
-                ResetButton(onReset = { onSettingsChange(ClockSettings()) })
             }
         }
 
-        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [🎨 디자인 ▾](테마·애니메이션),  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘) [👤 사용자]
+        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [🎨 디자인 ▾](테마·애니메이션·숫자),  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘)
         val styleControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.End) { // 좁으면 다음 줄로
                 if (digitalOnly) {
@@ -669,7 +701,7 @@ fun ClockScreen(
                         onSelect = { onSettingsChange(settings.copy(digitalColor = it)) },
                     )
                 } else {
-                    // [🎨 디자인 ▾] → 테마 + 구분선 + 애니메이션 을 한 메뉴에서
+                    // [🎨 디자인 ▾] → 테마 / 애니메이션 / 숫자 를 한 메뉴에서
                     DesignMenu(settings, onSettingsChange)
                 }
                 // [🖼 배경 ▾] → 이미지 / 동영상 / 음악 / 유튜브 를 구분선으로 나눈 한 메뉴 (모든 모드 공통)
@@ -686,8 +718,6 @@ fun ClockScreen(
                     autoClose = settings.autoClose,
                     onAutoCloseChange = { onSettingsChange(settings.copy(autoClose = it)) },
                 )
-                // [👤 사용자 등록] → 성명 + 긴급 연락처 (모든 모드 공통)
-                UserButton(onClick = { userDialog = true })
             }
         }
 
@@ -739,14 +769,15 @@ fun ClockScreen(
 
 /** 두 손가락 스와이프를 화면 분할로 볼 최소 이동 거리. */
 private val TwoFingerSwipeMin = 80.dp
+/** 아날로그·하이브리드에서 한 손가락 오른쪽 스와이프를 앱 종료로 볼 최소 이동 거리 (실수로 닫히지 않게 더 길게). */
+private val OneFingerSwipeMin = 120.dp
 
 /**
- * [⧉ 화면 ▾] 버튼: 축소 화면과 화면 분할을 한 메뉴에서, 구분선으로 나눠서.
- *  - 축소: [작은 창으로 축소] → 다른 앱 위에 작은 창으로 (화면 속 화면, PIP)
- *  - 화면 분할 (자체 분할: 시계를 고른 쪽에, 나머지는 앱 목록)
- *      가로 화면 → [左 분할] [右 분할], 세로 화면 → [上 분할] [下 분할]
- *      이미 분할된 상태(자체 분할 또는 시스템 분할)면 [분할 해제] 만
- * [onEnterPip] / [onSplitChange] 가 null 이면 그 구역은 없음. 둘 다 없으면 버튼도 없음.
+ * [⧉ 화면 ▾] 버튼 (한 단계 목록):
+ *  축소 (다른 앱 위에 작은 창, 화면 속 화면 PIP)
+ *  분할 안 됨: 세로 화면 上 분할 / 下 분할, 가로 화면 左 분할 / 右 분할
+ *  이미 분할됨 (자체 분할 또는 시스템 분할): 분할 해제 만
+ * [onEnterPip] / [onSplitChange] 가 null 이면 그 항목은 없음. 둘 다 없으면 버튼도 없음.
  */
 @Composable
 private fun ScreenMenu(
@@ -757,71 +788,39 @@ private fun ScreenMenu(
 ) {
     if (onEnterPip == null && onSplitChange == null) return
     val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(
-                if (landscape) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
+    val splitIcon = if (landscape) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit
+
+    FlatMenuButton(
+        button = {
+            Icon(splitIcon, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
             Text(stringResource(R.string.screen_menu), style = MaterialTheme.typography.labelMedium)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // ── 축소 ──
-            if (onEnterPip != null) {
-                MenuSectionTitle(R.string.pip)
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.pip_item), style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = {
-                        Icon(Icons.Filled.PictureInPictureAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    onClick = {
-                        expanded = false
-                        onEnterPip()
-                    },
-                )
+        },
+    ) { close ->
+        if (onEnterPip != null) {
+            MenuItem(R.string.pip, Icons.Filled.PictureInPictureAlt) {
+                close()
+                onEnterPip()
             }
-            // ── 화면 분할 ──
-            if (onSplitChange == null) return@InlineDropdown
-            if (onEnterPip != null) HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.split)
-            val onChange = onSplitChange
+        }
+        if (onSplitChange != null) {
             if (current != null || systemSplit) {
                 // 이미 분할됨 → [분할 해제] 만
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.split_exit), style = MaterialTheme.typography.bodyMedium) },
-                    onClick = {
-                        expanded = false
-                        onChange(null)
-                        // 시스템 분할은 앱이 직접 풀 수 없음 → 방법 안내
-                        if (systemSplit) {
-                            Toast.makeText(context, R.string.split_system_exit_hint, Toast.LENGTH_LONG).show()
-                        }
-                    },
-                )
+                MenuItem(R.string.split_exit, splitIcon) {
+                    close()
+                    onSplitChange(null)
+                    // 시스템 분할은 앱이 직접 풀 수 없음 → 방법 안내
+                    if (systemSplit) {
+                        Toast.makeText(context, R.string.split_system_exit_hint, Toast.LENGTH_LONG).show()
+                    }
+                }
             } else {
                 SplitSide.sides(landscape).forEach { side ->
-                    DropdownMenuItem(
-                        text = { Text(stringResource(side.label), style = MaterialTheme.typography.bodyMedium) },
-                        leadingIcon = {
-                            Icon(
-                                if (landscape) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        },
-                        onClick = {
-                            expanded = false
-                            onChange(side)
-                        },
-                    )
+                    MenuItem(side.label, splitIcon) {
+                        close()
+                        onSplitChange(side)
+                    }
                 }
             }
         }
@@ -829,21 +828,88 @@ private fun ScreenMenu(
 }
 
 /**
- * 초기화: 확인 창을 띄운 뒤 모든 설정(표시 방식, 테마, 애니메이션, 초침, 글자색,
- * 굵게, 네온사인, 스크롤, 배경 사진)을 처음 상태로 되돌린다. 배경 사진 파일도 지운다.
+ * 한 단계짜리 메뉴 버튼: 누르면 항목 목록이 바로 나옴 ([모드], [초침], [화면]).
+ * [button]: 버튼 안 내용 (끝에 ▾ 는 자동). [items]: 목록 항목 ([close] 를 부르면 닫힘).
  */
 @Composable
-private fun ResetButton(onReset: () -> Unit) {
+private fun FlatMenuButton(
+    button: @Composable RowScope.() -> Unit,
+    items: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            button()
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            items { expanded = false }
+        }
+    }
+}
+
+/** 메뉴 항목 하나: 아이콘 + 이름 (+ 고른 것이면 오른쪽 ✓). */
+@Composable
+private fun MenuItem(
+    @StringRes label: Int,
+    icon: ImageVector? = null,
+    checked: Boolean = false,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(label), style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = icon?.let { { Icon(it, contentDescription = null, modifier = Modifier.size(18.dp)) } },
+        trailingIcon = if (checked) {
+            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+        } else null,
+        onClick = onClick,
+    )
+}
+
+/**
+ * [🕐 모드 ▾] 버튼 (한 단계 목록):
+ *  아날로그 / 하이브리드 / 디지털 (지금 값에 ✓)
+ *  ── 구분선 ──
+ *  초기화 → 확인 창 → [초기화] 를 누르면 모든 설정(표시 방식, 테마, 애니메이션, 초침, 글자색,
+ *    굵게, 네온사인, 스크롤, 배경 사진 …)을 처음 상태로. 배경 사진 파일도 지운다.
+ *  사용자 등록 → 성명 + 긴급 연락처 창
+ * 무엇을 골라도 목록은 닫힘.
+ */
+@Composable
+private fun ModeMenu(
+    mode: DisplayMode,
+    onModeChange: (DisplayMode) -> Unit,
+    onReset: () -> Unit,
+    onUserRegister: () -> Unit,
+) {
     val context = LocalContext.current
     var confirming by remember { mutableStateOf(false) }
 
-    TextButton(
-        onClick = { confirming = true },
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.reset), style = MaterialTheme.typography.labelMedium)
+    FlatMenuButton(
+        button = {
+            Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.mode_menu), style = MaterialTheme.typography.labelMedium)
+        },
+    ) { close ->
+        DisplayMode.entries.forEach { m ->
+            MenuItem(m.label, checked = m == mode) {
+                close()
+                onModeChange(m)
+            }
+        }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        MenuItem(R.string.reset, Icons.Filled.RestartAlt) {
+            close()
+            confirming = true
+        }
+        MenuItem(R.string.user_register, Icons.Filled.Person) {
+            close()
+            onUserRegister()
+        }
     }
 
     if (confirming) {
@@ -866,7 +932,7 @@ private fun ResetButton(onReset: () -> Unit) {
 }
 
 /**
- * [🖼 배경 ▾] 버튼: 배경(이미지) / 배경(동영상) / 음악 을 한 메뉴에서, 구분선으로 나눠서.
+ * [🖼 배경 ▾] 버튼 (2단계 메뉴, [SectionedMenuButton]). 영역 목록 (오른쪽에 켜짐/꺼짐·재생 중) → 영역 팝업:
  *  - 이미지: 지금 사진 / 사진 선택(여러 장 = 슬라이드쇼) / 무한 반복 / 검은색 / 끄기
  *  - 동영상: 지금 파일 / 재생 위치 / 동영상 선택 / 무한 반복 / 소리 / 끄기   ([VideoBackgroundItems])
  *  - 음악:   현재 곡 / 재생 위치 / 재생·일시정지 / 다음 곡 / 다른 음악 / 끄기 ([MusicItems])
@@ -900,7 +966,6 @@ private fun BackgroundButton(
     // 사진을 복사하는 동안 설정이 바뀌어도 최신 값에 반영되도록
     val latestSettings by rememberUpdatedState(settings)
     val latestOnChange by rememberUpdatedState(onSettingsChange)
-    var expanded by remember { mutableStateOf(false) }
 
     // 1장 이상 선택: 1장 = 고정 배경, 여러 장 = 슬라이드쇼
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
@@ -930,216 +995,231 @@ private fun BackgroundButton(
 
     val pickVideo = rememberVideoPicker(settings, onSettingsChange)
     val pickMusic = if (music != null) rememberMusicPicker(music) else null
-    val close = { expanded = false }
+    val checkIcon: @Composable () -> Unit = {
+        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+    }
+    @Composable
+    fun onOff(on: Boolean) = stringResource(if (on) R.string.chime_state_on else R.string.chime_state_off)
 
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(Icons.Filled.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.background_menu), style = MaterialTheme.typography.labelMedium)
-            // 음악이 나오는 중이면 버튼에도 표시
-            if (music?.isPlaying == true) {
-                Spacer(Modifier.width(4.dp))
-                Icon(Icons.Filled.MusicNote, contentDescription = null, modifier = Modifier.size(14.dp))
-            }
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // ── 이미지 ──
-            MenuSectionTitle(R.string.background)
-            val hasImage = settings.backgroundVersion != 0L
-            // 지금(가장 최근) 사진 파일 이름 (이름 기록이 없는 예전 사진이면 표시 안 함)
-            val names by produceState(emptyList<String>(), settings.backgroundVersion) {
-                value = if (hasImage) BackgroundStore.names(context) else emptyList()
-            }
-            if (hasImage && names.isNotEmpty()) {
-                val i = BackgroundStore.shownIndex.coerceIn(0, names.lastIndex)
-                CurrentFileItem(i, names.size, names[i])
-            }
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.background_pick), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                trailingIcon = if (hasImage) {
-                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                } else null,
-                onClick = {
-                    expanded = false
-                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    val sections = buildList {
+        // ── 이미지 ──
+        add(
+            MenuSection(
+                title = R.string.background,
+                icon = Icons.Filled.Image,
+                value = { onOff(settings.backgroundVersion != 0L) },
+            ) { close ->
+                val hasImage = settings.backgroundVersion != 0L
+                // 지금(가장 최근) 사진 파일 이름 (이름 기록이 없는 예전 사진이면 표시 안 함)
+                val names by produceState(emptyList<String>(), settings.backgroundVersion) {
+                    value = if (hasImage) BackgroundStore.names(context) else emptyList()
+                }
+                if (hasImage && names.isNotEmpty()) {
+                    val i = BackgroundStore.shownIndex.coerceIn(0, names.lastIndex)
+                    CurrentFileItem(i, names.size, names[i])
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.background_pick), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    trailingIcon = if (hasImage) checkIcon else null,
+                    onClick = {
+                        close()
+                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                )
+                // 슬라이드쇼 무한 반복 On/Off (사진을 고르기 전에도 정할 수 있게 항상 표시)
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.image_repeat), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = {
+                        Icon(
+                            if (settings.imageRepeat) Icons.Filled.Repeat else Icons.Filled.RepeatOne,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    trailingIcon = {
+                        Checkbox(checked = settings.imageRepeat, onCheckedChange = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = { onSettingsChange(settings.copy(imageRepeat = !settings.imageRepeat)) },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.background_black), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { ColorDot(Color.Black) },
+                    trailingIcon = if (!hasImage) checkIcon else null,
+                    onClick = {
+                        close()
+                        BackgroundStore.clear(context)
+                        onSettingsChange(settings.copy(backgroundVersion = 0L))
+                    },
+                )
+                // 끄기: 고른 사진을 지우고 검은 배경으로 (사진이 없으면 흐리게)
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.image_off), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { Icon(Icons.Filled.HideImage, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    enabled = hasImage,
+                    onClick = {
+                        close()
+                        BackgroundStore.clear(context)
+                        onSettingsChange(settings.copy(backgroundVersion = 0L))
+                    },
+                )
+            },
+        )
+        // ── 동영상 ──
+        add(
+            MenuSection(
+                title = R.string.video_background,
+                icon = Icons.Filled.VideoLibrary,
+                value = { onOff(settings.videoUris.isNotEmpty()) },
+            ) { close ->
+                VideoBackgroundItems(settings, onSettingsChange, video, onPick = pickVideo, close = close)
+            },
+        )
+        // ── 음악 ──
+        if (music != null && pickMusic != null) add(
+            MenuSection(
+                title = R.string.music,
+                icon = Icons.Filled.MusicNote,
+                value = {
+                    when {
+                        music.isPlaying -> stringResource(R.string.music_state_playing)
+                        music.tracks.isNotEmpty() -> stringResource(R.string.music_state_paused)
+                        else -> onOff(false)
+                    }
                 },
-            )
-            // 슬라이드쇼 무한 반복 On/Off (사진을 고르기 전에도 정할 수 있게 항상 표시)
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.image_repeat), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = {
-                    Icon(
-                        if (settings.imageRepeat) Icons.Filled.Repeat else Icons.Filled.RepeatOne,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                trailingIcon = {
-                    Checkbox(checked = settings.imageRepeat, onCheckedChange = null, modifier = Modifier.size(18.dp))
-                },
-                onClick = { onSettingsChange(settings.copy(imageRepeat = !settings.imageRepeat)) },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.background_black), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { ColorDot(Color.Black) },
-                trailingIcon = if (!hasImage) {
-                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                } else null,
-                onClick = {
-                    expanded = false
-                    BackgroundStore.clear(context)
-                    onSettingsChange(settings.copy(backgroundVersion = 0L))
-                },
-            )
-            // 끄기: 고른 사진을 지우고 검은 배경으로 (사진이 없으면 흐리게)
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.image_off), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { Icon(Icons.Filled.HideImage, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                enabled = hasImage,
-                onClick = {
-                    expanded = false
-                    BackgroundStore.clear(context)
-                    onSettingsChange(settings.copy(backgroundVersion = 0L))
-                },
-            )
-
-            // ── 동영상 ──
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.video_background)
-            VideoBackgroundItems(settings, onSettingsChange, video, onPick = pickVideo, close = close)
-
-            // ── 음악 ──
-            if (music != null && pickMusic != null) {
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                MenuSectionTitle(R.string.music)
+            ) { close ->
                 MusicItems(music, onPick = pickMusic, close = close)
-            }
+            },
+        )
+        // ── 유튜브 ──
+        add(
+            MenuSection(
+                title = R.string.youtube,
+                icon = Icons.Filled.SmartDisplay,
+                value = { onOff(settings.youtubeUrl.isNotBlank()) },
+            ) { close ->
+                YouTubeItems(
+                    url = settings.youtubeUrl,
+                    sound = settings.youtubeSound,
+                    onChange = onYouTubeChange,
+                    dialog = youTubeDialog,
+                    close = close,
+                )
+            },
+        )
+    }
 
-            // ── 유튜브 ──
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.youtube)
-            YouTubeItems(
-                url = settings.youtubeUrl,
-                sound = settings.youtubeSound,
-                onChange = onYouTubeChange,
-                dialog = youTubeDialog,
-                close = close,
-            )
+    SectionedMenuButton(sections) {
+        Icon(Icons.Filled.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(stringResource(R.string.background_menu), style = MaterialTheme.typography.labelMedium)
+        // 음악이 나오는 중이면 버튼에도 표시
+        if (music?.isPlaying == true) {
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Filled.MusicNote, contentDescription = null, modifier = Modifier.size(14.dp))
         }
     }
 }
 
 /**
- * 디지털 [날짜 ▾] 버튼: 한 메뉴에서 구분선으로 나눠
- *  - 위치: 날짜 끔 / 날짜(상) / 날짜(하)
- *  - 날짜색: 흰색 ~ 무지개 (날짜를 켰을 때만 고를 수 있음, 끄면 흐리게)
- * 버튼에는 지금 위치와, 날짜를 켰으면 날짜색 동그라미를 표시.
- * 위치·색을 골라도 메뉴는 열려 있어서 바로 이어서 고를 수 있음.
+ * 디지털 [날짜 ▾] 버튼 (2단계 메뉴, [SectionedMenuButton]). 영역 목록:
+ *  - 위치 (지금: 날짜 끔 / 날짜(상) / 날짜(하)) → 영역 팝업
+ *  - 날짜색 (지금: 흰색 …) → 영역 팝업: 흰색 ~ 무지개 (날짜를 껐을 때는 흐리게, 고를 수 없음)
+ * 버튼에는 지금 위치와, 날짜를 켰으면 날짜색 동그라미. 영역 팝업에서 골라도 팝업은 열려 있음.
  */
 @Composable
 private fun DigitalDateMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
     val dateOn = settings.digitalDate != DigitalDate.Off
     val checkIcon: @Composable () -> Unit = {
         Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
     }
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            if (dateOn) {
-                ColorSwatch(settings.digitalDateColor)
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(stringResource(settings.digitalDate.label), style = MaterialTheme.typography.labelMedium)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+    SectionedMenuButton(
+        sections = listOf(
+            MenuSection(
+                title = R.string.date_section_position,
+                icon = Icons.Filled.CalendarMonth,
+                value = { stringResource(settings.digitalDate.label) },
+            ) {
+                DigitalDate.entries.forEach { d ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(d.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (d == settings.digitalDate) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(digitalDate = d)) },
+                    )
+                }
+            },
+            MenuSection(
+                title = R.string.date_section_color,
+                icon = Icons.Filled.Palette,
+                value = {
+                    if (dateOn) stringResource(settings.digitalDateColor.label) else stringResource(R.string.chime_state_off)
+                },
+            ) {
+                DigitalColor.entries.forEach { c ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(c.label), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { ColorSwatch(c) },
+                        trailingIcon = if (dateOn && c == settings.digitalDateColor) checkIcon else null,
+                        enabled = dateOn,
+                        onClick = { onSettingsChange(settings.copy(digitalDateColor = c)) },
+                    )
+                }
+            },
+        ),
+    ) {
+        if (dateOn) {
+            ColorSwatch(settings.digitalDateColor)
+            Spacer(Modifier.width(6.dp))
         }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // ── 위치 ──
-            MenuSectionTitle(R.string.date_section_position)
-            DigitalDate.entries.forEach { d ->
-                DropdownMenuItem(
-                    text = { Text(stringResource(d.label), style = MaterialTheme.typography.bodyMedium) },
-                    trailingIcon = if (d == settings.digitalDate) checkIcon else null,
-                    onClick = { onSettingsChange(settings.copy(digitalDate = d)) },
-                )
-            }
-            // ── 날짜색 ──
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.date_section_color)
-            DigitalColor.entries.forEach { c ->
-                DropdownMenuItem(
-                    text = { Text(stringResource(c.label), style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = { ColorSwatch(c) },
-                    trailingIcon = if (dateOn && c == settings.digitalDateColor) checkIcon else null,
-                    enabled = dateOn,
-                    onClick = { onSettingsChange(settings.copy(digitalDateColor = c)) },
-                )
-            }
-        }
+        Text(stringResource(settings.digitalDate.label), style = MaterialTheme.typography.labelMedium)
     }
 }
 
 /**
- * [⚡ 고급 모드 ▾] / [🔋 전원 절약 ▾] 버튼 (버튼에는 지금 모드): 한 메뉴에서 구분선으로 나눠
- *  - 전원: 고급 모드 / 전원 절약
- *  - 초침 (아날로그·하이브리드만, [showSecondsItem]): 초침 표시 켜기/끄기.
- *    초침을 끄면 1분에 한 번만 갱신해서 전기를 더 아낌.
- * 골라도 메뉴는 열려 있음.
+ * [⏱ 초침 ▾] 목록 항목 = 초침 표시 + 전원 모드 묶음.
+ *  - off (강한 절전): 초침 없음 → 1분에 한 번만 갱신, 애니메이션 초당 15장
+ *  - 1초 간격 (보통 절전): 초침 똑딱 (1초에 한 번), 애니메이션 초당 15장
+ *  - 부드럽게 (절전 없음): 초침이 부드럽게 흐름 (1초에 20번), 애니메이션 화면 최대 속도
+ */
+private enum class SecondHand(@StringRes val label: Int, val showSeconds: Boolean, val power: PowerMode) {
+    Off(R.string.second_hand_off, false, PowerMode.Saving),
+    Tick(R.string.second_hand_tick, true, PowerMode.Saving),
+    Smooth(R.string.second_hand_smooth, true, PowerMode.Advanced),
+}
+
+/**
+ * [⏱ 초침 ▾] 버튼 (한 단계 목록): off(강한 절전) / 1초 간격(보통 절전) / 부드럽게(절전 없음).
+ * 디지털 ([allowOff] = false) 은 초가 늘 보이므로 off 없이 두 항목만, 고르면 전원 모드만 바꿈
+ * (아날로그·하이브리드의 초침 끔 설정은 그대로 둠).
  */
 @Composable
-private fun PowerMenu(
+private fun SecondHandMenu(
     settings: ClockSettings,
     onSettingsChange: (ClockSettings) -> Unit,
-    showSecondsItem: Boolean,
+    allowOff: Boolean,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    @Composable
-    fun modeIcon(mode: PowerMode, size: Dp) = Icon(
-        if (mode == PowerMode.Saving) Icons.Filled.BatterySaver else Icons.Filled.Bolt,
-        contentDescription = null,
-        modifier = Modifier.size(size),
-    )
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            modeIcon(settings.powerMode, 16.dp)
-            Spacer(Modifier.width(6.dp))
-            Text(stringResource(settings.powerMode.label), style = MaterialTheme.typography.labelMedium)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // ── 전원 ──
-            MenuSectionTitle(R.string.power_section)
-            PowerMode.entries.forEach { m ->
-                DropdownMenuItem(
-                    text = { Text(stringResource(m.label), style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = { modeIcon(m, 18.dp) },
-                    trailingIcon = if (m == settings.powerMode) {
-                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    } else null,
-                    onClick = { onSettingsChange(settings.copy(powerMode = m)) },
-                )
-            }
-            // ── 초침 ──
-            if (showSecondsItem) {
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                MenuSectionTitle(R.string.show_seconds)
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.show_seconds_item), style = MaterialTheme.typography.bodyMedium) },
-                    trailingIcon = {
-                        Checkbox(checked = settings.showSeconds, onCheckedChange = null, modifier = Modifier.size(18.dp))
-                    },
-                    onClick = { onSettingsChange(settings.copy(showSeconds = !settings.showSeconds)) },
+    val current = when {
+        allowOff && !settings.showSeconds -> SecondHand.Off
+        settings.powerMode == PowerMode.Saving -> SecondHand.Tick
+        else -> SecondHand.Smooth
+    }
+    FlatMenuButton(
+        button = {
+            Icon(Icons.Filled.Timer, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.show_seconds), style = MaterialTheme.typography.labelMedium)
+        },
+    ) { close ->
+        SecondHand.entries.filter { allowOff || it != SecondHand.Off }.forEach { h ->
+            MenuItem(
+                label = h.label,
+                icon = if (h.power == PowerMode.Saving) Icons.Filled.BatterySaver else Icons.Filled.Bolt,
+                checked = h == current,
+            ) {
+                close()
+                onSettingsChange(
+                    if (allowOff) settings.copy(showSeconds = h.showSeconds, powerMode = h.power)
+                    else settings.copy(powerMode = h.power),
                 )
             }
         }
@@ -1147,48 +1227,63 @@ private fun PowerMenu(
 }
 
 /**
- * 아날로그·하이브리드 [🎨 디자인 ▾] 버튼: 한 메뉴에서 구분선으로 나눠
- *  - 테마: 기본 / 무지개 / 네온 / 오션 … (시계판·바늘 색)
- *  - 애니메이션: 끄기 / 별빛 반짝임 / 초 단위 펄스 … (시계 뒤 움직이는 배경)
- * 버튼에는 지금 테마 이름. 골라도 메뉴는 열려 있어서 테마와 애니메이션을 이어서 바꿔 볼 수 있음.
+ * 아날로그·하이브리드 [🎨 디자인 ▾] 버튼 (2단계 메뉴, [SectionedMenuButton]):
+ *  1. 영역 목록: [테마 › 오션] [애니메이션 › 눈 내리는 밤] [숫자 › 숫자 끔]   ← 이름 + 지금 값만
+ *  2. 영역 팝업: 테마 → 기본 / 무지개 / 네온 / 오션 …,  애니메이션 → 끄기 / 별빛 반짝임 …,
+ *               숫자 → 숫자 끔 / 숫자 3·6·9·12 / 숫자 전부
+ * 영역 팝업에서 골라도 팝업은 열려 있어서 여러 개를 바로 바꿔 볼 수 있음.
  */
 @Composable
 private fun DesignMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
     val checkIcon: @Composable () -> Unit = {
         Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
     }
-    Box {
-        TextButton(
-            onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.design_menu), style = MaterialTheme.typography.labelMedium)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // ── 테마 ──
-            MenuSectionTitle(R.string.design_section_theme)
-            DialTheme.entries.forEach { t ->
-                DropdownMenuItem(
-                    text = { Text(stringResource(t.label), style = MaterialTheme.typography.bodyMedium) },
-                    trailingIcon = if (t == settings.theme) checkIcon else null,
-                    onClick = { onSettingsChange(settings.copy(theme = t)) },
-                )
-            }
-            // ── 애니메이션 ──
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            MenuSectionTitle(R.string.design_section_animation)
-            DialAnimation.entries.forEach { a ->
-                DropdownMenuItem(
-                    text = { Text(stringResource(a.label), style = MaterialTheme.typography.bodyMedium) },
-                    trailingIcon = if (a == settings.animation) checkIcon else null,
-                    onClick = { onSettingsChange(settings.copy(animation = a)) },
-                )
-            }
-        }
+    SectionedMenuButton(
+        sections = listOf(
+            MenuSection(
+                title = R.string.design_section_theme,
+                icon = Icons.Filled.Palette,
+                value = { stringResource(settings.theme.label) },
+            ) {
+                DialTheme.entries.forEach { t ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(t.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (t == settings.theme) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(theme = t)) },
+                    )
+                }
+            },
+            MenuSection(
+                title = R.string.design_section_animation,
+                icon = Icons.Filled.AutoAwesome,
+                value = { stringResource(settings.animation.label) },
+            ) {
+                DialAnimation.entries.forEach { a ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(a.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (a == settings.animation) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(animation = a)) },
+                    )
+                }
+            },
+            MenuSection(
+                title = R.string.design_section_numbers,
+                icon = Icons.Filled.Pin,
+                value = { stringResource(settings.dialNumbers.label) },
+            ) {
+                DialNumbers.entries.forEach { n ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(n.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (n == settings.dialNumbers) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(dialNumbers = n)) },
+                    )
+                }
+            },
+        ),
+    ) {
+        Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(stringResource(R.string.design_menu), style = MaterialTheme.typography.labelMedium)
     }
 }
 
