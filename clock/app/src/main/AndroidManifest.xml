@@ -18,12 +18,18 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 시보: 연주 중 알림 ([정지] 버튼). 거부해도 시보는 울림 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 자체 화면 분할 앱 목록에 삼성 홈 화면의 폴더(그룹)를 보여 주려고 홈 화면 배치를 읽음.
+         삼성 홈(One UI Home)이 다른 앱용으로 열어 둔 읽기 권한 (일반 권한, 사용자 동의 창 없음).
+         삼성 폰이 아니면 권한이 없는 것과 같아서 폴더 없이 앱 목록만 보임. -->
+    <uses-permission android:name="com.samsung.android.launcher.permission.READ_SETTINGS" />
     <!-- 자체 화면 분할의 빈 절반에 앱 목록을 보여 주려면 (Android 11+ 다른 앱 보기 제한) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- 삼성 홈 화면 배치 (폴더) 읽기 -->
+        <provider android:authorities="com.sec.android.app.launcher.settings" />
     </queries>
     <!-- 전화 기능이 없는 기기(태블릿)에도 설치 가능하도록 -->
     <uses-feature android:name="android.hardware.telephony" android:required="false" />

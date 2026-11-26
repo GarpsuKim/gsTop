@@ -128,6 +128,8 @@
     <string name="app_search_none">찾는 앱이 없습니다</string>
     <string name="app_section_pinned">고정</string>
     <string name="app_section_all">모든 앱</string>
+    <string name="app_section_folders">홈 화면 폴더</string>
+    <string name="app_folder_untitled">폴더</string>
     <string name="app_pin_hint">앱을 길게 누르면 위에 고정됩니다</string>
     <string name="app_pinned">위에 고정했습니다</string>
     <string name="app_unpinned">고정을 풀었습니다</string>

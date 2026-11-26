@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -20,6 +24,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.key
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -148,6 +154,53 @@ private fun AppCell(app: LauncherApp, isPinned: Boolean, onClick: () -> Unit, on
 /** 아이콘 크기. */
 private val AppIconSize = 48.dp
 
+/** 홈 화면 폴더를 이 목록의 앱으로 바꾼 것. */
+private class FolderView(val id: Long, val title: String, val apps: List<LauncherApp>)
+
+/**
+ * 폴더 한 칸: 홈 화면 폴더처럼 둥근 사각형 안에 앞쪽 앱 4개의 작은 아이콘 (2×2) + 폴더 이름.
+ * 누르면 폴더를 엶 (폴더 안 앱만 보임).
+ */
+@Composable
+private fun FolderCell(folder: FolderView, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            Modifier
+                .size(AppIconSize)
+                .background(Color(0x55FFFFFF), RoundedCornerShape(14.dp))
+                .padding(5.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            folder.apps.take(4).chunked(2).forEach { rowApps ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    rowApps.forEach { app ->
+                        Image(app.icon, contentDescription = null, modifier = Modifier.size(FolderMiniIconSize))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            folder.title.ifBlank { stringResource(R.string.app_folder_untitled) },
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 폴더 칸 안의 작은 아이콘 크기 (48dp 칸 - 여백 5dp×2 에 2개 + 사이 틈). */
+private val FolderMiniIconSize = 17.dp
+
 /**
  * 자체 화면 분할의 빈 절반: 폰에 설치된 앱 목록 (홈 화면 앱 서랍과 같은 목록, 이름순).
  * 위에 검색창: 이름 일부 또는 초성으로 거름. 키보드가 뜨면 목록이 키보드 위로 줄어듦 (safeDrawing 여백).
@@ -158,10 +211,31 @@ private val AppIconSize = 48.dp
 fun AppListPanel(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val iconPx = with(LocalDensity.current) { AppIconSize.roundToPx() }
-    // 분할할 때마다 새로 읽음 (그 사이 설치·삭제한 앱 반영). 아이콘 변환은 화면이 멈추지 않게 백그라운드에서
-    val apps by produceState<List<LauncherApp>?>(null, iconPx) {
-        value = withContext(Dispatchers.IO) { loadLauncherApps(context, iconPx) }
+    // 분할할 때마다 새로 읽음 (그 사이 설치·삭제한 앱, 홈 화면 폴더 변경 반영).
+    // 아이콘 변환은 화면이 멈추지 않게 백그라운드에서
+    val loaded by produceState<Pair<List<LauncherApp>, List<HomeFolder>>?>(null, iconPx) {
+        value = withContext(Dispatchers.IO) { loadLauncherApps(context, iconPx) to loadHomeFolders(context) }
     }
+    val apps = loaded?.first
+    // 홈 화면 폴더 → 이 목록의 앱으로 (목록에 없는 앱은 빠지고, 비면 폴더도 빠짐).
+    // 같은 액티비티가 없으면 같은 패키지의 앱으로 맞춤 (홈 화면에 다른 시작 화면이 저장된 경우)
+    val folders = remember(loaded) {
+        val all = loaded?.first.orEmpty()
+        val byKey = all.associateBy { it.key }
+        val byPackage = all.groupBy { it.component.packageName }
+        loaded?.second.orEmpty().mapNotNull { f ->
+            val list = f.appKeys.mapNotNull { key ->
+                byKey[key] ?: ComponentName.unflattenFromString(key)?.let { byPackage[it.packageName]?.firstOrNull() }
+            }.distinctBy { it.key }
+            if (list.isEmpty()) null else FolderView(f.id, f.title, list)
+        }
+    }
+    // 열어 본 폴더 (null = 목록 화면). [뒤로] = 폴더 닫기
+    var openFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val openFolder = folders.firstOrNull { it.id == openFolderId }
+    BackHandler(enabled = openFolder != null) { openFolderId = null }
+    // 전체 목록 스크롤 위치 (폴더를 여는 동안 목록이 화면에서 빠져도 기억)
+    val mainGridState = rememberLazyGridState()
 
     // 검색어 (화면을 돌려도 유지)
     var query by rememberSaveable { mutableStateOf("") }
@@ -174,7 +248,10 @@ fun AppListPanel(modifier: Modifier = Modifier) {
         // 검색창: 이름 일부 또는 초성 (예: "카톡", "ㅋㅋㅇ" → 카카오톡)
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = {
+                query = it
+                openFolderId = null // 검색하면 폴더에서 나와 전체에서 찾음
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 8.dp, end = 8.dp, top = 8.dp),
@@ -227,8 +304,49 @@ fun AppListPanel(modifier: Modifier = Modifier) {
                     Toast.LENGTH_SHORT,
                 ).show()
             }
-            LazyVerticalGrid(
+            val showFolders = folders.isNotEmpty() && query.isBlank()
+            if (openFolder != null && query.isBlank()) {
+                // 폴더 안: 맨 위 [‹ 폴더 이름] (스크롤해도 늘 보임, 누르면 닫기) + 폴더 안 앱 (홈 화면 순서).
+                // 폴더마다 새 목록이라 늘 맨 위부터 보임
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier
+                            .padding(start = 8.dp, end = 8.dp, top = 6.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { openFolderId = null }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            openFolder.title.ifBlank { stringResource(R.string.app_folder_untitled) },
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color.White,
+                        )
+                    }
+                    key(openFolder.id) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 76.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            items(openFolder.apps, key = { "in-folder:" + it.key }) { app ->
+                                AppCell(app, isPinned = app.key in pinned, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
+                            }
+                        }
+                    }
+                }
+            } else LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 76.dp),
+                // 전체 목록의 스크롤 위치는 폴더를 열었다 닫아도 그대로 (보던 폴더 자리로 돌아옴)
+                state = mainGridState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -238,7 +356,8 @@ fun AppListPanel(modifier: Modifier = Modifier) {
                     items(pinnedList, key = { "pin:" + it.key }) { app ->
                         AppCell(app, isPinned = true, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
                     }
-                    if (restList.isNotEmpty()) sectionHeader(R.string.app_section_all)
+                    // "모든 앱" 제목은 폴더 구역이 있으면 그 아래에서 (제목이 두 번 나오지 않게)
+                    if (restList.isNotEmpty() && !showFolders) sectionHeader(R.string.app_section_all)
                 } else if (pinned.isEmpty() && query.isBlank()) {
                     // 아직 고정한 앱이 없으면 방법 안내
                     item(key = "hint", span = { GridItemSpan(maxLineSpan) }) {
@@ -250,6 +369,14 @@ fun AppListPanel(modifier: Modifier = Modifier) {
                             modifier = Modifier.padding(bottom = 4.dp),
                         )
                     }
+                }
+                // 홈 화면 폴더 (검색 중에는 숨김: 앱을 하나하나 거름)
+                if (showFolders) {
+                    sectionHeader(R.string.app_section_folders)
+                    items(folders, key = { "folder:" + it.id }) { folder ->
+                        FolderCell(folder, onClick = { openFolderId = folder.id })
+                    }
+                    if (restList.isNotEmpty()) sectionHeader(R.string.app_section_all)
                 }
                 items(restList, key = { it.key }) { app ->
                     AppCell(app, isPinned = false, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
