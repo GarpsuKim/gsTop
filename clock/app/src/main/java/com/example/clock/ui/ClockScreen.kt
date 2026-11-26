@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.annotation.StringRes
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -377,7 +378,6 @@ fun ClockScreen(
     inSystemSplit: Boolean = false,
 ) {
     val theme = settings.theme
-    val animation = settings.animation
     var now by remember { mutableStateOf(LocalTime.now()) }
     var today by remember { mutableStateOf(LocalDate.now()) }
 
@@ -629,11 +629,6 @@ fun ClockScreen(
                     // [날짜 ▾] → 위치 (끔 / 상 / 하) + 구분선 + 날짜색 을 한 메뉴에서
                     DigitalDateMenu(settings, onSettingsChange)
                 } else {
-                    SmallCheck(
-                        label = stringResource(R.string.show_seconds),
-                        checked = settings.showSeconds,
-                        onCheckedChange = { onSettingsChange(settings.copy(showSeconds = it)) },
-                    )
                     // [숫자 ▾] → 끔 / 3·6·9·12 / 전부
                     SmallMenu(
                         selected = settings.dialNumbers,
@@ -642,20 +637,8 @@ fun ClockScreen(
                         onSelect = { onSettingsChange(settings.copy(dialNumbers = it)) },
                     )
                 }
-                // [⚡ 고급 모드 ▾] / [전원 절약 모드 ▾]
-                SmallMenu(
-                    selected = settings.powerMode,
-                    items = PowerMode.entries,
-                    label = { stringResource(it.label) },
-                    icon = {
-                        Icon(
-                            if (it == PowerMode.Saving) Icons.Filled.BatterySaver else Icons.Filled.Bolt,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    },
-                    onSelect = { onSettingsChange(settings.copy(powerMode = it)) },
-                )
+                // [⚡ 고급 모드 ▾] / [🔋 전원 절약 ▾] → 전원 모드 + (아날로그·하이브리드) 구분선 + 초침
+                PowerMenu(settings, onSettingsChange, showSecondsItem = !digitalOnly)
                 // [↺ 초기화] → 확인 후 모든 설정을 처음 상태로
                 // [⧉ 화면 ▾] → 축소(화면 속 화면) + 구분선 + 화면 분할 (가로: 左/右, 세로: 上/下, 분할 중이면 분할 해제)
                 ScreenMenu(
@@ -668,7 +651,7 @@ fun ClockScreen(
             }
         }
 
-        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘) [👤 사용자]
+        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [🎨 디자인 ▾](테마·애니메이션),  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘) [👤 사용자]
         val styleControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.End) { // 좁으면 다음 줄로
                 if (digitalOnly) {
@@ -686,18 +669,8 @@ fun ClockScreen(
                         onSelect = { onSettingsChange(settings.copy(digitalColor = it)) },
                     )
                 } else {
-                    SmallMenu(
-                        selected = animation,
-                        items = DialAnimation.entries,
-                        label = { stringResource(it.label) },
-                        onSelect = { onSettingsChange(settings.copy(animation = it)) },
-                    )
-                    SmallMenu(
-                        selected = theme,
-                        items = DialTheme.entries,
-                        label = { stringResource(it.label) },
-                        onSelect = { onSettingsChange(settings.copy(theme = it)) },
-                    )
+                    // [🎨 디자인 ▾] → 테마 + 구분선 + 애니메이션 을 한 메뉴에서
+                    DesignMenu(settings, onSettingsChange)
                 }
                 // [🖼 배경 ▾] → 이미지 / 동영상 / 음악 / 유튜브 를 구분선으로 나눈 한 메뉴 (모든 모드 공통)
                 BackgroundButton(
@@ -1108,6 +1081,111 @@ private fun DigitalDateMenu(settings: ClockSettings, onSettingsChange: (ClockSet
                     trailingIcon = if (dateOn && c == settings.digitalDateColor) checkIcon else null,
                     enabled = dateOn,
                     onClick = { onSettingsChange(settings.copy(digitalDateColor = c)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * [⚡ 고급 모드 ▾] / [🔋 전원 절약 ▾] 버튼 (버튼에는 지금 모드): 한 메뉴에서 구분선으로 나눠
+ *  - 전원: 고급 모드 / 전원 절약
+ *  - 초침 (아날로그·하이브리드만, [showSecondsItem]): 초침 표시 켜기/끄기.
+ *    초침을 끄면 1분에 한 번만 갱신해서 전기를 더 아낌.
+ * 골라도 메뉴는 열려 있음.
+ */
+@Composable
+private fun PowerMenu(
+    settings: ClockSettings,
+    onSettingsChange: (ClockSettings) -> Unit,
+    showSecondsItem: Boolean,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    @Composable
+    fun modeIcon(mode: PowerMode, size: Dp) = Icon(
+        if (mode == PowerMode.Saving) Icons.Filled.BatterySaver else Icons.Filled.Bolt,
+        contentDescription = null,
+        modifier = Modifier.size(size),
+    )
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            modeIcon(settings.powerMode, 16.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(stringResource(settings.powerMode.label), style = MaterialTheme.typography.labelMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // ── 전원 ──
+            MenuSectionTitle(R.string.power_section)
+            PowerMode.entries.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(m.label), style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { modeIcon(m, 18.dp) },
+                    trailingIcon = if (m == settings.powerMode) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else null,
+                    onClick = { onSettingsChange(settings.copy(powerMode = m)) },
+                )
+            }
+            // ── 초침 ──
+            if (showSecondsItem) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                MenuSectionTitle(R.string.show_seconds)
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.show_seconds_item), style = MaterialTheme.typography.bodyMedium) },
+                    trailingIcon = {
+                        Checkbox(checked = settings.showSeconds, onCheckedChange = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = { onSettingsChange(settings.copy(showSeconds = !settings.showSeconds)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 아날로그·하이브리드 [🎨 디자인 ▾] 버튼: 한 메뉴에서 구분선으로 나눠
+ *  - 테마: 기본 / 무지개 / 네온 / 오션 … (시계판·바늘 색)
+ *  - 애니메이션: 끄기 / 별빛 반짝임 / 초 단위 펄스 … (시계 뒤 움직이는 배경)
+ * 버튼에는 지금 테마 이름. 골라도 메뉴는 열려 있어서 테마와 애니메이션을 이어서 바꿔 볼 수 있음.
+ */
+@Composable
+private fun DesignMenu(settings: ClockSettings, onSettingsChange: (ClockSettings) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val checkIcon: @Composable () -> Unit = {
+        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+    }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.design_menu), style = MaterialTheme.typography.labelMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // ── 테마 ──
+            MenuSectionTitle(R.string.design_section_theme)
+            DialTheme.entries.forEach { t ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(t.label), style = MaterialTheme.typography.bodyMedium) },
+                    trailingIcon = if (t == settings.theme) checkIcon else null,
+                    onClick = { onSettingsChange(settings.copy(theme = t)) },
+                )
+            }
+            // ── 애니메이션 ──
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.design_section_animation)
+            DialAnimation.entries.forEach { a ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(a.label), style = MaterialTheme.typography.bodyMedium) },
+                    trailingIcon = if (a == settings.animation) checkIcon else null,
+                    onClick = { onSettingsChange(settings.copy(animation = a)) },
                 )
             }
         }

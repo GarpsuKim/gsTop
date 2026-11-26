@@ -39,7 +39,9 @@
     <string name="music_failed">음악을 재생할 수 없습니다</string>
     <string name="transparency">투명도</string>
     <string name="power_advanced">고급 모드</string>
-    <string name="power_saving">전원 절약 모드</string>
+    <string name="power_saving">전원 절약</string>
+    <string name="power_section">전원</string>
+    <string name="show_seconds_item">초침 표시</string>
     <string name="reset">초기화</string>
     <string name="pip">축소</string>
     <string name="pip_failed">축소 화면을 쓸 수 없습니다. 설정 → 애플리케이션 → %1$s → 화면 속 화면 허용을 확인하세요</string>
@@ -82,6 +84,9 @@
     <string name="numbers_all">숫자 전부</string>
     <string name="split">화면분할</string>
     <string name="screen_menu">화면</string>
+    <string name="design_menu">디자인</string>
+    <string name="design_section_theme">테마</string>
+    <string name="design_section_animation">애니메이션</string>
     <string name="chime_alarm">시보·알람</string>
     <string name="chime_settings_item">시보 설정</string>
     <string name="chime_state_on">켜짐</string>
