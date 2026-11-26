@@ -43,6 +43,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.annotation.StringRes
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.core.content.edit
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,7 +71,79 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** 앱 목록의 한 칸. */
-private class LauncherApp(val label: String, val component: ComponentName, val icon: ImageBitmap)
+private class LauncherApp(val label: String, val component: ComponentName, val icon: ImageBitmap) {
+    /** 저장·구분용 이름 (패키지/액티비티). */
+    val key: String = component.flattenToString()
+}
+
+/** 위에 고정한 앱 목록 (고정한 순서). 앱마다(와이파이·텔레그램 빌드) 따로 저장. */
+private object PinnedAppStore {
+    private const val PREFS = "app_list"
+    private const val KEY_PINNED = "pinned"
+
+    fun load(context: Context): List<String> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_PINNED, "").orEmpty()
+            .lines().filter { it.isNotBlank() }
+
+    fun save(context: Context, pinned: List<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString(KEY_PINNED, pinned.joinToString("\n"))
+        }
+    }
+}
+
+/** 목록 칸 너비 전체를 쓰는 구역 제목 ("고정", "모든 앱"). */
+private fun LazyGridScope.sectionHeader(@StringRes title: Int) {
+    item(key = "header:$title", span = { GridItemSpan(maxLineSpan) }) {
+        Text(
+            stringResource(title),
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White.copy(alpha = 0.8f),
+            modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
+        )
+    }
+}
+
+/** 앱 한 칸: 아이콘 + 이름. 누르기 = 열기, 길게 누르기 = 위에 고정/해제. 고정한 앱은 아이콘에 핀 표시. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AppCell(app: LauncherApp, isPinned: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box {
+            Image(app.icon, contentDescription = null, modifier = Modifier.size(AppIconSize))
+            if (isPinned) {
+                Icon(
+                    Icons.Filled.PushPin,
+                    contentDescription = stringResource(R.string.app_section_pinned),
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 4.dp, y = (-4).dp)
+                        .size(16.dp)
+                        .background(Color(0xAA000000), CircleShape)
+                        .padding(2.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            app.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
 
 /** 아이콘 크기. */
 private val AppIconSize = 48.dp
@@ -83,6 +166,9 @@ fun AppListPanel(modifier: Modifier = Modifier) {
     // 검색어 (화면을 돌려도 유지)
     var query by rememberSaveable { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
+    // 위에 고정한 앱 (길게 눌러 고정/해제, 설정에 저장)
+    var pinned by remember { mutableStateOf(PinnedAppStore.load(context)) }
+    val haptic = LocalHapticFeedback.current
 
     Column(modifier.background(Color(0x55000000))) { // 배경화면 위에서도 글자가 보이게 살짝 어둡게
         // 검색창: 이름 일부 또는 초성 (예: "카톡", "ㅋㅋㅇ" → 카카오톡)
@@ -115,42 +201,58 @@ fun AppListPanel(modifier: Modifier = Modifier) {
             contentAlignment = Alignment.Center,
         ) {
         val all = apps
-        val list = remember(all, query) { all?.filter { matchesSearch(it.label, query) } }
-        if (list == null) {
+        // 고정한 앱 (고정한 순서, 지워진 앱은 빠짐) / 나머지 (이름순). 검색어가 있으면 둘 다 거름
+        val (pinnedList, restList) = remember(all, query, pinned) {
+            val found = all.orEmpty().filter { matchesSearch(it.label, query) }
+            val byKey = found.associateBy { it.key }
+            pinned.mapNotNull { byKey[it] } to found.filter { it.key !in pinned }
+        }
+        if (all == null) {
             CircularProgressIndicator()
-        } else if (list.isEmpty()) {
+        } else if (pinnedList.isEmpty() && restList.isEmpty()) {
             Text(
                 stringResource(R.string.app_search_none),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.8f),
             )
         } else {
+            val togglePin: (LauncherApp) -> Unit = { app ->
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val nowPinned = app.key !in pinned
+                pinned = if (nowPinned) pinned + app.key else pinned - app.key
+                PinnedAppStore.save(context, pinned)
+                Toast.makeText(
+                    context,
+                    if (nowPinned) R.string.app_pinned else R.string.app_unpinned,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 76.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(list, key = { it.component.flattenToString() }) { app ->
-                    Column(
-                        Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { launchApp(context, app.component) }
-                            .padding(vertical = 8.dp, horizontal = 4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Image(app.icon, contentDescription = null, modifier = Modifier.size(AppIconSize))
-                        Spacer(Modifier.height(4.dp))
+                if (pinnedList.isNotEmpty()) {
+                    sectionHeader(R.string.app_section_pinned)
+                    items(pinnedList, key = { "pin:" + it.key }) { app ->
+                        AppCell(app, isPinned = true, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
+                    }
+                    if (restList.isNotEmpty()) sectionHeader(R.string.app_section_all)
+                } else if (pinned.isEmpty() && query.isBlank()) {
+                    // 아직 고정한 앱이 없으면 방법 안내
+                    item(key = "hint", span = { GridItemSpan(maxLineSpan) }) {
                         Text(
-                            app.label,
+                            stringResource(R.string.app_pin_hint),
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                            color = Color.White.copy(alpha = 0.6f),
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.padding(bottom = 4.dp),
                         )
                     }
+                }
+                items(restList, key = { it.key }) { app ->
+                    AppCell(app, isPinned = false, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
                 }
             }
         }

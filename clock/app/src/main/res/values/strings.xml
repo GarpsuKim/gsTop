@@ -85,6 +85,11 @@
     <string name="app_search_hint">앱 검색 (초성도 됨)</string>
     <string name="app_search_clear">검색어 지우기</string>
     <string name="app_search_none">찾는 앱이 없습니다</string>
+    <string name="app_section_pinned">고정</string>
+    <string name="app_section_all">모든 앱</string>
+    <string name="app_pin_hint">앱을 길게 누르면 위에 고정됩니다</string>
+    <string name="app_pinned">위에 고정했습니다</string>
+    <string name="app_unpinned">고정을 풀었습니다</string>
     <string name="split_system_exit_hint">가운데 구분선을 화면 끝까지 끌면 분할이 해제됩니다</string>
     <string name="chime">시보</string>
     <string name="chime_title">시보 (매시 연주)</string>
