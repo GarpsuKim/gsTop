@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -217,62 +218,70 @@ private fun clipboardYouTube(context: Context): String? {
     return text?.takeIf { parseYouTube(it) != null }
 }
 
+/** 유튜브 주소 입력 창 상태: 열림 여부 + 공유받은 주소. [YouTubeItems] (메뉴) 와 [YouTubeDialogHost] (창) 가 함께 씀. */
+class YouTubeDialogState {
+    var open by mutableStateOf(false)
+    var shared by mutableStateOf<String?>(null)
+}
+
 /**
- * [▶ 유튜브] 버튼: 주소 입력 창을 띄워 유튜브 영상을 배경으로 재생하거나 끈다.
- * [incoming]: 다른 앱에서 공유받은 유튜브 주소. 들어오면 창을 열고 주소를 채운 뒤 [onIncomingConsumed] 호출.
+ * [배경 ▾] 메뉴의 "유튜브" 구역: [유튜브 주소 입력…] / [끄기] (켜져 있을 때만).
+ * [close]: 메뉴 닫기. 주소 입력 창은 [YouTubeDialogHost] 가 그림.
  */
 @Composable
-fun YouTubeButton(
+fun YouTubeItems(
     url: String,
     sound: Boolean,
     onChange: (url: String, sound: Boolean) -> Unit,
+    dialog: YouTubeDialogState,
+    close: () -> Unit,
+) {
+    val active = url.isNotBlank()
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.youtube_change), style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = { Icon(Icons.Filled.SmartDisplay, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        trailingIcon = if (active) {
+            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+        } else null,
+        onClick = {
+            close()
+            dialog.open = true
+        },
+    )
+    // 끄기 (항상 표시, 유튜브가 꺼져 있으면 흐리게)
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.youtube_off), style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        enabled = active,
+        onClick = {
+            close()
+            onChange("", sound)
+        },
+    )
+}
+
+/**
+ * 유튜브 주소 입력 창: 유튜브 영상을 배경으로 재생하거나 끈다. 메뉴 바깥(버튼 쪽)에 두어,
+ * 메뉴가 닫혀 있어도 [incoming] (다른 앱에서 "공유 → 시계" 로 받은 주소) 이 들어오면 창을 열고 주소를 채움.
+ */
+@Composable
+fun YouTubeDialogHost(
+    url: String,
+    sound: Boolean,
+    onChange: (url: String, sound: Boolean) -> Unit,
+    dialog: YouTubeDialogState,
     incoming: String? = null,
     onIncomingConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    var open by remember { mutableStateOf(false) }
-    var shared by remember { mutableStateOf<String?>(null) }
+    var open by dialog::open
+    var shared by dialog::shared
 
     LaunchedEffect(incoming) {
         if (incoming != null) {
             shared = incoming
             open = true
             onIncomingConsumed()
-        }
-    }
-
-    // 유튜브가 꺼져 있으면 바로 주소 입력 창, 켜져 있으면 메뉴: [유튜브 주소 입력…] [끄기]
-    val active = url.isNotBlank()
-    var menu by remember { mutableStateOf(false) }
-    Box {
-        TextButton(
-            onClick = { if (active) menu = true else open = true },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-        ) {
-            Icon(Icons.Filled.SmartDisplay, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.youtube), style = MaterialTheme.typography.labelMedium)
-            if (active) {
-                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-        }
-        InlineDropdown(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.youtube_change), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { Icon(Icons.Filled.SmartDisplay, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                onClick = {
-                    menu = false
-                    open = true
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.youtube_off), style = MaterialTheme.typography.bodyMedium) },
-                leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                onClick = {
-                    menu = false
-                    onChange("", sound)
-                },
-            )
         }
     }
 

@@ -668,7 +668,7 @@ fun ClockScreen(
             }
         }
 
-        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악) [▶ 유튜브] [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘) [👤 사용자]
+        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악·유튜브) [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘) [👤 사용자]
         val styleControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.End) { // 좁으면 다음 줄로
                 if (digitalOnly) {
@@ -699,17 +699,11 @@ fun ClockScreen(
                         onSelect = { onSettingsChange(settings.copy(theme = it)) },
                     )
                 }
-                // [🖼 배경 ▾] → 이미지 / 동영상 / 음악 을 구분선으로 나눈 한 메뉴 (모든 모드 공통)
-                BackgroundButton(settings, onSettingsChange, video, music)
-                // [▶ 유튜브] → 유튜브 영상을 배경으로 (모든 모드 공통)
-                YouTubeButton(
-                    url = settings.youtubeUrl,
-                    sound = settings.youtubeSound,
-                    onChange = { url, sound ->
-                        onSettingsChange(settings.copy(youtubeUrl = url, youtubeSound = sound))
-                    },
-                    incoming = incomingYouTube,
-                    onIncomingConsumed = onIncomingYouTubeConsumed,
+                // [🖼 배경 ▾] → 이미지 / 동영상 / 음악 / 유튜브 를 구분선으로 나눈 한 메뉴 (모든 모드 공통)
+                BackgroundButton(
+                    settings, onSettingsChange, video, music,
+                    incomingYouTube = incomingYouTube,
+                    onIncomingYouTubeConsumed = onIncomingYouTubeConsumed,
                 )
                 // [📅 달력] → 기본 브라우저로 음력 달력 페이지 (모든 모드 공통)
                 CalendarButton()
@@ -903,7 +897,9 @@ private fun ResetButton(onReset: () -> Unit) {
  *  - 이미지: 지금 사진 / 사진 선택(여러 장 = 슬라이드쇼) / 무한 반복 / 검은색 / 끄기
  *  - 동영상: 지금 파일 / 재생 위치 / 동영상 선택 / 무한 반복 / 소리 / 끄기   ([VideoBackgroundItems])
  *  - 음악:   현재 곡 / 재생 위치 / 재생·일시정지 / 다음 곡 / 다른 음악 / 끄기 ([MusicItems])
- * 고르기 창(사진·동영상·음악)은 메뉴가 닫혀도 결과를 받을 수 있도록 메뉴 바깥(이 버튼)에 만들어 둔다.
+ *  - 유튜브: 유튜브 주소 입력… / 끄기 ([YouTubeItems])
+ * 고르기 창(사진·동영상·음악)과 유튜브 주소 입력 창은 메뉴가 닫혀도 동작하도록 메뉴 바깥(이 버튼)에 둔다.
+ * [incomingYouTube]: 다른 앱에서 "공유 → 시계" 로 받은 유튜브 주소 → 주소 입력 창을 바로 엶.
  */
 @Composable
 private fun BackgroundButton(
@@ -911,7 +907,21 @@ private fun BackgroundButton(
     onSettingsChange: (ClockSettings) -> Unit,
     video: VideoBackgroundViewModel?,
     music: MusicViewModel?,
+    incomingYouTube: String? = null,
+    onIncomingYouTubeConsumed: () -> Unit = {},
 ) {
+    val youTubeDialog = remember { YouTubeDialogState() }
+    val onYouTubeChange: (String, Boolean) -> Unit = { url, sound ->
+        onSettingsChange(settings.copy(youtubeUrl = url, youtubeSound = sound))
+    }
+    YouTubeDialogHost(
+        url = settings.youtubeUrl,
+        sound = settings.youtubeSound,
+        onChange = onYouTubeChange,
+        dialog = youTubeDialog,
+        incoming = incomingYouTube,
+        onIncomingConsumed = onIncomingYouTubeConsumed,
+    )
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // 사진을 복사하는 동안 설정이 바뀌어도 최신 값에 반영되도록
@@ -1037,6 +1047,17 @@ private fun BackgroundButton(
                 MenuSectionTitle(R.string.music)
                 MusicItems(music, onPick = pickMusic, close = close)
             }
+
+            // ── 유튜브 ──
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.youtube)
+            YouTubeItems(
+                url = settings.youtubeUrl,
+                sound = settings.youtubeSound,
+                onChange = onYouTubeChange,
+                dialog = youTubeDialog,
+                close = close,
+            )
         }
     }
 }
