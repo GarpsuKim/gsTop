@@ -44,12 +44,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.wrapContentSize
-import kotlin.math.abs
-import androidx.compose.ui.input.pointer.pointerInput
 import com.example.clock.R
 import java.time.LocalDate
 import java.time.LocalTime
@@ -130,8 +126,6 @@ fun BigDigitalClock(
     date: LocalDate = LocalDate.now(),
     /** 날짜·요일 줄: 끔 / 시각 위 / 시각 아래. */
     datePosition: DigitalDate = DigitalDate.Off,
-    /** 글자를 끌었다 놓았을 때 새 스크롤 방향 (← / →). */
-    onScrollChange: (DigitalScroll) -> Unit = {},
 ) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -205,7 +199,6 @@ fun BigDigitalClock(
         }
 
         val margin = with(density) { 32.dp.toPx() } // 화면 밖 여유 (네온 번짐까지 완전히 사라지게)
-        val swipeMinPx = with(density) { 48.dp.toPx() }
         var contentWidth by remember { mutableIntStateOf(0) }
         var contentHeight by remember { mutableIntStateOf(0) }
         val centerX = (maxW - contentWidth) / 2f
@@ -214,13 +207,11 @@ fun BigDigitalClock(
         val latestMaxH by rememberUpdatedState(maxH)
 
         // 글자 왼쪽 위 모서리의 위치 (x, y). NaN = 가운데.
-        // 스크롤·드래그 모두 이 값을 움직이므로, 방향을 바꾸거나 손을 떼도 글자가 튀지 않고 그 자리에서 이어짐.
+        // 스크롤이 이 값을 움직이므로, 방향을 바꿔도 글자가 튀지 않고 그 자리에서 이어짐.
+        // (글자를 손가락으로 끄는 기능은 없앰: 한 손가락 스와이프는 화면 분할·앱 종료)
         var x by remember { mutableFloatStateOf(Float.NaN) }
         var y by remember { mutableFloatStateOf(Float.NaN) }
-        var dragging by remember { mutableStateOf(false) }
         var bounceDir by remember { mutableFloatStateOf(-1f) } // ↔ 에서 지금 가는 방향 (-1 = 왼쪽)
-        val latestOnScrollChange by rememberUpdatedState(onScrollChange)
-        val latestScroll by rememberUpdatedState(scroll)
 
         // 스크롤을 끄면 가운데로
         LaunchedEffect(scroll) {
@@ -240,7 +231,7 @@ fun BigDigitalClock(
                 val now = SystemClock.elapsedRealtime()
                 val dt = (now - last).coerceAtMost(200L) // 잠깐 멈췄다 돌아와도 크게 튀지 않게
                 last = now
-                if (dragging || contentWidth == 0 || contentHeight == 0) continue
+                if (contentWidth == 0 || contentHeight == 0) continue
                 // 글자 크기·화면 크기는 실행 중에 바뀔 수 있으므로 (첫 측정, 회전) 매번 최신 값으로 계산
                 val w = latestMaxW
                 val h = latestMaxH
@@ -293,54 +284,7 @@ fun BigDigitalClock(
 
         Box(
             Modifier
-                .fillMaxSize()
-                // 글자를 끌면 손가락을 따라 이동, 손을 떼면 끈 방향(상하좌우 중 많이 움직인 쪽)으로 스크롤 (설정에 저장)
-                .pointerInput(Unit) {
-                    var dragX = 0f
-                    var dragY = 0f
-                    fun backToCenterIfOff() {
-                        if (latestScroll == DigitalScroll.Off) {
-                            x = Float.NaN
-                            y = Float.NaN
-                        }
-                    }
-                    detectDragGestures(
-                        onDragStart = {
-                            dragX = 0f
-                            dragY = 0f
-                            if (x.isNaN()) x = (size.width - contentWidth) / 2f
-                            if (y.isNaN()) y = (size.height - contentHeight) / 2f
-                            dragging = true
-                        },
-                        onDragEnd = {
-                            dragging = false
-                            val horizontal = abs(dragX) >= abs(dragY)
-                            val dir = when {
-                                horizontal && dragX <= -swipeMinPx -> DigitalScroll.Left
-                                horizontal && dragX >= swipeMinPx -> DigitalScroll.Right
-                                !horizontal && dragY <= -swipeMinPx -> DigitalScroll.Up
-                                !horizontal && dragY >= swipeMinPx -> DigitalScroll.Down
-                                else -> null
-                            }
-                            // 조금만 끌었고 스크롤도 꺼져 있으면 가운데로 돌아감
-                            if (dir == null) {
-                                backToCenterIfOff()
-                            } else if (dir != latestScroll) {
-                                latestOnScrollChange(dir)
-                            }
-                        },
-                        onDragCancel = {
-                            dragging = false
-                            backToCenterIfOff()
-                        },
-                    ) { change, amount ->
-                        change.consume()
-                        dragX += amount.x
-                        dragY += amount.y
-                        x += amount.x
-                        y += amount.y
-                    }
-                },
+                .fillMaxSize(),
             contentAlignment = Alignment.TopStart,
         ) {
             Box(

@@ -385,7 +385,7 @@ fun ClockScreen(
     fullscreenRequest: Int = 0,
     /** 자체 화면 분할: 시계가 있는 자리 (null = 전체 화면). */
     split: SplitSide? = null,
-    /** [화면분할] 버튼·두 손가락 스와이프로 분할 자리를 바꿈 (null = 분할 해제). null 이면 기능 없음. */
+    /** [화면분할] 버튼·한 손가락 스와이프로 분할 자리를 바꿈 (null = 분할 해제). null 이면 기능 없음. */
     onSplitChange: ((SplitSide?) -> Unit)? = null,
     /** 시스템 화면 분할로 다른 앱과 나란히 떠 있는지 ([화면분할] 메뉴에 [분할 해제] 만). */
     inSystemSplit: Boolean = false,
@@ -495,13 +495,12 @@ fun ClockScreen(
         }
     }
 
-    // 두 손가락 스와이프에서 최신 값을 쓰도록
+    // 한 손가락 스와이프에서 최신 값을 쓰도록
     val latestOnSplitChange by rememberUpdatedState(onSplitChange)
     val screenLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val latestLandscape by rememberUpdatedState(screenLandscape)
-    // 분할 중(자체 분할 또는 시스템 분할)에는 두 손가락 스와이프로 분할하지 않음
-    val latestSplitting by rememberUpdatedState(split != null || inSystemSplit)
-    val latestDigitalOnly by rememberUpdatedState(settings.mode == DisplayMode.Digital)
+    val latestSplit by rememberUpdatedState(split)
+    val latestSystemSplit by rememberUpdatedState(inSystemSplit)
 
     // OLED 번인 방지: 3분마다 시계 화면 전체를 4dp 씩 옮김 (가운데 → 8방향, 27분에 한 바퀴. 눈에 거의 안 띔)
     var burnInStep by remember { mutableIntStateOf(0) }
@@ -533,12 +532,13 @@ fun ClockScreen(
                     }
                 }
             }
-            // 아날로그·하이브리드: 한 손가락 오른쪽 스와이프 → 앱 종료.
-            // 화면을 지나가는 손가락을 보기만 하고 소비하지 않음 (누르기 = 버튼 보이기/숨기기 는 그대로).
-            // 다른 것이 이미 소비한 끌기 (투명도 슬라이더, 메뉴 스크롤, 두 손가락 스와이프) 는 무시.
-            .pointerInput(inPip, digitalOnly) {
-                if (inPip || digitalOnly) return@pointerInput
-                val minPx = OneFingerSwipeMin.toPx()
+            // 한 손가락 스와이프 → 화면 분할 / 분할 해제 / 앱 종료 (모든 모드 공통, 규칙은 [swipeAction]).
+            // 버튼·슬라이더·메뉴 등 화면 위 다른 것이 먼저 받은 끌기는 무시 (Main 단계에서 그 뒤에 봄).
+            // 손가락이 조금이라도 끌리면 그 움직임을 소비 → 손을 뗄 때 "화면 누르기"(버튼 보이기/숨기기) 로 처리되지 않음.
+            .pointerInput(inPip) {
+                if (inPip) return@pointerInput
+                val minPx = SwipeMin.toPx()
+                val slop = viewConfiguration.touchSlop
                 awaitPointerEventScope {
                     while (true) {
                         var e = awaitPointerEvent()
@@ -549,67 +549,39 @@ fun ClockScreen(
                         var valid = true
                         while (true) {
                             e = awaitPointerEvent()
-                            if (e.changes.count { it.pressed } > 1) valid = false // 두 손가락이 됨
+                            if (e.changes.count { it.pressed } > 1) valid = false // 두 손가락이 됨 → 무시
                             val c = e.changes.firstOrNull { it.id == id } ?: break
                             if (c.pressed && c.previousPressed) {
-                                if (c.isConsumed) valid = false
+                                if (c.isConsumed) valid = false // 슬라이더·메뉴 스크롤 등이 먼저 가져감
                                 dx += c.position.x - c.previousPosition.x
                                 dy += c.position.y - c.previousPosition.y
+                                if (valid && (abs(dx) > slop || abs(dy) > slop)) c.consume()
                             }
                             if (!c.pressed) break
                         }
-                        if (valid && abs(dx) > abs(dy) && dx >= minPx) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            activity?.finish()
-                        }
-                    }
-                }
-            }
-            // 두 손가락 스와이프 → 화면 분할 / 앱 종료 (한 손가락 끌기·누르기는 그대로 아래로 전달)
-            //  가로 화면: → 右 분할 (아날로그·하이브리드는 앱 종료), ← 左 분할, ↑ 앱 종료
-            //  세로 화면: ↑ 上 분할, ↓ 下 분할, → 앱 종료
-            //  분할은 분할 중에는 동작 안 함, 앱 종료는 언제나 동작
-            .pointerInput(inPip) {
-                if (inPip) return@pointerInput
-                val minPx = TwoFingerSwipeMin.toPx()
-                awaitPointerEventScope {
-                    while (true) {
-                        var e = awaitPointerEvent(PointerEventPass.Initial)
-                        if (e.changes.count { it.pressed } < 2) continue
-                        // 두 손가락이 닿은 순간부터 모든 손가락을 뗄 때까지: 이동량 합산 + 아래(스크롤 끌기·누르기)로 안 보냄
-                        var dx = 0f
-                        var dy = 0f
-                        while (true) {
-                            val moving = e.changes.filter { it.pressed && it.previousPressed }
-                            if (moving.isNotEmpty()) {
-                                dx += moving.sumOf { (it.position.x - it.previousPosition.x).toDouble() }.toFloat() / moving.size
-                                dy += moving.sumOf { (it.position.y - it.previousPosition.y).toDouble() }.toFloat() / moving.size
-                            }
-                            e.changes.forEach { it.consume() }
-                            if (e.changes.none { it.pressed }) break
-                            e = awaitPointerEvent(PointerEventPass.Initial)
-                        }
-                        val landscape = latestLandscape
-                        // 앱 종료 (분할 중에도 동작): 오른쪽으로 (가로 화면 디지털은 제외 = 右 분할), 가로 화면은 위로도
-                        val right = abs(dx) > abs(dy) && dx >= minPx
-                        val up = abs(dy) > abs(dx) && dy <= -minPx
-                        val exit = (right && (!landscape || !latestDigitalOnly)) || (landscape && up)
-                        if (exit) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            activity?.finish()
-                            continue
-                        }
-                        // 분할 중이면 무시 (두 손가락 동작은 위에서 이미 막았으므로 글자 끌기 등도 일어나지 않음)
-                        if (latestSplitting) continue
-                        val change = latestOnSplitChange ?: continue
-                        val side = when {
-                            landscape && abs(dx) > abs(dy) && dx >= minPx -> SplitSide.Right
-                            landscape && abs(dx) > abs(dy) && dx <= -minPx -> SplitSide.Left
-                            !landscape && abs(dy) > abs(dx) && dy <= -minPx -> SplitSide.Top
-                            !landscape && abs(dy) > abs(dx) && dy >= minPx -> SplitSide.Bottom
+                        if (!valid) continue
+                        val dir = when {
+                            abs(dx) > abs(dy) && dx >= minPx -> SwipeDir.Right
+                            abs(dx) > abs(dy) && dx <= -minPx -> SwipeDir.Left
+                            abs(dy) > abs(dx) && dy <= -minPx -> SwipeDir.Up
+                            abs(dy) > abs(dx) && dy >= minPx -> SwipeDir.Down
                             else -> null
+                        } ?: continue
+                        when (val action = swipeAction(dir, latestSplit, latestSystemSplit, latestLandscape)) {
+                            SwipeAction.None -> {}
+                            SwipeAction.Exit -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                activity?.finish()
+                            }
+                            SwipeAction.Unsplit -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                latestOnSplitChange?.invoke(null)
+                            }
+                            is SwipeAction.Split -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                latestOnSplitChange?.invoke(action.side)
+                            }
                         }
-                        if (side != null) change(side)
                     }
                 }
             }
@@ -631,9 +603,6 @@ fun ClockScreen(
         },
     ) {
         if (digitalOnly) {
-            // 디지털: 글자를 좌우로 끌면 손가락을 따라 움직이고, 놓으면 그 방향으로 스크롤 (설정에 저장됨)
-            val swipeSettings by rememberUpdatedState(settings)
-            val swipeOnChange by rememberUpdatedState(onSettingsChange)
             BigDigitalClock(
                 time = now,
                 color = settings.digitalColor,
@@ -647,7 +616,6 @@ fun ClockScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(DialPadding),
-                onScrollChange = { swipeOnChange(swipeSettings.copy(digitalScroll = it)) },
             )
         } else {
             AnalogClockArea(settings, style, now, today)
@@ -783,10 +751,59 @@ fun ClockScreen(
     }
 }
 
-/** 두 손가락 스와이프를 화면 분할로 볼 최소 이동 거리. */
-private val TwoFingerSwipeMin = 80.dp
-/** 아날로그·하이브리드에서 한 손가락 오른쪽 스와이프를 앱 종료로 볼 최소 이동 거리 (실수로 닫히지 않게 더 길게). */
-private val OneFingerSwipeMin = 120.dp
+/** 한 손가락 스와이프로 볼 최소 이동 거리 (이보다 짧으면 아무 일 없음). */
+private val SwipeMin = 100.dp
+
+private enum class SwipeDir { Left, Right, Up, Down }
+
+private sealed interface SwipeAction {
+    data object None : SwipeAction
+    data object Exit : SwipeAction
+    data object Unsplit : SwipeAction
+    data class Split(val side: SplitSide) : SwipeAction
+}
+
+/**
+ * 한 손가락 스와이프 규칙 (모든 모드 공통).
+ *
+ * 분할 안 됨 — 스와이프한 쪽에 시계, 반대쪽에 다른 앱:
+ *  - 가로 화면: → 右 분할 (오른쪽 시계), ← 左 분할 (왼쪽 시계), ↑·↓ 앱 종료
+ *  - 세로 화면: ↑ 上 분할 (위 시계),     ↓ 下 분할 (아래 시계),  ←·→ 앱 종료
+ *
+ * 자체 분할 중 — 시계 쪽으로 밀면 앱 종료, 다른 앱 쪽으로 밀면 분할 해제:
+ *  - 左 시계: ← 앱 종료, → 분할 해제      - 右 시계: → 앱 종료, ← 분할 해제
+ *  - 上 시계: ↑ 앱 종료, ↓ 분할 해제      - 下 시계: ↓ 앱 종료, ↑ 분할 해제
+ *  - 분할 방향과 직각인 스와이프 (예: 左 시계에서 ↑): 아무 일 없음
+ *
+ * 시스템 분할 중 (다른 앱과 나란히, 앱이 직접 나누거나 풀 수 없음): 분할 안 됨 때의 "앱 종료" 방향만 동작.
+ */
+private fun swipeAction(dir: SwipeDir, split: SplitSide?, systemSplit: Boolean, landscape: Boolean): SwipeAction {
+    if (split != null) {
+        val (towardClock, towardOther) = when (split) {
+            SplitSide.Left -> SwipeDir.Left to SwipeDir.Right
+            SplitSide.Right -> SwipeDir.Right to SwipeDir.Left
+            SplitSide.Top -> SwipeDir.Up to SwipeDir.Down
+            SplitSide.Bottom -> SwipeDir.Down to SwipeDir.Up
+        }
+        return when (dir) {
+            towardClock -> SwipeAction.Exit
+            towardOther -> SwipeAction.Unsplit
+            else -> SwipeAction.None
+        }
+    }
+    val splitTo: SplitSide? = when {
+        landscape && dir == SwipeDir.Left -> SplitSide.Left
+        landscape && dir == SwipeDir.Right -> SplitSide.Right
+        !landscape && dir == SwipeDir.Up -> SplitSide.Top
+        !landscape && dir == SwipeDir.Down -> SplitSide.Bottom
+        else -> null
+    }
+    return when {
+        splitTo == null -> SwipeAction.Exit
+        systemSplit -> SwipeAction.None
+        else -> SwipeAction.Split(splitTo)
+    }
+}
 
 /**
  * [⧉ 화면 ▾] 버튼 (한 단계 목록):
