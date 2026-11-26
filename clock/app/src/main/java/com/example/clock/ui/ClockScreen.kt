@@ -516,8 +516,10 @@ fun ClockScreen(
                     }
                 }
             }
-            // 두 손가락 스와이프 → 화면 분할 (한 손가락 끌기·누르기는 그대로 아래로 전달)
-            //  가로 화면: → 右 분할, ← 左 분할 / 세로 화면: ↑ 上 분할, ↓ 下 분할. 분할 중에는 동작 안 함
+            // 두 손가락 스와이프 → 화면 분할 / 앱 종료 (한 손가락 끌기·누르기는 그대로 아래로 전달)
+            //  가로 화면: → 右 분할, ← 左 분할, ↑ 앱 종료
+            //  세로 화면: ↑ 上 분할, ↓ 下 분할, → 앱 종료
+            //  분할은 분할 중에는 동작 안 함, 앱 종료는 언제나 동작
             .pointerInput(inPip) {
                 if (inPip) return@pointerInput
                 val minPx = TwoFingerSwipeMin.toPx()
@@ -538,10 +540,21 @@ fun ClockScreen(
                             if (e.changes.none { it.pressed }) break
                             e = awaitPointerEvent(PointerEventPass.Initial)
                         }
+                        val landscape = latestLandscape
+                        // 앱 종료: 세로 화면 → 오른쪽으로, 가로 화면 → 위로 (분할 중에도 동작)
+                        val exit = if (landscape) {
+                            abs(dy) > abs(dx) && dy <= -minPx
+                        } else {
+                            abs(dx) > abs(dy) && dx >= minPx
+                        }
+                        if (exit) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            activity?.finish()
+                            continue
+                        }
                         // 분할 중이면 무시 (두 손가락 동작은 위에서 이미 막았으므로 글자 끌기 등도 일어나지 않음)
                         if (latestSplitting) continue
                         val change = latestOnSplitChange ?: continue
-                        val landscape = latestLandscape
                         val side = when {
                             landscape && abs(dx) > abs(dy) && dx >= minPx -> SplitSide.Right
                             landscape && abs(dx) > abs(dy) && dx <= -minPx -> SplitSide.Left
@@ -655,7 +668,7 @@ fun ClockScreen(
             }
         }
 
-        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악) [▶ 유튜브] [📅 달력] [🔔 시보·알람 ▾] [⏱ 닫힘 ▾] [👤 사용자]
+        // 버튼 묶음 B (우하단): 아날로그/하이브리드 → [애니메이션 ▾] [테마 ▾],  디지털 → [스크롤 ▾] [글자색 ▾]  + [🖼 배경 ▾](이미지·동영상·음악) [▶ 유튜브] [📅 달력] [🔔 시보·알람 ▾](시보·알람·닫힘) [👤 사용자]
         val styleControls: @Composable () -> Unit = {
             FlowRow(horizontalArrangement = Arrangement.End) { // 좁으면 다음 줄로
                 if (digitalOnly) {
@@ -700,14 +713,11 @@ fun ClockScreen(
                 )
                 // [📅 달력] → 기본 브라우저로 음력 달력 페이지 (모든 모드 공통)
                 CalendarButton()
-                // [🔔 시보·알람 ▾] → 시보 설정 (매시 정각 연주, 앱이 꺼져 있어도 울림) + 구분선 + 시스템 알람 화면 (모든 모드 공통)
-                ChimeAlarmButton()
-                // [⏱ 닫힘: 무한 ▾] → 시계 닫히는 시간 (모든 모드 공통)
-                SmallMenu(
-                    selected = settings.autoClose,
-                    items = AutoClose.entries,
-                    label = { autoCloseLabel(it) },
-                    onSelect = { onSettingsChange(settings.copy(autoClose = it)) },
+                // [🔔 시보·알람 ▾] → 시보 설정 (매시 정각 연주, 앱이 꺼져 있어도 울림) + 구분선 + 시스템 알람 화면
+                //                    + 구분선 + 닫힘 (시계 닫히는 시간)  (모든 모드 공통)
+                ChimeAlarmButton(
+                    autoClose = settings.autoClose,
+                    onAutoCloseChange = { onSettingsChange(settings.copy(autoClose = it)) },
                 )
                 // [👤 사용자 등록] → 성명 + 긴급 연락처 (모든 모드 공통)
                 UserButton(onClick = { userDialog = true })
@@ -1320,16 +1330,10 @@ private fun <T> SmallMenu(
     }
 }
 
-/** "닫힘: 무한", "닫힘: 30초", "닫힘: 90분", "닫힘: 12시간", "닫힘: 1일" … */
+/** 닫히는 시간 ("무한", "30초", "5분" …). [시보·알람] 메뉴의 "닫힘" 구역 항목에 씀. */
 @Composable
-private fun autoCloseLabel(a: AutoClose): String {
-    val value = if (a == AutoClose.Off) {
-        stringResource(R.string.auto_close_infinite)
-    } else {
-        stringResource(a.unit, a.amount)
-    }
-    return stringResource(R.string.auto_close_format, value)
-}
+internal fun autoCloseValue(a: AutoClose): String =
+    if (a == AutoClose.Off) stringResource(R.string.auto_close_infinite) else stringResource(a.unit, a.amount)
 
 /** 시계판 하나를 그리는 데 필요한 색 묶음. */
 class DialStyle(

@@ -73,10 +73,11 @@ import java.time.format.DateTimeFormatter
  * [🔔 시보·알람 ▾] 버튼: 시보와 알람을 한 메뉴에서, 구분선으로 나눠서.
  *  - 시보: [시보 설정] → 시보 설정 창 (켜기/끄기, 음악 파일, 연주 시간 …). 오른쪽에 켜짐/꺼짐 표시
  *  - 알람: [알람 열기] → 시스템 시계 앱의 알람 화면
+ *  - 닫힘: 무한 / 30초 / 1분 … → 화면을 만지지 않은 채 이 시간이 지나면 시계 앱을 닫음 (지금 값에 체크)
  * 버튼 아이콘으로 시보 켜짐/꺼짐 표시 (설정 창을 닫을 때 다시 읽음).
  */
 @Composable
-fun ChimeAlarmButton() {
+fun ChimeAlarmButton(autoClose: AutoClose, onAutoCloseChange: (AutoClose) -> Unit) {
     val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
@@ -131,6 +132,21 @@ fun ChimeAlarmButton() {
                     openSystemAlarms(context)
                 },
             )
+            // ── 닫힘 ──
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            MenuSectionTitle(R.string.auto_close_section)
+            AutoClose.entries.forEach { a ->
+                DropdownMenuItem(
+                    text = { Text(autoCloseValue(a), style = MaterialTheme.typography.bodyMedium) },
+                    trailingIcon = if (a == autoClose) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else null,
+                    onClick = {
+                        expanded = false
+                        onAutoCloseChange(a)
+                    },
+                )
+            }
         }
     }
 

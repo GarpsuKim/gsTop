@@ -87,6 +87,7 @@
     <string name="chime_state_on">켜짐</string>
     <string name="chime_state_off">꺼짐</string>
     <string name="alarm_open">알람 열기</string>
+    <string name="auto_close_section">닫힘 (화면을 안 만지면 시계 닫기)</string>
     <string name="pip_item">작은 창으로 축소</string>
     <string name="split_left">左 분할</string>
     <string name="split_right">右 분할</string>
