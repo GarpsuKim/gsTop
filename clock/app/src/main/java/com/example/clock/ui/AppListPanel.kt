@@ -27,6 +27,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +67,7 @@ private val AppIconSize = 48.dp
 
 /**
  * 자체 화면 분할의 빈 절반: 폰에 설치된 앱 목록 (홈 화면 앱 서랍과 같은 목록, 이름순).
+ * 위에 검색창: 이름 일부 또는 초성으로 거름. 키보드가 뜨면 목록이 키보드 위로 줄어듦 (safeDrawing 여백).
  * 누르면 그 앱을 열고, 기기가 지원하면 시스템 화면 분할로 시계 옆에 엶 (FLAG_ACTIVITY_LAUNCH_ADJACENT).
  * 지원하지 않는 기기에서는 그냥 그 앱이 열림.
  */
@@ -63,16 +80,54 @@ fun AppListPanel(modifier: Modifier = Modifier) {
         value = withContext(Dispatchers.IO) { loadLauncherApps(context, iconPx) }
     }
 
-    Box(
-        modifier.background(Color(0x55000000)), // 배경화면 위에서도 글자가 보이게 살짝 어둡게
-        contentAlignment = Alignment.Center,
-    ) {
-        val list = apps
+    // 검색어 (화면을 돌려도 유지)
+    var query by rememberSaveable { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+
+    Column(modifier.background(Color(0x55000000))) { // 배경화면 위에서도 글자가 보이게 살짝 어둡게
+        // 검색창: 이름 일부 또는 초성 (예: "카톡", "ㅋㅋㅇ" → 카카오톡)
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp),
+            placeholder = { Text(stringResource(R.string.app_search_hint)) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            trailingIcon = if (query.isNotEmpty()) {
+                {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.app_search_clear))
+                    }
+                }
+            } else null,
+            singleLine = true,
+            shape = RoundedCornerShape(24.dp),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }), // 키보드 닫기
+        )
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+        val all = apps
+        val list = remember(all, query) { all?.filter { matchesSearch(it.label, query) } }
         if (list == null) {
             CircularProgressIndicator()
+        } else if (list.isEmpty()) {
+            Text(
+                stringResource(R.string.app_search_none),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.8f),
+            )
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 76.dp),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -99,7 +154,41 @@ fun AppListPanel(modifier: Modifier = Modifier) {
                 }
             }
         }
+        }
     }
+}
+
+/** 한글 초성 (가 ~ 힣 의 첫 자음 순서). */
+private const val CHOSUNG = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+
+/** 한글 음절이면 그 초성, 아니면 그대로. */
+private fun chosungOf(c: Char): Char =
+    if (c in '가'..'힣') CHOSUNG[(c - '가') / 588] else c
+
+/**
+ * 앱 이름 검색: 이름 안에 검색어가 이어서 들어 있으면 맞음 (대소문자·띄어쓰기 무시).
+ * 검색어의 자음 글자(ㄱ, ㅋ …)는 이름 글자의 초성과 비교 → "ㅋㅋㅇ" 도 "카카오톡" 에 맞음.
+ * 글자와 초성을 섞어도 됨 ("카ㅋ오").
+ */
+private fun matchesSearch(label: String, query: String): Boolean {
+    val q = query.filterNot { it.isWhitespace() }.lowercase()
+    if (q.isEmpty()) return true
+    val name = label.filterNot { it.isWhitespace() }.lowercase()
+    if (q.length > name.length) return false
+    for (start in 0..name.length - q.length) {
+        var ok = true
+        for (i in q.indices) {
+            val qc = q[i]
+            val nc = name[start + i]
+            val same = if (qc in CHOSUNG) chosungOf(nc) == qc else nc == qc
+            if (!same) {
+                ok = false
+                break
+            }
+        }
+        if (ok) return true
+    }
+    return false
 }
 
 /** 홈 화면 앱 서랍에 나오는 앱들 (이 시계 앱 제외), 이름순. */
