@@ -41,7 +41,7 @@ set "ADDR=%IP%:%PORT%"
 echo 연결: %ADDR%
 "%ADB%" connect %ADDR%
 
-call "%~dp0_BUILD.BAT" nopause
+call "%~dp0_BUILD_WIFI.BAT" nopause
 if errorlevel 1 goto buildfail
 
 echo 설치 중...

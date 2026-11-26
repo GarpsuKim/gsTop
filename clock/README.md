@@ -90,9 +90,19 @@ Android Studio 없이 명령줄로 빌드합니다. (Android SDK: `C:\Android\sd
 
 | 파일 | 용도 |
 |---|---|
-| `_BUILD.BAT` | 디버그 APK 빌드 → `app\build\outputs\apk\debug\app-debug.apk` |
-| `_RUN_TELEGRAM.BAT` | 빌드한 APK를 텔레그램 봇으로 폰에 전송 (`telegram_config.bat`에 `BOT_TOKEN`, `CHAT_ID` 필요) |
-| `_RUN_WIFI.BAT` | adb 무선 디버깅으로 폰에 설치·실행 (IP/포트 입력, 마지막 주소는 `adb_addr.txt`에 기억) |
+| `_BUILD_WIFI.BAT` | 와이파이 설치용 디버그 APK 빌드 (앱 이름 = 이 파일의 `set "AppIcon=..."`) → `app\build\outputs\apk\debug\app-debug.apk` |
+| `_BUILD_Telegram.BAT` | 텔레그램 전송용 디버그 APK 빌드 (앱 이름 = 이 파일의 `set "AppIcon=..."`) |
+| `_RUN_TELEGRAM.BAT` | `_BUILD_Telegram.BAT` 로 빌드 → 텔레그램 봇으로 폰에 전송 (`telegram_config.bat`에 `BOT_TOKEN`, `CHAT_ID` 필요) |
+| `_RUN_WIFI.BAT` | `_BUILD_WIFI.BAT` 로 빌드 → adb 무선 디버깅으로 폰에 설치·실행 (IP/포트 입력, 마지막 주소는 `adb_addr.txt`에 기억) |
+
+앱 이름과 앱 ID 는 빌드 bat 이 `-PappNameBat=<자기 파일 이름>` 을 넘기면 `app/build.gradle.kts` 가 그 파일의 `AppIcon`(이름), `AppIdSuffix`(앱 ID 꼬리) 줄을 UTF-8 로 직접 읽어 정합니다 (한글이 깨지지 않게). `gradlew` 를 직접 실행하면 `_BUILD_WIFI.BAT` 의 값을 씁니다.
+
+| 빌드 | 앱 이름 | 앱 ID |
+|---|---|---|
+| `_BUILD_WIFI.BAT` | 영원한_시계 | `com.example.clock` |
+| `_BUILD_Telegram.BAT` | KJA시계 | `com.example.clock.kja` |
+
+앱 ID 가 달라서 한 폰에 두 앱을 따로 설치할 수 있습니다 (설정·시보·위젯도 각자 따로).
 | `_github_push.bat` | 커밋 후 [gsTop/clock](https://github.com/GarpsuKim/gsTop/tree/main/clock) 에 올리기 |
 
 `local.properties`, `telegram_config.bat`, `adb_addr.txt`, 빌드 결과물은 `.gitignore`로 제외되어 GitHub에 올라가지 않습니다.

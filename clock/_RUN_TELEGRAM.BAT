@@ -15,7 +15,7 @@ if "%BOT_TOKEN%"=="" (
     exit /b 1
 )
 
-call "%~dp0_BUILD.BAT" nopause
+call "%~dp0_BUILD_Telegram.BAT" nopause
 if errorlevel 1 (
     pause
     exit /b 1
