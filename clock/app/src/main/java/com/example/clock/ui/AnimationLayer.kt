@@ -5,7 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import android.os.SystemClock
@@ -23,6 +23,7 @@ import com.example.clock.R
 import java.time.LocalTime
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -69,12 +70,14 @@ fun AnimationLayer(
 ) {
     if (animation == DialAnimation.Off) return
 
-    var t by remember { mutableFloatStateOf(0f) }
+    // 지난 시간 (밀리초, Long). Float 초로 계속 쌓으면 며칠 뒤 정밀도가 떨어져 애니메이션이 뚝뚝 끊기므로
+    // Long 으로 보관하고, 그리는 쪽은 Double 로 받아 각 주기 안의 값(frac/ang)만 Float 로 바꿔 씀.
+    var elapsedMs by remember { mutableLongStateOf(0L) }
     // 정해진 간격으로만 다시 그림 (화면 최대 속도 120번으로 그리면 폰이 뜨거워짐)
     LaunchedEffect(frameMs) {
-        val start = SystemClock.elapsedRealtime() - (t * 1_000f).toLong() // 모드를 바꿔도 이어서
+        val start = SystemClock.elapsedRealtime() - elapsedMs // 모드를 바꿔도 이어서
         while (true) {
-            t = (SystemClock.elapsedRealtime() - start) / 1_000f
+            elapsedMs = SystemClock.elapsedRealtime() - start
             awaitNextFrame(frameMs)
         }
     }
@@ -84,7 +87,7 @@ fun AnimationLayer(
         val radius = (size.minDimension - 2 * dialPadding.toPx()) / 2f
         val now = LocalTime.now()
         val sec = now.second + now.nano / 1_000_000_000f
-        val time = t // 이 값을 읽어서 매 프레임 다시 그림
+        val time = elapsedMs / 1_000.0 // 이 값을 읽어서 매 프레임 다시 그림 (초, Double)
 
         when (animation) {
             DialAnimation.Off -> Unit
@@ -102,6 +105,12 @@ fun AnimationLayer(
     }
 }
 
+/** x 의 소수 부분 (0..1). 큰 시간 값도 Double 로 계산한 뒤 Float 로 바꿔 정밀도 유지. */
+private fun frac(x: Double): Float = (x - floor(x)).toFloat()
+
+/** sin(t × rate) 에 넣을 각도. t × rate 를 한 바퀴(2π) 안으로 줄여서 Float 로. */
+private fun ang(t: Double, rate: Float): Float = frac(t * rate / (2 * PI)) * TAU
+
 private fun at(angleRad: Float, length: Float) =
     Offset(cos(angleRad) * length, sin(angleRad) * length)
 
@@ -109,9 +118,9 @@ private fun at(angleRad: Float, length: Float) =
 private fun clockAngle(fraction: Float) = fraction * TAU - TAU / 4f
 
 // 1. 화면 전체에 반짝이는 별
-private fun DrawScope.stars(t: Float, s: Seeds, palette: (Float) -> Color) {
+private fun DrawScope.stars(t: Double, s: Seeds, palette: (Float) -> Color) {
     for (i in 0 until s.n) {
-        val twinkle = 0.5f + 0.5f * sin(t * (0.8f + s.speed[i] * 2.2f) + s.phase[i] * TAU)
+        val twinkle = 0.5f + 0.5f * sin(ang(t, 0.8f + s.speed[i] * 2.2f) + s.phase[i] * TAU)
         drawCircle(
             color = palette(s.phase[i]).copy(alpha = 0.1f + 0.9f * twinkle),
             radius = (1f + s.size[i] * 2f) * density,
@@ -135,10 +144,10 @@ private fun DrawScope.pulse(sec: Float, radius: Float, palette: (Float) -> Color
 }
 
 // 3. 테두리 바로 바깥을 도는 혜성 두 개
-private fun DrawScope.comet(t: Float, radius: Float, palette: (Float) -> Color) {
+private fun DrawScope.comet(t: Double, radius: Float, palette: (Float) -> Color) {
     val trail = 40
     for (c in 0..1) {
-        val head = t / 6f + c * 0.5f
+        val head = frac(t / 6.0) + c * 0.5f
         for (k in 0 until trail) {
             val f = head - k * 0.004f
             val fade = 1f - k / trail.toFloat()
@@ -170,11 +179,11 @@ private fun DrawScope.sweep(sec: Float, radius: Float, palette: (Float) -> Color
 }
 
 // 5. 흔들리며 내리는 눈
-private fun DrawScope.snow(t: Float, s: Seeds, palette: (Float) -> Color) {
+private fun DrawScope.snow(t: Double, s: Seeds, palette: (Float) -> Color) {
     for (i in 0 until s.n) {
         val speed = 0.03f + s.speed[i] * 0.08f
-        val y = ((s.y[i] + t * speed) % 1f) * size.height
-        val x = s.x[i] * size.width + sin(t * (0.5f + s.phase[i]) + i) * 12f * density
+        val y = ((s.y[i] + frac(t * speed)) % 1f) * size.height
+        val x = s.x[i] * size.width + sin(ang(t, 0.5f + s.phase[i]) + i) * 12f * density
         drawCircle(
             color = palette(s.phase[i]).copy(alpha = 0.4f + 0.4f * s.size[i]),
             radius = (1.5f + s.size[i] * 2.5f) * density,
@@ -184,9 +193,9 @@ private fun DrawScope.snow(t: Float, s: Seeds, palette: (Float) -> Color) {
 }
 
 // 6. 테두리 둘레가 숨쉬듯 밝아졌다 어두워짐 (색도 천천히 바뀜)
-private fun DrawScope.glow(t: Float, radius: Float, palette: (Float) -> Color) {
-    val alpha = 0.3f + 0.3f * sin(t * TAU / 4f)
-    val color = palette((t / 20f) % 1f).copy(alpha = alpha)
+private fun DrawScope.glow(t: Double, radius: Float, palette: (Float) -> Color) {
+    val alpha = 0.3f + 0.3f * sin(frac(t / 4.0) * TAU)
+    val color = palette(frac(t / 20.0)).copy(alpha = alpha)
     val outer = radius * 1.3f
     drawCircle(
         brush = Brush.radialGradient(
@@ -203,12 +212,12 @@ private fun DrawScope.glow(t: Float, radius: Float, palette: (Float) -> Color) {
 }
 
 // 7. 시계 바깥으로 뻗어 천천히 도는 햇살
-private fun DrawScope.rays(t: Float, radius: Float, palette: (Float) -> Color) {
+private fun DrawScope.rays(t: Double, radius: Float, palette: (Float) -> Color) {
     val n = 24
     for (i in 0 until n) {
-        val f = i / n.toFloat() + t / 45f
+        val f = i / n.toFloat() + frac(t / 45.0)
         val angle = clockAngle(f)
-        val alpha = 0.15f + 0.35f * (0.5f + 0.5f * sin(t * 2f + i))
+        val alpha = 0.15f + 0.35f * (0.5f + 0.5f * sin(ang(t, 2f) + i))
         drawLine(
             color = palette(i / n.toFloat()).copy(alpha = alpha),
             start = center + at(angle, radius * 1.04f),
@@ -220,10 +229,10 @@ private fun DrawScope.rays(t: Float, radius: Float, palette: (Float) -> Color) {
 }
 
 // 8. 아래에서 떠오르는 방울
-private fun DrawScope.bubbles(t: Float, s: Seeds, palette: (Float) -> Color) {
+private fun DrawScope.bubbles(t: Double, s: Seeds, palette: (Float) -> Color) {
     for (i in 0 until s.n / 2) {
-        val p = (s.y[i] + t * (0.04f + s.speed[i] * 0.08f)) % 1f
-        val x = s.x[i] * size.width + sin(t * 1.3f + s.phase[i] * TAU) * 10f * density
+        val p = (s.y[i] + frac(t * (0.04f + s.speed[i] * 0.08f))) % 1f
+        val x = s.x[i] * size.width + sin(ang(t, 1.3f) + s.phase[i] * TAU) * 10f * density
         drawCircle(
             color = palette(s.phase[i]).copy(alpha = 0.1f + 0.5f * (1f - p)),
             radius = (4f + s.size[i] * 10f) * density,
@@ -234,14 +243,14 @@ private fun DrawScope.bubbles(t: Float, s: Seeds, palette: (Float) -> Color) {
 }
 
 // 9. 시계 둘레 궤도를 도는 행성 세 개 (번갈아 반대 방향)
-private fun DrawScope.orbits(t: Float, radius: Float, palette: (Float) -> Color) {
+private fun DrawScope.orbits(t: Double, radius: Float, palette: (Float) -> Color) {
     val orbits = listOf(1.06f to 7f, 1.16f to 11f, 1.26f to 17f)
     orbits.forEachIndexed { idx, (rf, period) ->
         val color = palette(idx / 3f)
         val r = radius * rf
         drawCircle(color.copy(alpha = 0.15f), r, center, style = Stroke(width = density))
         val dir = if (idx % 2 == 0) 1f else -1f
-        val f = dir * t / period + idx * 0.3f
+        val f = dir * frac(t / period) + idx * 0.3f
         for (k in 12 downTo 1) {
             drawCircle(
                 color = color.copy(alpha = (1f - k / 12f) * 0.5f),
@@ -254,10 +263,10 @@ private fun DrawScope.orbits(t: Float, radius: Float, palette: (Float) -> Color)
 }
 
 // 10. 시계 가운데서 퍼져 나가는 물결
-private fun DrawScope.ripple(t: Float, radius: Float, palette: (Float) -> Color) {
-    val period = 3f
+private fun DrawScope.ripple(t: Double, radius: Float, palette: (Float) -> Color) {
+    val period = 3.0
     for (k in 0 until 3) {
-        val p = ((t / period) + k / 3f) % 1f
+        val p = (frac(t / period) + k / 3f) % 1f
         drawCircle(
             color = palette(p).copy(alpha = 0.4f * (1f - p)),
             radius = radius * 0.92f * p,

@@ -136,7 +136,7 @@ function onYouTubeIframeAPIReady(){
 
 /**
  * 유튜브 영상 배경. 주소나 소리 설정이 바뀌면 플레이어를 새로 만든다.
- * 앱이 화면에서 사라지면 일시정지, 돌아오면 다시 재생.
+ * 앱이 화면에서 사라지면 일시정지, 돌아오면 다시 재생 (축소 화면 중에는 계속 재생).
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -149,9 +149,10 @@ fun YouTubeBackground(url: String, sound: Boolean, modifier: Modifier = Modifier
 
         DisposableEffect(lifecycle, webView) {
             val observer = LifecycleEventObserver { _, event ->
+                // ON_STOP/ON_START 기준: 축소 화면(PIP)은 ON_PAUSE 만 오고 화면에는 보이므로 계속 재생
                 when (event) {
-                    Lifecycle.Event.ON_PAUSE -> webView?.onPause()
-                    Lifecycle.Event.ON_RESUME -> webView?.run {
+                    Lifecycle.Event.ON_STOP -> webView?.onPause()
+                    Lifecycle.Event.ON_START -> webView?.run {
                         onResume()
                         // 앱으로 돌아오면 플레이어는 일시정지 상태로 남으므로 직접 다시 재생
                         evaluateJavascript("if(window.player&&player.playVideo)player.playVideo();", null)

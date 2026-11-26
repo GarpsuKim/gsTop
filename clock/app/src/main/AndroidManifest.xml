@@ -5,6 +5,28 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- 유튜브 영상 배경 재생 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 위젯 두 번 누르기 → 긴급 연락처로 바로 전화 (거부하면 전화 앱에 번호만 띄움) -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- 시보: 매시 정각에 정확히 깨어나기 (시계 앱이라 USE_EXACT_ALARM, Android 12 이하는 SCHEDULE_EXACT_ALARM) -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <!-- 시보: 재부팅 후 정각 알람 다시 맞추기 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 시보: 앱이 꺼져 있어도 연주 (미디어 재생 포그라운드 서비스 + 연주 중 CPU 유지) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 시보: 연주 중 알림 ([정지] 버튼). 거부해도 시보는 울림 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 자체 화면 분할의 빈 절반에 앱 목록을 보여 주려면 (Android 11+ 다른 앱 보기 제한) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+    <!-- 전화 기능이 없는 기기(태블릿)에도 설치 가능하도록 -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -16,7 +38,10 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -35,6 +60,63 @@
                 <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
+
+        <!-- 시보: 정각 알람 수신 (우리 앱만 보냄) -->
+        <receiver
+            android:name=".chime.ChimeAlarmReceiver"
+            android:exported="false" />
+        <!-- 시보: 재부팅·시각/시간대 변경·앱 업데이트 때 알람 다시 맞추기 (시스템만 보내는 방송) -->
+        <receiver
+            android:name=".chime.ChimeRescheduleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <!-- 시보 연주 (앱이 꺼져 있어도) -->
+        <service
+            android:name=".chime.ChimeService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- 위젯 누르기 처리용 투명 화면: 한 번 = 시계 앱, 두 번 = 긴급 전화.
+             별도 작업(taskAffinity="")이라 두 번 누를 때 시계 앱이 잠깐 보이지 않음 -->
+        <activity
+            android:name=".widget.WidgetTapActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 위젯 글자색 설정 팝업: 위젯 추가할 때 + 위젯 길게 누르기 → 위젯 설정 (Android 12+) -->
+        <activity
+            android:name=".widget.WidgetColorActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!-- 홈 화면 시계 위젯 (납작한 2줄. 1줄: 오전/오후 HH:MM(:SS), 2줄: MM월 DD일 X요일 + 사용자 성명) -->
+        <receiver
+            android:name=".widget.ClockWidgetProvider"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_clock_info" />
+        </receiver>
     </application>
 
 </manifest>

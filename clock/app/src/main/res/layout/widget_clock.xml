@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 납작하고 긴 2줄 위젯
+     1줄 : 오전/오후 HH:MM(:SS)
+     2줄 : MM월 DD일 X요일  성명 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingStart="12dp"
+    android:paddingTop="2dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="4dp">
+
+    <!-- 1줄 : 오전/오후는 작게, 시각은 크게, 초는 중간 크기 (밑줄 맞춤)
+         기기 설정이 24시간이어도 항상 오전/오후 표시 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:baselineAligned="true"
+        android:orientation="horizontal">
+
+        <TextClock
+            android:id="@+id/widget_ampm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:format12Hour="a"
+            android:format24Hour="a"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextClock
+            android:id="@+id/widget_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:format12Hour="hh:mm"
+            android:format24Hour="hh:mm"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="34sp"
+            android:textStyle="bold" />
+
+        <!-- 초 (초 표시 모드에서만 보임) -->
+        <TextClock
+            android:id="@+id/widget_sec"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:format12Hour=":ss"
+            android:format24Hour=":ss"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- 2줄 : 날짜·요일 + 그 오른쪽에 성명 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:baselineAligned="true"
+        android:orientation="horizontal">
+
+        <TextClock
+            android:id="@+id/widget_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:format12Hour="MM월 dd일 EEEE"
+            android:format24Hour="MM월 dd일 EEEE"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="14sp" />
+
+        <!-- 성명 (등록 전에는 숨김) -->
+        <TextView
+            android:id="@+id/widget_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="#FFFFFFFF"
+            android:textSize="14sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,5 +1,6 @@
 package com.example.clock.ui
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -17,6 +18,15 @@ import android.net.Uri
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material.icons.filled.HorizontalSplit
+import androidx.compose.material.icons.filled.VerticalSplit
+import com.example.clock.split.SplitSide
+import kotlin.math.abs
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Repeat
@@ -45,6 +55,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -87,6 +100,20 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import android.os.SystemClock
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import com.example.clock.UserStore
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -122,6 +149,52 @@ private const val KEY_VIDEO_REPEAT = "video_repeat"
 private const val KEY_IMAGE_REPEAT = "image_repeat"
 private const val KEY_POWER_MODE = "power_mode"
 private const val KEY_BLACK_TRANSPARENCY = "black_transparency"
+private const val KEY_AUTO_CLOSE = "auto_close"
+private const val KEY_DIAL_NUMBERS = "dial_numbers"
+private const val KEY_DIGITAL_DATE = "digital_date"
+private const val KEY_DIGITAL_DATE_COLOR = "digital_date_color"
+
+/** 아날로그·하이브리드 시계판 숫자. 순서 = 저장값(ordinal) → 새 항목은 끝에 추가할 것. */
+enum class DialNumbers(@StringRes val label: Int) {
+    Off(R.string.numbers_off),
+    Quarters(R.string.numbers_quarters), // 3, 6, 9, 12
+    All(R.string.numbers_all),           // 1 ~ 12
+}
+
+/**
+ * [시계 닫히는 시간]: 마지막으로 화면을 만진 뒤(또는 앱이 화면에 나타난 뒤) 이 시간이 지나면 앱을 닫음.
+ * Off(0) = 닫지 않음 (무한). 순서 = 저장값(ordinal) → 새 항목은 끝에 추가할 것.
+ */
+enum class AutoClose(val seconds: Long, @StringRes val unit: Int, val amount: Int) {
+    Off(0L, 0, 0),
+    S30(30L, R.string.unit_seconds, 30),
+    M1(60L, R.string.unit_minutes, 1),
+    M2(2 * 60L, R.string.unit_minutes, 2),
+    M3(3 * 60L, R.string.unit_minutes, 3),
+    M5(5 * 60L, R.string.unit_minutes, 5),
+    M10(10 * 60L, R.string.unit_minutes, 10),
+    M15(15 * 60L, R.string.unit_minutes, 15),
+    M30(30 * 60L, R.string.unit_minutes, 30),
+    M60(60 * 60L, R.string.unit_minutes, 60),
+    M90(90 * 60L, R.string.unit_minutes, 90),
+    M120(120 * 60L, R.string.unit_minutes, 120),
+    M180(180 * 60L, R.string.unit_minutes, 180),
+    M360(360 * 60L, R.string.unit_minutes, 360),
+    H12(12 * 3600L, R.string.unit_hours, 12),
+    D1(86_400L, R.string.unit_days, 1),
+    D2(2 * 86_400L, R.string.unit_days, 2),
+    D3(3 * 86_400L, R.string.unit_days, 3),
+    D5(5 * 86_400L, R.string.unit_days, 5),
+}
+
+/** OLED 번인 방지: 이 간격마다 시계 화면 전체를 조금씩 옮김. */
+private const val BURN_IN_SHIFT_MS = 3 * 60_000L
+/** 번인 방지로 옮기는 거리 (가운데 기준 상하좌우·대각선). */
+private val BurnInShift = 4.dp
+/** 번인 방지 위치 순서: 가운데 → 8방향을 한 바퀴 (3분 × 9 = 27분 주기). */
+private val burnInSteps = listOf(
+    0 to 0, 1 to 0, 1 to 1, 0 to 1, -1 to 1, -1 to 0, -1 to -1, 0 to -1, 1 to -1,
+)
 
 enum class DialTheme(@StringRes val label: Int) {
     // 순서 = 저장값(ordinal). 새 테마는 끝에 추가할 것.
@@ -138,23 +211,25 @@ enum class DialTheme(@StringRes val label: Int) {
 }
 
 /** 화면 설정 묶음 (모두 SharedPreferences 에 저장). */
+// 기본값 = 처음 설치했을 때의 설정이자 [초기화] 했을 때의 설정.
+// (2026-11-25 사용 중이던 휴대폰 설정을 그대로 옮겨 옴: 디지털 · 오션 · 눈 내리는 밤 · 무지개 굵게 · 스크롤 ← · 투명 100%)
 data class ClockSettings(
-    val theme: DialTheme = DialTheme.Default,
-    val animation: DialAnimation = DialAnimation.Off,
-    val mode: DisplayMode = DisplayMode.Hybrid,
+    val theme: DialTheme = DialTheme.Ocean,
+    val animation: DialAnimation = DialAnimation.Snow,
+    val mode: DisplayMode = DisplayMode.Digital,
     val showSeconds: Boolean = true,
-    val digitalColor: DigitalColor = DigitalColor.White,
-    val digitalBold: Boolean = false,
+    val digitalColor: DigitalColor = DigitalColor.Rainbow,
+    val digitalBold: Boolean = true,
     val digitalNeon: Boolean = false,
-    val digitalScroll: DigitalScroll = DigitalScroll.Off,
+    val digitalScroll: DigitalScroll = DigitalScroll.Left,
     /** 0 = 검은 바탕, 그 외 = 배경 사진 있음 (바뀔 때마다 새 값 → 다시 불러옴). */
     val backgroundVersion: Long = 0L,
     /** 유튜브 배경 주소 ("" = 꺼짐). 켜져 있으면 사진 배경보다 우선. */
     val youtubeUrl: String = "",
-    val youtubeSound: Boolean = false,
+    val youtubeSound: Boolean = true,
     /** 배경(동영상) 목록 (비어 있으면 꺼짐). 우선순위: 유튜브 > 동영상 > 이미지. */
     val videoUris: List<String> = emptyList(),
-    val videoSound: Boolean = false,
+    val videoSound: Boolean = true,
     /** true = 목록 전체 무한 반복, false = 한 번씩만 재생하고 마지막 화면에서 멈춤. */
     val videoRepeat: Boolean = true,
     /** 이미지 슬라이드쇼: true = 무한 반복, false = 한 번씩만 보여주고 마지막 사진에서 멈춤. */
@@ -162,7 +237,15 @@ data class ClockSettings(
     /** 고급 모드(기본) / 전원 절약 모드. */
     val powerMode: PowerMode = PowerMode.Advanced,
     /** 검은 배경 투명도 (0 = 완전 검정, 1 = 완전 투명 → 폰 배경화면이 보임). 검은 배경일 때만 적용. */
-    val blackTransparency: Float = 0f,
+    val blackTransparency: Float = 1f,
+    /** 시계 닫히는 시간 (Off = 무한). */
+    val autoClose: AutoClose = AutoClose.Off,
+    /** 아날로그·하이브리드 시계판 숫자 (끔 / 3·6·9·12 / 전부). */
+    val dialNumbers: DialNumbers = DialNumbers.Off,
+    /** 디지털 날짜·요일 줄 (끔 / 위 / 아래). */
+    val digitalDate: DigitalDate = DigitalDate.Off,
+    /** 디지털 날짜·요일 줄 글자색 (날짜를 켰을 때만 [날짜색] 버튼이 보임). */
+    val digitalDateColor: DigitalColor = DigitalColor.White,
 ) {
     /** 이미지·동영상·유튜브 배경이 모두 꺼진 검은 배경인지. */
     val isBlackBackground: Boolean
@@ -194,26 +277,36 @@ internal suspend fun awaitNextFrame(frameMs: Long) {
 
 fun loadClockSettings(context: Context): ClockSettings {
     val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    // 예전 "디지털 체크박스" 값이 있으면 그걸로 모드를 정함 (켜짐=디지털, 꺼짐=아날로그)
-    val legacyMode = if (p.getBoolean(KEY_SHOW_DIGITAL, true)) DisplayMode.Hybrid else DisplayMode.Analog
+    // 저장된 값이 없는 항목은 ClockSettings 의 기본값 (기본값은 그곳 한 군데에서만 정함)
+    val d = ClockSettings()
+    // 예전 "디지털 체크박스" 값이 저장돼 있으면 그걸로 모드를 정함 (켜짐=하이브리드, 꺼짐=아날로그)
+    val fallbackMode = if (p.contains(KEY_SHOW_DIGITAL)) {
+        if (p.getBoolean(KEY_SHOW_DIGITAL, true)) DisplayMode.Hybrid else DisplayMode.Analog
+    } else {
+        d.mode
+    }
     return ClockSettings(
-        theme = DialTheme.entries.getOrElse(p.getInt(KEY_DIAL_THEME, 0)) { DialTheme.Default },
-        animation = DialAnimation.entries.getOrElse(p.getInt(KEY_DIAL_ANIMATION, 0)) { DialAnimation.Off },
-        mode = DisplayMode.entries.getOrElse(p.getInt(KEY_DISPLAY_MODE, legacyMode.ordinal)) { legacyMode },
-        showSeconds = p.getBoolean(KEY_SHOW_SECONDS, true),
-        digitalColor = DigitalColor.entries.getOrElse(p.getInt(KEY_DIGITAL_COLOR, 0)) { DigitalColor.White },
-        digitalBold = p.getBoolean(KEY_DIGITAL_BOLD, false),
-        digitalNeon = p.getBoolean(KEY_DIGITAL_NEON, false),
-        digitalScroll = DigitalScroll.entries.getOrElse(p.getInt(KEY_DIGITAL_SCROLL, 0)) { DigitalScroll.Off },
-        backgroundVersion = p.getLong(KEY_BACKGROUND_VERSION, 0L),
-        youtubeUrl = p.getString(KEY_YOUTUBE_URL, "").orEmpty(),
-        youtubeSound = p.getBoolean(KEY_YOUTUBE_SOUND, false),
+        theme = DialTheme.entries.getOrElse(p.getInt(KEY_DIAL_THEME, d.theme.ordinal)) { d.theme },
+        animation = DialAnimation.entries.getOrElse(p.getInt(KEY_DIAL_ANIMATION, d.animation.ordinal)) { d.animation },
+        mode = DisplayMode.entries.getOrElse(p.getInt(KEY_DISPLAY_MODE, fallbackMode.ordinal)) { fallbackMode },
+        showSeconds = p.getBoolean(KEY_SHOW_SECONDS, d.showSeconds),
+        digitalColor = DigitalColor.entries.getOrElse(p.getInt(KEY_DIGITAL_COLOR, d.digitalColor.ordinal)) { d.digitalColor },
+        digitalBold = p.getBoolean(KEY_DIGITAL_BOLD, d.digitalBold),
+        digitalNeon = p.getBoolean(KEY_DIGITAL_NEON, d.digitalNeon),
+        digitalScroll = DigitalScroll.entries.getOrElse(p.getInt(KEY_DIGITAL_SCROLL, d.digitalScroll.ordinal)) { d.digitalScroll },
+        backgroundVersion = p.getLong(KEY_BACKGROUND_VERSION, d.backgroundVersion),
+        youtubeUrl = p.getString(KEY_YOUTUBE_URL, d.youtubeUrl).orEmpty(),
+        youtubeSound = p.getBoolean(KEY_YOUTUBE_SOUND, d.youtubeSound),
         videoUris = p.getString(KEY_VIDEO_URIS, "").orEmpty().lines().filter { it.isNotBlank() },
-        videoSound = p.getBoolean(KEY_VIDEO_SOUND, false),
-        videoRepeat = p.getBoolean(KEY_VIDEO_REPEAT, true),
-        imageRepeat = p.getBoolean(KEY_IMAGE_REPEAT, true),
-        powerMode = PowerMode.entries.getOrElse(p.getInt(KEY_POWER_MODE, 0)) { PowerMode.Advanced },
-        blackTransparency = p.getFloat(KEY_BLACK_TRANSPARENCY, 0f).coerceIn(0f, 1f),
+        videoSound = p.getBoolean(KEY_VIDEO_SOUND, d.videoSound),
+        videoRepeat = p.getBoolean(KEY_VIDEO_REPEAT, d.videoRepeat),
+        imageRepeat = p.getBoolean(KEY_IMAGE_REPEAT, d.imageRepeat),
+        powerMode = PowerMode.entries.getOrElse(p.getInt(KEY_POWER_MODE, d.powerMode.ordinal)) { d.powerMode },
+        blackTransparency = p.getFloat(KEY_BLACK_TRANSPARENCY, d.blackTransparency).coerceIn(0f, 1f),
+        autoClose = AutoClose.entries.getOrElse(p.getInt(KEY_AUTO_CLOSE, d.autoClose.ordinal)) { d.autoClose },
+        dialNumbers = DialNumbers.entries.getOrElse(p.getInt(KEY_DIAL_NUMBERS, d.dialNumbers.ordinal)) { d.dialNumbers },
+        digitalDate = DigitalDate.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE, d.digitalDate.ordinal)) { d.digitalDate },
+        digitalDateColor = DigitalColor.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE_COLOR, d.digitalDateColor.ordinal)) { d.digitalDateColor },
     )
 }
 
@@ -236,12 +329,16 @@ fun saveClockSettings(context: Context, s: ClockSettings) {
         putBoolean(KEY_IMAGE_REPEAT, s.imageRepeat)
         putInt(KEY_POWER_MODE, s.powerMode.ordinal)
         putFloat(KEY_BLACK_TRANSPARENCY, s.blackTransparency)
+        putInt(KEY_AUTO_CLOSE, s.autoClose.ordinal)
+        putInt(KEY_DIAL_NUMBERS, s.dialNumbers.ordinal)
+        putInt(KEY_DIGITAL_DATE, s.digitalDate.ordinal)
+        putInt(KEY_DIGITAL_DATE_COLOR, s.digitalDateColor.ordinal)
     }
 }
 
 private val DialPadding = 16.dp
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ClockScreen(
     settings: ClockSettings,
@@ -254,6 +351,18 @@ fun ClockScreen(
     music: MusicViewModel? = null,
     /** 배경(동영상) 재생기 (재생 위치 슬라이더용). */
     video: VideoBackgroundViewModel? = null,
+    /** 축소 화면(PIP) 중이면 true: 버튼을 모두 숨기고 시계만. */
+    inPip: Boolean = false,
+    /** [⧉ 축소] 버튼: 축소 화면으로 전환 (인자 = 디지털 모드인지). null 이면 버튼 없음. */
+    onEnterPip: ((digital: Boolean) -> Unit)? = null,
+    /** 위젯을 눌러 들어올 때마다 1씩 커짐: 버튼을 숨기고 상태바·내비게이션바까지 감춘 전체화면으로. */
+    fullscreenRequest: Int = 0,
+    /** 자체 화면 분할: 시계가 있는 자리 (null = 전체 화면). */
+    split: SplitSide? = null,
+    /** [화면분할] 버튼·두 손가락 스와이프로 분할 자리를 바꿈 (null = 분할 해제). null 이면 기능 없음. */
+    onSplitChange: ((SplitSide?) -> Unit)? = null,
+    /** 시스템 화면 분할로 다른 앱과 나란히 떠 있는지 ([화면분할] 메뉴에 [분할 해제] 만). */
+    inSystemSplit: Boolean = false,
 ) {
     val theme = settings.theme
     val animation = settings.animation
@@ -262,12 +371,29 @@ fun ClockScreen(
 
     // 고급 모드: 0.05초마다(1초에 20번) 갱신 → 초침이 부드럽게 흐름.
     // 전원 절약 모드: 1초에 한 번, 초가 바뀌는 순간에 맞춰 갱신 → 초침 "똑딱", CPU 크게 절약.
-    LaunchedEffect(settings.powerMode) {
+    // 초침이 없을 때 (아날로그/하이브리드 + 초침 끔): 분이 바뀌는 순간에만 1분에 한 번 갱신 → 전력 절약.
+    // (디지털은 초까지 표시하므로 해당 없음)
+    val minuteOnly = settings.mode != DisplayMode.Digital && !settings.showSeconds
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(settings.powerMode, minuteOnly, lifecycle) {
         val saving = settings.powerMode == PowerMode.Saving
+        // 앱이 보일 때만 갱신. 다시 보이면 즉시 현재 시각으로 (화면이 꺼졌다 켜져도 1분 늦게 보이지 않게)
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         while (true) {
-            now = if (saving) LocalTime.now().withNano(0) else LocalTime.now()
+            now = when {
+                minuteOnly -> LocalTime.now().withSecond(0).withNano(0) // 분침이 분 눈금에 정확히
+                saving -> LocalTime.now().withNano(0)
+                else -> LocalTime.now()
+            }
             today = LocalDate.now()
-            delay(if (saving) 1_000L - System.currentTimeMillis() % 1_000L else 50L)
+            delay(
+                when {
+                    minuteOnly -> 60_000L - System.currentTimeMillis() % 60_000L
+                    saving -> 1_000L - System.currentTimeMillis() % 1_000L
+                    else -> 50L
+                },
+            )
+        }
         }
     }
 
@@ -276,25 +402,162 @@ fun ClockScreen(
     val digitalOnly = settings.mode == DisplayMode.Digital
 
     // 화면을 누를 때마다 버튼 보이기/숨기기 (회전해도 유지)
-    var controlsVisible by rememberSaveable { mutableStateOf(true) }
+    // 앱은 항상 버튼 없이 시작 (화면을 누르면 버튼이 나타남)
+    var controlsVisible by rememberSaveable { mutableStateOf(false) }
+    // 전체화면: 상태바/내비게이션바 숨김. 앱은 항상 전체화면으로 시작하고,
+    // 화면을 눌러 버튼을 다시 보이면 바도 돌아옴. 앱이 떠 있을 때 위젯을 누르면 다시 전체화면으로.
     // 유튜브 주소를 공유받으면 버튼이 숨겨져 있어도 유튜브 창이 보이도록 다시 표시
-    LaunchedEffect(incomingYouTube) {
-        if (incomingYouTube != null) controlsVisible = true
+    var widgetFullscreen by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(fullscreenRequest) {
+        if (fullscreenRequest > 0) {
+            controlsVisible = false
+            widgetFullscreen = true
+        }
     }
+    LaunchedEffect(incomingYouTube) {
+        if (incomingYouTube != null) {
+            controlsVisible = true
+            widgetFullscreen = false
+        }
+    }
+    val window = (LocalContext.current as? Activity)?.window
+    LaunchedEffect(widgetFullscreen, window) {
+        val w = window ?: return@LaunchedEffect
+        val bars = WindowCompat.getInsetsController(w, w.decorView)
+        if (widgetFullscreen) {
+            // 가장자리에서 밀면 잠깐 나타났다가 다시 숨음
+            bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            bars.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    // 사용자 등록 창: 사용자 성명이 아직 없으면 앱을 시작할 때 자동으로 띄움
+    val appContext = LocalContext.current
+    var userDialog by rememberSaveable { mutableStateOf(UserStore.load(appContext).name.isBlank()) }
+
+    // 축소 화면(PIP) 중에는 작은 창에 시계만 보이도록 버튼을 모두 숨김
+    val showControls = controlsVisible && !inPip
 
     val menuHost = remember { InlineMenuHost() }
     // 버튼을 숨기면 열려 있던 메뉴도 함께 사라지도록 (숨겨진 버튼의 메뉴가 남지 않게)
-    LaunchedEffect(controlsVisible) { if (!controlsVisible) menuHost.current = null }
+    LaunchedEffect(showControls) { if (!showControls) menuHost.current = null }
+
+    val haptic = LocalHapticFeedback.current
+
+    // [시계 닫히는 시간]: 화면을 만질 때마다, 그리고 앱이 다시 화면에 나타날 때마다 처음부터 다시 셈.
+    // 시간이 다 되면 앱을 닫음 → 화면 켜짐 유지가 풀려 폰이 평소대로 화면을 끔. Off = 무한.
+    var touchCount by remember { mutableIntStateOf(0) }
+    val activity = LocalContext.current as? Activity
+    LaunchedEffect(settings.autoClose, touchCount, lifecycle) {
+        val limitMs = settings.autoClose.seconds * 1_000L
+        if (limitMs <= 0L || activity == null) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            // 실제 경과 시간(elapsedRealtime)으로 판단: 폰이 잠들어 delay 가 늦어져도 정확히 닫힘
+            val deadline = SystemClock.elapsedRealtime() + limitMs
+            while (true) {
+                val remain = deadline - SystemClock.elapsedRealtime()
+                if (remain <= 0L) {
+                    activity.finish()
+                    break
+                }
+                delay(remain.coerceAtMost(60_000L))
+            }
+        }
+    }
+
+    // 두 손가락 스와이프에서 최신 값을 쓰도록
+    val latestOnSplitChange by rememberUpdatedState(onSplitChange)
+    val screenLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val latestLandscape by rememberUpdatedState(screenLandscape)
+
+    // OLED 번인 방지: 3분마다 시계 화면 전체를 4dp 씩 옮김 (가운데 → 8방향, 27분에 한 바퀴. 눈에 거의 안 띔)
+    var burnInStep by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(BURN_IN_SHIFT_MS)
+            burnInStep = (burnInStep + 1) % burnInSteps.size
+        }
+    }
+    val burnInPx = with(LocalDensity.current) { BurnInShift.toPx() }
 
     CompositionLocalProvider(LocalInlineMenuHost provides menuHost) {
     Box(
-        modifier.clickable(
+        modifier
+            .graphicsLayer {
+                // 축소 화면(PIP)은 창이 작아서 옮기지 않음
+                if (!inPip) {
+                    val (dx, dy) = burnInSteps[burnInStep]
+                    translationX = dx * burnInPx
+                    translationY = dy * burnInPx
+                }
+            }
+            // 화면을 만지면 [시계 닫히는 시간] 을 처음부터 다시 셈 (누르기·끌기 동작은 그대로 전달)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Initial)
+                        if (e.type == PointerEventType.Press) touchCount++
+                    }
+                }
+            }
+            // 두 손가락 스와이프 → 화면 분할 (한 손가락 끌기·누르기는 그대로 아래로 전달)
+            //  가로 화면: → 右 분할, ← 左 분할 / 세로 화면: ↑ 上 분할, ↓ 下 분할
+            .pointerInput(inPip) {
+                if (inPip) return@pointerInput
+                val minPx = TwoFingerSwipeMin.toPx()
+                awaitPointerEventScope {
+                    while (true) {
+                        var e = awaitPointerEvent(PointerEventPass.Initial)
+                        if (e.changes.count { it.pressed } < 2) continue
+                        // 두 손가락이 닿은 순간부터 모든 손가락을 뗄 때까지: 이동량 합산 + 아래(스크롤 끌기·누르기)로 안 보냄
+                        var dx = 0f
+                        var dy = 0f
+                        while (true) {
+                            val moving = e.changes.filter { it.pressed && it.previousPressed }
+                            if (moving.isNotEmpty()) {
+                                dx += moving.sumOf { (it.position.x - it.previousPosition.x).toDouble() }.toFloat() / moving.size
+                                dy += moving.sumOf { (it.position.y - it.previousPosition.y).toDouble() }.toFloat() / moving.size
+                            }
+                            e.changes.forEach { it.consume() }
+                            if (e.changes.none { it.pressed }) break
+                            e = awaitPointerEvent(PointerEventPass.Initial)
+                        }
+                        val change = latestOnSplitChange ?: continue
+                        val landscape = latestLandscape
+                        val side = when {
+                            landscape && abs(dx) > abs(dy) && dx >= minPx -> SplitSide.Right
+                            landscape && abs(dx) > abs(dy) && dx <= -minPx -> SplitSide.Left
+                            !landscape && abs(dy) > abs(dx) && dy <= -minPx -> SplitSide.Top
+                            !landscape && abs(dy) > abs(dx) && dy >= minPx -> SplitSide.Bottom
+                            else -> null
+                        }
+                        if (side != null) change(side)
+                    }
+                }
+            }
+            .combinedClickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null, // 누를 때 물결 효과 없이
-        ) { controlsVisible = !controlsVisible },
+            // 디지털: 화면을 꾹 누르고 있으면 스크롤 종료 (설정에 저장됨)
+            onLongClick = if (digitalOnly && settings.digitalScroll != DigitalScroll.Off) {
+                {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSettingsChange(settings.copy(digitalScroll = DigitalScroll.Off))
+                }
+            } else {
+                null
+            },
+        ) {
+            controlsVisible = !controlsVisible
+            if (controlsVisible) widgetFullscreen = false // 버튼을 다시 보이면 전체화면 해제
+        },
     ) {
         if (digitalOnly) {
-            // 디지털: 다른 것은 모두 지우고 큰 시각만
+            // 디지털: 글자를 좌우로 끌면 손가락을 따라 움직이고, 놓으면 그 방향으로 스크롤 (설정에 저장됨)
+            val swipeSettings by rememberUpdatedState(settings)
+            val swipeOnChange by rememberUpdatedState(onSettingsChange)
             BigDigitalClock(
                 time = now,
                 color = settings.digitalColor,
@@ -302,9 +565,13 @@ fun ClockScreen(
                 neon = settings.digitalNeon,
                 scroll = settings.digitalScroll,
                 powerMode = settings.powerMode,
+                date = today,
+                datePosition = settings.digitalDate,
+                dateColor = settings.digitalDateColor,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(DialPadding),
+                onScrollChange = { swipeOnChange(swipeSettings.copy(digitalScroll = it)) },
             )
         } else {
             AnalogClockArea(settings, style, now, today)
@@ -330,11 +597,25 @@ fun ClockScreen(
                         checked = settings.digitalNeon,
                         onCheckedChange = { onSettingsChange(settings.copy(digitalNeon = it)) },
                     )
+                    // [날짜 ▾] → 끔 / 날짜(상) / 날짜(하)
+                    SmallMenu(
+                        selected = settings.digitalDate,
+                        items = DigitalDate.entries,
+                        label = { stringResource(it.label) },
+                        onSelect = { onSettingsChange(settings.copy(digitalDate = it)) },
+                    )
                 } else {
                     SmallCheck(
                         label = stringResource(R.string.show_seconds),
                         checked = settings.showSeconds,
                         onCheckedChange = { onSettingsChange(settings.copy(showSeconds = it)) },
+                    )
+                    // [숫자 ▾] → 끔 / 3·6·9·12 / 전부
+                    SmallMenu(
+                        selected = settings.dialNumbers,
+                        items = DialNumbers.entries,
+                        label = { stringResource(it.label) },
+                        onSelect = { onSettingsChange(settings.copy(dialNumbers = it)) },
                     )
                 }
                 // [⚡ 고급 모드 ▾] / [전원 절약 모드 ▾]
@@ -352,6 +633,10 @@ fun ClockScreen(
                     onSelect = { onSettingsChange(settings.copy(powerMode = it)) },
                 )
                 // [↺ 초기화] → 확인 후 모든 설정을 처음 상태로
+                // [⧉ 축소] → 다른 앱 위에 작은 창으로 (화면 속 화면)
+                if (onEnterPip != null) PipButton(onClick = { onEnterPip(digitalOnly) })
+                // [⧉ 화면분할 ▾] → 가로: 左/右 분할, 세로: 上/下 분할 (+ 분할 중이면 분할 해제)
+                if (!inPip && onSplitChange != null) SplitButton(split, inSystemSplit, onSplitChange)
                 ResetButton(onReset = { onSettingsChange(ClockSettings()) })
             }
         }
@@ -373,6 +658,16 @@ fun ClockScreen(
                         icon = { ColorSwatch(it) },
                         onSelect = { onSettingsChange(settings.copy(digitalColor = it)) },
                     )
+                    // [날짜 ● ▾] → 날짜·요일 줄 글자색 (날짜를 켰을 때만)
+                    if (settings.digitalDate != DigitalDate.Off) {
+                        SmallMenu(
+                            selected = settings.digitalDateColor,
+                            items = DigitalColor.entries,
+                            label = { stringResource(R.string.date_color, stringResource(it.label)) },
+                            icon = { ColorSwatch(it) },
+                            onSelect = { onSettingsChange(settings.copy(digitalDateColor = it)) },
+                        )
+                    }
                 } else {
                     SmallMenu(
                         selected = animation,
@@ -405,6 +700,17 @@ fun ClockScreen(
                 if (music != null) MusicButton(music)
                 // [📅 달력] → 기본 브라우저로 음력 달력 페이지 (모든 모드 공통)
                 CalendarButton()
+                // [🔔 시보] → 매시 정각 음악 연주 설정 (모든 모드 공통, 앱이 꺼져 있어도 울림)
+                ChimeButton()
+                // [⏱ 닫힘: 무한 ▾] → 시계 닫히는 시간 (모든 모드 공통)
+                SmallMenu(
+                    selected = settings.autoClose,
+                    items = AutoClose.entries,
+                    label = { autoCloseLabel(it) },
+                    onSelect = { onSettingsChange(settings.copy(autoClose = it)) },
+                )
+                // [👤 사용자 등록] → 성명 + 긴급 연락처 (모든 모드 공통)
+                UserButton(onClick = { userDialog = true })
                 // 마지막: [⏰ 알람] → 시스템 시계 앱의 알람 화면 (모든 모드 공통)
                 AlarmButton()
             }
@@ -413,7 +719,7 @@ fun ClockScreen(
         // 버튼 배치 (가로·세로 공통): A 는 좌상단, B 는 우하단.
         // 가로 화면은 넓어서 각각 1줄, 세로 화면은 폭이 모자라면 자동으로 2줄로 나뉨.
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
@@ -421,7 +727,7 @@ fun ClockScreen(
             Box(Modifier.padding(top = 4.dp, start = 8.dp, end = 8.dp)) { modeControls() }
         }
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomEnd),
@@ -433,7 +739,7 @@ fun ClockScreen(
         // 세로 화면 → 오른쪽 가운데에 세로로 (위로 = 투명), 가로 화면 → 상단 가운데에 가로로 (오른쪽 = 투명)
         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         AnimatedVisibility(
-            visible = controlsVisible && settings.isBlackBackground,
+            visible = showControls && settings.isBlackBackground,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(if (landscape) Alignment.TopCenter else Alignment.CenterEnd),
@@ -449,7 +755,78 @@ fun ClockScreen(
 
         // 열린 목록 메뉴는 별도 창이 아니라 이 화면 맨 위에 그림 (터치가 뒤로 새지 않도록)
         InlineMenuLayer(menuHost)
+
+        // 사용자 등록 창 (축소 화면에서는 띄우지 않음)
+        if (userDialog && !inPip) UserRegisterDialog(onDismiss = { userDialog = false })
     }
+    }
+}
+
+/** 두 손가락 스와이프를 화면 분할로 볼 최소 이동 거리. */
+private val TwoFingerSwipeMin = 80.dp
+
+/**
+ * [화면분할 ▾] 버튼: 자체 화면 분할. 시계를 고른 절반 자리에만 그리고 나머지 절반은 투명(폰 배경화면).
+ * 가로 화면 → [左 분할] [右 분할], 세로 화면 → [上 분할] [下 분할].
+ * 이미 분할된 상태(자체 분할 또는 시스템 분할)면 [분할 해제] 만.
+ */
+@Composable
+private fun SplitButton(current: SplitSide?, systemSplit: Boolean, onChange: (SplitSide?) -> Unit) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Icon(
+                if (landscape) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.split), style = MaterialTheme.typography.labelMedium)
+        }
+        InlineDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (current != null || systemSplit) {
+                // 이미 분할됨 → [분할 해제] 만
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.split_exit), style = MaterialTheme.typography.bodyMedium) },
+                    onClick = {
+                        expanded = false
+                        onChange(null)
+                        // 시스템 분할은 앱이 직접 풀 수 없음 → 방법 안내
+                        if (systemSplit) {
+                            Toast.makeText(context, R.string.split_system_exit_hint, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                )
+            } else {
+                SplitSide.sides(landscape).forEach { side ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(side.label), style = MaterialTheme.typography.bodyMedium) },
+                        onClick = {
+                            expanded = false
+                            onChange(side)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** [⧉ 축소] 버튼: 축소 화면(화면 속 화면)으로 전환. */
+@Composable
+private fun PipButton(onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+    ) {
+        Icon(Icons.Filled.PictureInPictureAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(stringResource(R.string.pip), style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -707,6 +1084,7 @@ private fun AnalogClockArea(
             val dialSize = minOf(maxWidth, maxHeight)
             Box(modifier = Modifier.size(dialSize), contentAlignment = Alignment.Center) {
                 DialFace(style, Modifier.fillMaxSize())
+                DialNumberLayer(style, settings.dialNumbers, Modifier.fillMaxSize())
                 if (settings.mode == DisplayMode.Hybrid) {
                     // 시계판 안쪽: 위에 요일(AM/PM), 아래에 년월일
                     val amPm = if (now.hour < 12) "AM" else "PM"
@@ -751,6 +1129,35 @@ private fun SmallCheck(label: String, checked: Boolean, onCheckedChange: (Boolea
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 6.dp),
         )
+    }
+}
+
+/**
+ * 시계판 숫자: 긴 눈금(3·6·9·12) 바로 안쪽 원 위에. 크기는 시계판에 비례, 색은 테마 글자색.
+ * 하이브리드의 요일·날짜 글자(중심에서 위아래 0.44r)와 겹치지 않는 위치·크기.
+ */
+@Composable
+private fun DialNumberLayer(style: DialStyle, numbers: DialNumbers, modifier: Modifier = Modifier) {
+    if (numbers == DialNumbers.Off) return
+    val measurer = rememberTextMeasurer()
+    val hours = if (numbers == DialNumbers.Quarters) listOf(12, 3, 6, 9) else (1..12).toList()
+    Canvas(modifier) {
+        val radius = size.minDimension / 2f
+        val fontPx = radius * 0.15f
+        val textStyle = TextStyle(fontSize = fontPx.toSp(), fontWeight = FontWeight.Bold)
+        // 눈금 바깥 끝(DialFace 와 같은 계산) → 긴 눈금 길이 → 조금 띄우고 → 글자 반 높이만큼 안쪽
+        val tickOuter = radius - radius * 0.035f - radius * 0.025f
+        val r = tickOuter - radius * 0.18f - radius * 0.04f - fontPx * 0.55f
+        for (h in hours) {
+            val layout = measurer.measure(h.toString(), textStyle)
+            val c = center + polar(Math.toRadians(h * 30.0 - 90.0), r)
+            drawText(
+                textLayoutResult = layout,
+                brush = style.textBrush,
+                topLeft = Offset(c.x - layout.size.width / 2f, c.y - layout.size.height / 2f),
+                alpha = 0.9f,
+            )
+        }
     }
 }
 
@@ -816,6 +1223,17 @@ private fun <T> SmallMenu(
             }
         }
     }
+}
+
+/** "닫힘: 무한", "닫힘: 30초", "닫힘: 90분", "닫힘: 12시간", "닫힘: 1일" … */
+@Composable
+private fun autoCloseLabel(a: AutoClose): String {
+    val value = if (a == AutoClose.Off) {
+        stringResource(R.string.auto_close_infinite)
+    } else {
+        stringResource(a.unit, a.amount)
+    }
+    return stringResource(R.string.auto_close_format, value)
 }
 
 /** 시계판 하나를 그리는 데 필요한 색 묶음. */
