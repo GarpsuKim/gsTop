@@ -30,6 +30,10 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.material3.ScaffoldDefaults
+import com.example.clock.split.opposite
+import com.example.clock.split.screenEdgeSides
 import com.example.clock.ui.BackgroundSlideshow
 import com.example.clock.ui.YouTubeBackground
 import com.example.clock.ui.extractYouTubeUrl
@@ -122,8 +126,10 @@ class MainActivity : ComponentActivity() {
                     SplitSide.Top -> Modifier.fillMaxWidth().fillMaxHeight(listPart).align(Alignment.BottomCenter)
                     SplitSide.Bottom -> Modifier.fillMaxWidth().fillMaxHeight(listPart).align(Alignment.TopCenter)
                 }
-                if (appListArea != null) {
-                    AppListPanel(appListArea.windowInsetsPadding(WindowInsets.safeDrawing))
+                if (appListArea != null && activeSplit != null) {
+                    // 앱 목록이 화면 가장자리에 닿은 쪽에만 여백 (구분선 쪽에 상태바·내비게이션바 여백이 생기지 않게).
+                    // safeDrawing = 시스템 바 + 카메라 구멍 + 키보드 (목록이 아래쪽이면 검색 키보드 위로 줄어듦)
+                    AppListPanel(appListArea.windowInsetsPadding(WindowInsets.safeDrawing.only(screenEdgeSides(activeSplit.opposite()))))
                 }
                 val clockArea = when (activeSplit) {
                     null -> Modifier.fillMaxSize()
@@ -170,6 +176,13 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     containerColor = Color.Transparent,
+                    // 자체 분할 중에는 시계가 화면 가장자리에 닿은 쪽에만 시스템 바 여백
+                    // (예: 上 분할 시계는 화면 아래에 닿지 않으므로 내비게이션바 여백 없음 → 버튼 줄이 구분선 가까이)
+                    contentWindowInsets = if (activeSplit == null) {
+                        ScaffoldDefaults.contentWindowInsets
+                    } else {
+                        ScaffoldDefaults.contentWindowInsets.only(screenEdgeSides(activeSplit))
+                    },
                 ) { innerPadding ->
                     ClockScreen(
                         settings = settings,

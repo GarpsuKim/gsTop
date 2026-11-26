@@ -1,6 +1,7 @@
 package com.example.clock.split
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.WindowInsetsSides
 import com.example.clock.R
 
 /**
@@ -33,4 +34,24 @@ enum class SplitSide(@StringRes val label: Int) {
         fun sides(landscape: Boolean): List<SplitSide> =
             if (landscape) listOf(Left, Right) else listOf(Top, Bottom)
     }
+}
+
+/** 반대쪽 자리 (시계가 左 이면 앱 목록은 右). */
+fun SplitSide.opposite(): SplitSide = when (this) {
+    SplitSide.Left -> SplitSide.Right
+    SplitSide.Right -> SplitSide.Left
+    SplitSide.Top -> SplitSide.Bottom
+    SplitSide.Bottom -> SplitSide.Top
+}
+
+/**
+ * 이 자리에 놓인 영역이 화면 가장자리에 닿는 쪽 (가운데 구분선 쪽은 빠짐).
+ * 상태바·내비게이션바·카메라 구멍 여백은 이 쪽에만 주면 됨.
+ * 예: 上 → 위·왼쪽·오른쪽 (아래는 구분선), 右 → 오른쪽·위·아래 (왼쪽은 구분선).
+ */
+fun screenEdgeSides(side: SplitSide): WindowInsetsSides = when (side) {
+    SplitSide.Left -> WindowInsetsSides.Left + WindowInsetsSides.Vertical
+    SplitSide.Right -> WindowInsetsSides.Right + WindowInsetsSides.Vertical
+    SplitSide.Top -> WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+    SplitSide.Bottom -> WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal
 }

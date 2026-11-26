@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.clock.R
 import kotlin.math.roundToInt
@@ -35,6 +36,8 @@ fun TransparencySlider(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     horizontal: Boolean = false,
+    /** 슬라이더 막대 길이 (자리가 좁으면 줄여서 넘김). */
+    length: Dp = SliderDefaultLength,
 ) {
     val icon = @Composable {
         Icon(
@@ -63,7 +66,7 @@ fun TransparencySlider(
             Slider(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.width(220.dp), // 가로 길이
+                modifier = Modifier.width(length), // 가로 길이
             )
             percent()
         }
@@ -78,7 +81,7 @@ fun TransparencySlider(
                 value = value,
                 onValueChange = onValueChange,
                 modifier = Modifier
-                    .height(220.dp) // 세로 길이
+                    .height(length) // 세로 길이
                     .vertical(),
             )
             percent()
@@ -107,3 +110,15 @@ private fun Modifier.vertical(): Modifier = layout { measurable, constraints ->
         }
     }
 }
+
+/** 슬라이더 막대 기본 길이. */
+val SliderDefaultLength = 220.dp
+
+/** 막대 말고 아이콘·여백·"50%" 글자가 차지하는 길이 (막대 방향). 자리가 좁을 때 막대 길이 계산용. */
+val SliderExtraLength = 70.dp
+
+/** 자리가 아주 좁을 때도 이만큼은 남기는 막대 길이. */
+val SliderMinLength = 60.dp
+
+/** 가로 슬라이더 한 줄의 높이 (세로 화면에서 시계 아래 빈 칸에 들어가는지 판단). */
+val SliderRowHeight = 48.dp

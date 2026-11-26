@@ -472,6 +472,8 @@ fun ClockScreen(
 
     // 우하단 버튼 줄의 높이 (px): 세로 화면 투명도 슬라이더를 그 위 빈 칸에 놓기 위해
     var bottomControlsPx by remember { mutableIntStateOf(0) }
+    // 좌상단 버튼 줄의 높이 (px): 가로 화면 투명도 슬라이더를 그 아래에 놓기 위해
+    var topControlsPx by remember { mutableIntStateOf(0) }
 
     val menuHost = remember { InlineMenuHost() }
     // 버튼을 숨기면 열려 있던 메뉴도 함께 사라지도록 (숨겨진 버튼의 메뉴가 남지 않게)
@@ -696,7 +698,11 @@ fun ClockScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
         ) {
-            Box(Modifier.padding(top = 4.dp, start = 8.dp, end = 8.dp)) { modeControls() }
+            Box(
+                Modifier
+                    .onSizeChanged { topControlsPx = it.height } // 투명도 슬라이더 자리 계산용
+                    .padding(top = 4.dp, start = 8.dp, end = 8.dp),
+            ) { modeControls() }
         }
         AnimatedVisibility(
             visible = showControls,
@@ -712,8 +718,10 @@ fun ClockScreen(
         }
 
         // 검은 배경일 때만 투명도 슬라이더 (폰 배경화면이 비침)
-        //  가로 화면 → 오른쪽에 세로로 (위로 = 투명), 아래 버튼 줄 위쪽 공간의 가운데
-        //  세로 화면 → 하단에 가로로 (오른쪽 = 투명), 시계 아래 끝과 아래 버튼 줄 사이 빈 칸의 가운데
+        //  가로 화면 → 오른쪽에 세로로 (위로 = 투명), 위 버튼 줄과 아래 버튼 줄 사이 공간의 가운데.
+        //              그 공간이 좁으면 (가로 분할로 시계 쪽이 좁아 버튼이 2줄씩) 막대를 줄여서 버튼과 겹치지 않게
+        //  세로 화면 → 하단에 가로로 (오른쪽 = 투명), 시계 아래 끝과 아래 버튼 줄 사이 빈 칸의 가운데.
+        //              빈 칸이 모자라면 (세로 분할로 시계 쪽이 낮음) 아래 버튼 줄 바로 위에
         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         AnimatedVisibility(
             visible = showControls && settings.isBlackBackground,
@@ -722,29 +730,43 @@ fun ClockScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val bottomControls = with(LocalDensity.current) { bottomControlsPx.toDp() }
-                val slider: @Composable (Modifier) -> Unit = { m ->
+                val density = LocalDensity.current
+                val topControls = with(density) { topControlsPx.toDp() }
+                val bottomControls = with(density) { bottomControlsPx.toDp() }
+                val slider: @Composable (Modifier, Dp) -> Unit = { m, length ->
                     TransparencySlider(
                         value = settings.blackTransparency,
                         onValueChange = { onSettingsChange(settings.copy(blackTransparency = it)) },
                         modifier = m,
                         horizontal = !landscape,
+                        length = length,
                     )
                 }
                 if (landscape) {
+                    // 두 버튼 줄 사이 높이에서 아이콘·글자 자리를 빼고 남는 만큼 (최대 기본 길이)
+                    val room = maxHeight - topControls - bottomControls
+                    val length = (room - SliderExtraLength).coerceIn(SliderMinLength, SliderDefaultLength)
                     Box(
-                        Modifier.fillMaxSize().padding(bottom = bottomControls),
+                        Modifier.fillMaxSize().padding(top = topControls, bottom = bottomControls),
                         contentAlignment = Alignment.CenterEnd,
-                    ) { slider(Modifier.padding(end = 4.dp)) }
+                    ) { slider(Modifier.padding(end = 4.dp), length) }
                 } else {
                     // 시계는 화면 가운데, 폭에 꽉 찬 정사각형 (AnalogClockArea·BigDigitalClock 과 같은 여백)
                     val clock = minOf(maxWidth, maxHeight) - DialPadding * 2
                     val clockBottom = maxHeight / 2 + clock / 2
-                    val gap = (maxHeight - bottomControls - clockBottom).coerceAtLeast(48.dp)
-                    Box(
-                        Modifier.fillMaxWidth().padding(top = clockBottom).height(gap),
-                        contentAlignment = Alignment.Center,
-                    ) { slider(Modifier) }
+                    val gap = maxHeight - bottomControls - clockBottom
+                    if (gap >= SliderRowHeight) {
+                        Box(
+                            Modifier.fillMaxWidth().padding(top = clockBottom).height(gap),
+                            contentAlignment = Alignment.Center,
+                        ) { slider(Modifier, SliderDefaultLength) }
+                    } else {
+                        // 빈 칸이 모자람 → 아래 버튼 줄 바로 위 (시계와 조금 겹쳐도 버튼·구분선에 잘리지 않게)
+                        Box(
+                            Modifier.fillMaxSize().padding(bottom = bottomControls),
+                            contentAlignment = Alignment.BottomCenter,
+                        ) { slider(Modifier, SliderDefaultLength) }
+                    }
                 }
             }
         }
