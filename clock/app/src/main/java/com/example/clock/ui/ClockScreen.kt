@@ -471,6 +471,8 @@ fun ClockScreen(
     val latestOnSplitChange by rememberUpdatedState(onSplitChange)
     val screenLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val latestLandscape by rememberUpdatedState(screenLandscape)
+    // 분할 중(자체 분할 또는 시스템 분할)에는 두 손가락 스와이프로 분할하지 않음
+    val latestSplitting by rememberUpdatedState(split != null || inSystemSplit)
 
     // OLED 번인 방지: 3분마다 시계 화면 전체를 4dp 씩 옮김 (가운데 → 8방향, 27분에 한 바퀴. 눈에 거의 안 띔)
     var burnInStep by remember { mutableIntStateOf(0) }
@@ -503,7 +505,7 @@ fun ClockScreen(
                 }
             }
             // 두 손가락 스와이프 → 화면 분할 (한 손가락 끌기·누르기는 그대로 아래로 전달)
-            //  가로 화면: → 右 분할, ← 左 분할 / 세로 화면: ↑ 上 분할, ↓ 下 분할
+            //  가로 화면: → 右 분할, ← 左 분할 / 세로 화면: ↑ 上 분할, ↓ 下 분할. 분할 중에는 동작 안 함
             .pointerInput(inPip) {
                 if (inPip) return@pointerInput
                 val minPx = TwoFingerSwipeMin.toPx()
@@ -524,6 +526,8 @@ fun ClockScreen(
                             if (e.changes.none { it.pressed }) break
                             e = awaitPointerEvent(PointerEventPass.Initial)
                         }
+                        // 분할 중이면 무시 (두 손가락 동작은 위에서 이미 막았으므로 글자 끌기 등도 일어나지 않음)
+                        if (latestSplitting) continue
                         val change = latestOnSplitChange ?: continue
                         val landscape = latestLandscape
                         val side = when {
