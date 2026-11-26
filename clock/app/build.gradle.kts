@@ -1,7 +1,44 @@
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+}
+
+// ---- 버전 정보 (앱의 [정보] 창에 표시) ----
+// 버전 이름 = 빌드 날짜 (예: 2026.11.26), 버전 번호 = yyMMdd (예: 261126, 날마다 커짐).
+// git 커밋 번호 (예: a99d6bf, 커밋 안 한 변경이 있으면 끝에 +). git 이 없으면 "unknown".
+val buildNow: LocalDateTime = LocalDateTime.now()
+fun gitOutput(vararg args: String): String = try {
+    providers.exec {
+        commandLine("git", *args)
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+} catch (e: Exception) {
+    ""
+}
+val gitHash: String = gitOutput("rev-parse", "--short", "HEAD").ifBlank { "unknown" } +
+    (if (gitOutput("status", "--porcelain", "--untracked-files=no").isNotBlank()) "+" else "")
+
+// ---- 도움말: 프로젝트 맨 위의 README.md 를 앱 안(assets)에 넣음 → README 를 고치면 다음 빌드에 자동 반영 ----
+abstract class CopyReadmeTask : DefaultTask() {
+    @get:InputFile
+    abstract val readme: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val out = outputDir.get().asFile
+        out.mkdirs()
+        readme.get().asFile.copyTo(File(out, "README.md"), overwrite = true)
+    }
+}
+val copyReadme = tasks.register<CopyReadmeTask>("copyReadme") {
+    readme.set(rootProject.layout.projectDirectory.file("README.md"))
 }
 
 android {
@@ -12,8 +49,10 @@ android {
         applicationId = "com.example.clock"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNow.format(DateTimeFormatter.ofPattern("yyMMdd")).toInt()
+        versionName = buildNow.format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
+        buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
+        buildConfigField("String", "BUILD_TIME", "\"${buildNow.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}\"")
 
         // 앱 이름 + 앱 ID 꼬리 (빌드 bat 마다 다르게 → 한 폰에 두 앱을 따로 설치 가능).
         // 빌드 bat 의 'set "AppIcon=..."' (앱 이름), 'set "AppIdSuffix=..."' (앱 ID 꼬리) 줄을 이 파일이 직접(UTF-8) 읽음.
@@ -60,6 +99,13 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.GIT_HASH, BUILD_TIME ([정보] 창)
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(copyReadme, CopyReadmeTask::outputDir)
     }
 }
 
@@ -75,5 +121,7 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.media3.exoplayer) // 배경(동영상) 재생
     implementation(libs.androidx.media3.ui)
+    implementation(libs.commonmark) // 도움말: README.md → HTML
+    implementation(libs.commonmark.ext.gfm.tables)
     debugImplementation(libs.androidx.ui.tooling)
 }

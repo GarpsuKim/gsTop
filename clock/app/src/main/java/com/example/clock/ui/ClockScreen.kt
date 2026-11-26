@@ -56,6 +56,8 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.SmartDisplay
@@ -461,6 +463,9 @@ fun ClockScreen(
     // 사용자 등록 창: 사용자 성명이 아직 없으면 앱을 시작할 때 자동으로 띄움
     val appContext = LocalContext.current
     var userDialog by rememberSaveable { mutableStateOf(UserStore.load(appContext).name.isBlank()) }
+    // [모드] → 도움말 / 정보 창 (화면을 돌려도 유지)
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
+    var aboutOpen by rememberSaveable { mutableStateOf(false) }
 
     // 축소 화면(PIP) 중에는 작은 창에 시계만 보이도록 버튼을 모두 숨김
     val showControls = controlsVisible && !inPip
@@ -631,6 +636,8 @@ fun ClockScreen(
                     onModeChange = { onSettingsChange(settings.copy(mode = it)) },
                     onReset = { onSettingsChange(ClockSettings()) },
                     onUserRegister = { userDialog = true },
+                    onHelp = { helpOpen = true },
+                    onAbout = { aboutOpen = true },
                 )
                 if (digitalOnly) {
                     // [글자 ▾] → ☑ 굵게 / ☑ 네온사인 / (구분선) 글자색
@@ -747,6 +754,9 @@ fun ClockScreen(
 
         // 사용자 등록 창 (축소 화면에서는 띄우지 않음)
         if (userDialog && !inPip) UserRegisterDialog(onDismiss = { userDialog = false })
+        // 도움말 / 정보 창 (축소 화면에서는 띄우지 않음)
+        if (helpOpen && !inPip) HelpDialog(onDismiss = { helpOpen = false })
+        if (aboutOpen && !inPip) AboutDialog(onDismiss = { aboutOpen = false })
     }
     }
 }
@@ -909,6 +919,8 @@ private fun MenuItem(
  *  초기화 → 확인 창 → [초기화] 를 누르면 모든 설정(표시 방식, 테마, 애니메이션, 초침, 글자색,
  *    굵게, 네온사인, 스크롤, 배경 사진 …)을 처음 상태로. 배경 사진 파일도 지운다.
  *  사용자 등록 → 성명 + 긴급 연락처 창
+ *  ── 구분선 ──
+ *  도움말 → README 의 사용자용 부분 ([HelpDialog]),  정보 → 버전·빌드·기기 ([AboutDialog])
  * 무엇을 골라도 목록은 닫힘.
  */
 @Composable
@@ -917,6 +929,8 @@ private fun ModeMenu(
     onModeChange: (DisplayMode) -> Unit,
     onReset: () -> Unit,
     onUserRegister: () -> Unit,
+    onHelp: () -> Unit,
+    onAbout: () -> Unit,
 ) {
     val context = LocalContext.current
     var confirming by remember { mutableStateOf(false) }
@@ -942,6 +956,15 @@ private fun ModeMenu(
         MenuItem(R.string.user_register, Icons.Filled.Person) {
             close()
             onUserRegister()
+        }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        MenuItem(R.string.help_title, Icons.AutoMirrored.Filled.HelpOutline) {
+            close()
+            onHelp()
+        }
+        MenuItem(R.string.about_title, Icons.Filled.Info) {
+            close()
+            onAbout()
         }
     }
 

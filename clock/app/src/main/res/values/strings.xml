@@ -130,6 +130,17 @@
     <string name="app_section_all">모든 앱</string>
     <string name="app_section_folders">홈 화면 폴더</string>
     <string name="app_folder_untitled">폴더</string>
+    <string name="help_title">도움말</string>
+    <string name="about_title">정보</string>
+    <string name="about_version">버전</string>
+    <string name="about_build_time">빌드</string>
+    <string name="about_app_id">앱 ID</string>
+    <string name="about_device">기기</string>
+    <string name="about_home_folders">홈 폴더</string>
+    <string name="about_home_folders_count">%1$d개 읽음 (화면 분할 앱 목록)</string>
+    <string name="about_home_folders_none">읽을 수 없음 (삼성 홈이 아니거나 폴더 없음)</string>
+    <string name="about_source">소스</string>
+    <string name="about_open_source">사용한 오픈소스</string>
     <string name="app_pin_hint">앱을 길게 누르면 위에 고정됩니다</string>
     <string name="app_pinned">위에 고정했습니다</string>
     <string name="app_unpinned">고정을 풀었습니다</string>
