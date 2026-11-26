@@ -6,7 +6,7 @@ rem usage: _BUILD_WIFI.BAT          (run directly, pause at end)
 rem        _BUILD_WIFI.BAT nopause  (when called from another bat)
 rem
 rem AppIcon     = app name shown on the home screen / widget list
-rem AppIdSuffix = added after com.example.clock (empty = com.example.clock)
+rem AppIdSuffix = added after io.github.garpsukim.clock (empty = io.github.garpsukim.clock)
 rem app/build.gradle.kts reads these two lines from this file (UTF-8),
 rem because this bat passes its own file name with -PappNameBat.
 rem Keep the format: set "AppIcon=name"

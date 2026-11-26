@@ -7,7 +7,7 @@
 
 - 언어: Kotlin + Jetpack Compose (Material 3), 도움말 표시에 commonmark-java
 - 최소 Android 8.0 (API 26), 대상 API 34
-- 패키지: `com.example.clock` (텔레그램 빌드는 `com.example.clock.kja`)
+- 앱 ID: `io.github.garpsukim.clock` (텔레그램 빌드는 `io.github.garpsukim.clock.kja`). 코드 위치(namespace)는 `com.example.clock`
 
 ---
 
@@ -226,8 +226,8 @@ Android Studio 없이 명령줄로 빌드합니다. (Android SDK: `C:\Android\sd
 
 | 빌드 | 앱 이름 | 앱 ID |
 |---|---|---|
-| `_BUILD_WIFI.BAT` | 영원한_시계 | `com.example.clock` |
-| `_BUILD_Telegram.BAT` | KJA시계 | `com.example.clock.kja` |
+| `_BUILD_WIFI.BAT` | 영원한_시계 | `io.github.garpsukim.clock` |
+| `_BUILD_Telegram.BAT` | KJA시계 | `io.github.garpsukim.clock.kja` |
 
 앱 ID 가 달라서 한 폰에 두 앱을 따로 설치할 수 있습니다 (설정·시보·위젯도 각자 따로).
 

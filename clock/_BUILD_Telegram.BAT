@@ -6,7 +6,7 @@ rem usage: _BUILD_Telegram.BAT          (run directly, pause at end)
 rem        _BUILD_Telegram.BAT nopause  (when called from another bat)
 rem
 rem AppIcon     = app name shown on the home screen / widget list
-rem AppIdSuffix = added after com.example.clock -> a separate app from the WIFI build,
+rem AppIdSuffix = added after io.github.garpsukim.clock -> a separate app from the WIFI build,
 rem               so both can be installed on one phone.
 rem               lowercase letter first, then lowercase letters / digits / _ only.
 rem               empty = same app as the WIFI build (overwrites it)

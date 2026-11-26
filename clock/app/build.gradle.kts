@@ -41,12 +41,17 @@ val copyReadme = tasks.register<CopyReadmeTask>("copyReadme") {
     readme.set(rootProject.layout.projectDirectory.file("README.md"))
 }
 
+// 앱 ID: Play 스토어·폰이 이 앱을 구분하는 고유 이름. Play 에 한 번 올리면 바꿀 수 없음.
+// (2026-11-26 com.example.clock → io.github.garpsukim.clock: Play 는 com.example 을 받지 않음.
+//  코드 위치 namespace 는 com.example.clock 그대로 → 화면 이름은 io.github.garpsukim.clock/com.example.clock.MainActivity)
+val baseAppId = "io.github.garpsukim.clock"
+
 android {
     namespace = "com.example.clock"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.clock"
+        applicationId = baseAppId
         minSdk = 26
         targetSdk = 34
         versionCode = buildNow.format(DateTimeFormatter.ofPattern("yyMMdd")).toInt()
@@ -58,8 +63,8 @@ android {
         // 빌드 bat 의 'set "AppIcon=..."' (앱 이름), 'set "AppIdSuffix=..."' (앱 ID 꼬리) 줄을 이 파일이 직접(UTF-8) 읽음.
         // bat → 환경 변수 → gradle 데몬으로 한글을 넘기면 깨지거나 데몬이 예전 값을 쓰는 일이 있어서,
         // bat 은 자기 파일 이름(영문)만 -PappNameBat=... 으로 넘기고, 값은 여기서 그 파일을 읽어 얻음.
-        //   _BUILD_WIFI.BAT     (← _RUN_WIFI.BAT)     → com.example.clock      (꼬리 없음)
-        //   _BUILD_Telegram.BAT (← _RUN_TELEGRAM.BAT) → com.example.clock.kja  (꼬리 .kja)
+        //   _BUILD_WIFI.BAT     (← _RUN_WIFI.BAT)     → io.github.garpsukim.clock      (꼬리 없음)
+        //   _BUILD_Telegram.BAT (← _RUN_TELEGRAM.BAT) → io.github.garpsukim.clock.kja  (꼬리 .kja)
         // -PappNameBat 없이 빌드하면 (gradlew 직접, Android Studio) _BUILD_WIFI.BAT. 파일이 없으면 기본 이름·꼬리 없음.
         val appNameBat = (project.findProperty("appNameBat") as String?)?.takeIf { it.isNotBlank() } ?: "_BUILD_WIFI.BAT"
         val buildBat = rootProject.file(appNameBat)
@@ -77,7 +82,7 @@ android {
             "$appNameBat 의 AppIdSuffix 가 잘못됨: '$idSuffix' (예: .kja — 영문 소문자로 시작, 영문 소문자·숫자·_ 만)"
         }
         applicationIdSuffix = idSuffix
-        logger.lifecycle("앱 이름(AppIcon) = $appLabel, 앱 ID = com.example.clock$idSuffix  ($appNameBat)")
+        logger.lifecycle("앱 이름(AppIcon) = $appLabel, 앱 ID = $baseAppId$idSuffix  ($appNameBat)")
         resValue("string", "app_name", appLabel)
     }
 
