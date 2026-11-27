@@ -338,9 +338,14 @@ object AlarmTone {
 object GreetingPlayer {
     private var player: MediaPlayer? = null
 
+    /** 지금 나오는 음악 (설정 창의 [들어보기] ↔ [멈추기] 표시용, null = 안 나옴). */
+    var playingUri by mutableStateOf<String?>(null)
+        private set
+
     fun play(context: Context, uri: String) {
         stop()
         if (uri.isBlank()) return
+        playingUri = uri
         player = runCatching {
             MediaPlayer().apply {
                 setAudioAttributes(
@@ -350,14 +355,17 @@ object GreetingPlayer {
                 setDataSource(context.applicationContext, Uri.parse(uri))
                 setOnCompletionListener { stop() }
                 setOnPreparedListener { it.start() }
+                setOnErrorListener { _, _, _ -> stop(); true } // 파일이 지워졌거나 권한이 없어진 경우 등
                 prepareAsync()
             }
         }.getOrNull()
+        if (player == null) playingUri = null
     }
 
     fun stop() {
         player?.runCatching { stop(); release() }
         player = null
+        playingUri = null
     }
 }
 

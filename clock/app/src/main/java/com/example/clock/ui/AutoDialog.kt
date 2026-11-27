@@ -98,6 +98,9 @@ import com.example.clock.auto.Place
 import com.example.clock.auto.PlaceSetting
 import com.example.clock.auto.RelaxKind
 import com.example.clock.auto.WifiMonitor
+import com.example.clock.auto.GreetingPlayer
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import com.example.clock.auto.hasBluetoothPermission
 import com.example.clock.chime.hour12
 
@@ -220,6 +223,8 @@ fun AutoDialog(onDismiss: () -> Unit) {
     var btPickFor by remember { mutableStateOf<String?>(null) }      // "watch" / "speaker"
     var appPickFor by remember { mutableStateOf<String?>(null) }     // "work" / "home" / "run0".."run4"
     var musicFor by remember { mutableStateOf<String?>(null) }       // "work" / "home" / "relax"
+    // [들어보기] 로 틀던 음악은 설정 창을 닫으면 멈춤
+    DisposableEffect(Unit) { onDispose { GreetingPlayer.stop() } }
 
     val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val f = musicFor ?: return@rememberLauncherForActivityResult
@@ -377,6 +382,8 @@ fun AutoDialog(onDismiss: () -> Unit) {
                                 onPick = { pickMany.launch(arrayOf("audio/*")) },
                                 onClear = if (s.relaxMusic.isNotEmpty()) ({ update(s.copy(relaxMusic = emptyList(), relaxMusicName = "")) }) else null,
                             )
+                            // 여러 곡이면 첫 곡으로 들어보기
+                            MusicTestButton(s.relaxMusic.firstOrNull().orEmpty())
                         } else {
                             var url by remember(s.relaxYoutube) { mutableStateOf(s.relaxYoutube) }
                             OutlinedTextField(
@@ -551,11 +558,31 @@ private fun PlaceSection(
             onPick = onPickMusic,
             onClear = if (p.musicUri.isNotBlank()) ({ onChange(p.copy(musicUri = "", musicName = "")) }) else null,
         )
+        MusicTestButton(p.musicUri)
         ValueRow(
             R.string.auto_open_app, p.appLabel.ifBlank { stringResource(R.string.auto_none) },
             onPick = onPickApp,
             onClear = if (p.app.isNotBlank()) ({ onChange(p.copy(app = "", appLabel = "")) }) else null,
         )
+    }
+}
+
+/**
+ * 음악 [▶ 들어보기] / [■ 멈추기]: 등록한 음악을 한 번 틀어 봄 (실제 인사·relax 때와 같은 재생기).
+ * 음악을 아직 고르지 않았으면 눌리지 않음.
+ */
+@Composable
+private fun MusicTestButton(uri: String) {
+    val context = LocalContext.current
+    val playing = uri.isNotBlank() && GreetingPlayer.playingUri == uri
+    OutlinedButton(
+        onClick = { if (playing) GreetingPlayer.stop() else GreetingPlayer.play(context, uri) },
+        enabled = uri.isNotBlank(),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(if (playing) R.string.auto_test_stop else R.string.auto_test_play))
     }
 }
 

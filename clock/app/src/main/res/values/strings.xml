@@ -383,6 +383,8 @@
     <string name="auto_wifi_full">직장 공유기는 %1$d개까지 등록할 수 있어요</string>
     <string name="auto_clear_all">모두 지우기</string>
     <string name="auto_wifi_register">지금 연결된 Wi-Fi 등록 (2.4/5GHz 는 각각 한 번씩)</string>
+    <string name="auto_test_play">들어보기</string>
+    <string name="auto_test_stop">멈추기</string>
     <string name="auto_greeting_music">인사 음악</string>
     <string name="auto_open_app">실행할 앱</string>
     <string name="auto_relax_title">relax 모드</string>
