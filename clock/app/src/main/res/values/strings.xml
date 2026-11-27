@@ -367,8 +367,8 @@
     <string name="auto_flip_mute_desc">폰을 엎으면 시보·약 알림·음악·백색 소음·동영상·유튜브 소리를 끔</string>
     <string name="auto_wake_event">이벤트 때 화면 켜기</string>
     <string name="auto_wake_event_desc">시보·약 먹을 시간에 화면이 꺼져 있으면 시계 화면을 켬 (그 뒤 화면 꺼짐은 시스템 설정대로)</string>
-    <string name="auto_watch_title">시계 찾기</string>
-    <string name="auto_watch_desc">등록한 손목시계가 블루투스로 연결되거나 끊기면 알람음을 울리고 시계 화면을 켭니다. 화면을 만지면 알람음이 멈춰요.</string>
+    <string name="auto_watch_title">분실 폰 찾기</string>
+    <string name="auto_watch_desc">블루투스 손목시계 MAC 주소를 미리 등록해 두고 폰을 분실하면, 손목시계와 폰과의 연결 여부를 감지하여, 분실 폰을 찾아 낼 가능성이 일부 있습니다. 손목시계와의 on/off 순간에 폰에서 알람음이 발생합니다.</string>
     <string name="auto_bt_device">손목시계 (블루투스)</string>
     <string name="auto_bt_speaker">홈 스피커 (블루투스)</string>
     <string name="auto_none">등록 안 됨</string>
@@ -380,6 +380,8 @@
     <string name="auto_home_desc">집 Wi-Fi 에 연결되면 왼쪽 위에 \'Home\', 인사 음악, 앱 실행, 시계 화면 (하루 한 번)</string>
     <string name="auto_wifi">Wi-Fi 공유기</string>
     <string name="auto_wifi_value">%1$s · MAC %2$d개</string>
+    <string name="auto_wifi_full">직장 공유기는 %1$d개까지 등록할 수 있어요</string>
+    <string name="auto_clear_all">모두 지우기</string>
     <string name="auto_wifi_register">지금 연결된 Wi-Fi 등록 (2.4/5GHz 는 각각 한 번씩)</string>
     <string name="auto_greeting_music">인사 음악</string>
     <string name="auto_open_app">실행할 앱</string>

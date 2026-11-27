@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
             requestHomeShortcutOnce()
             receiveShared(intent) // 앱이 꺼져 있을 때 "공유 → 시계" 로 시작된 경우
             receiveWidget(intent) // 앱이 꺼져 있을 때 위젯을 눌러 시작된 경우
-            receiveEvent(intent) // 자동 기능 이벤트(시보·약·시계 찾기·출근·귀가·relax)로 시작된 경우
+            receiveEvent(intent) // 자동 기능 이벤트(시보·약·분실 폰 찾기·출근·귀가·relax)로 시작된 경우
         }
         // 자동 기능: 출근·귀가 Wi-Fi 감시와 자동 실행 알람을 다시 맞춤 (강제 중지 등으로 지워졌어도 복구)
         WifiMonitor.register(this)
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
             // 잠들기 타이머 진행 (음악·동영상 소리를 서서히 줄이고, 끝나면 끔)
             SleepTimerEffect(music, videoBackground)
 
-            // 자동 기능 이벤트 처리 (시계 찾기 알람음·출근/귀가 인사·relax 배경·약 창)
+            // 자동 기능 이벤트 처리 (분실 폰 찾기 알람음·출근/귀가 인사·relax 배경·약 창)
             LaunchedEffect(AutoUi.pending) {
                 val e = AutoUi.pending ?: return@LaunchedEffect
                 AutoUi.pending = null
@@ -397,7 +397,7 @@ class MainActivity : ComponentActivity() {
     private var widgetLaunch by mutableIntStateOf(0)
 
     /**
-     * 이벤트(시보·약·시계 찾기·출근·귀가·relax)로 열린 상태.
+     * 이벤트(시보·약·분실 폰 찾기·출근·귀가·relax)로 열린 상태.
      * 이때는 화면 켜짐 유지를 끄고 시스템 화면 꺼짐 시간을 따름. 화면을 만지면 다시 평소처럼 켜짐 유지.
      */
     private var eventMode = false

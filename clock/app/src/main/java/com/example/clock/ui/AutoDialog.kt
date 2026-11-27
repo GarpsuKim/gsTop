@@ -101,6 +101,9 @@ import com.example.clock.auto.WifiMonitor
 import com.example.clock.auto.hasBluetoothPermission
 import com.example.clock.chime.hour12
 
+/** 출근 인사: 직장 공유기(MAC)는 3개까지 등록. */
+private const val WORK_MAX_BSSIDS = 3
+
 /** 자동 기능 창이 열려 있는지 (창은 시계 화면이 띄움). */
 object AutoDialogUi {
     var open by mutableStateOf(false)
@@ -171,7 +174,7 @@ fun PlaceBadge(place: Place, modifier: Modifier = Modifier) {
     }
 }
 
-/** 화면 위쪽 안내 (시계 찾기·출근·귀가 등). 누르면 닫힘. */
+/** 화면 위쪽 안내 (분실 폰 찾기·출근·귀가 등). 누르면 닫힘. */
 @Composable
 fun AutoBanner(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Text(
@@ -192,7 +195,7 @@ fun AutoBanner(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifie
 
 /**
  * 자동 기능 설정 창 (전체 화면). 바꾸는 즉시 저장되고 감시·알람도 다시 맞춤.
- *  권한 · 뒤집으면 무음 · 이벤트 때 화면 켜기 · 시계 찾기 · 출근 인사 · 귀가 인사 · relax 모드 · 자동 실행 1~5
+ *  권한 · 뒤집으면 무음 · 이벤트 때 화면 켜기 · 분실 폰 찾기 · 출근 인사 · 귀가 인사 · relax 모드 · 자동 실행 1~5
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -274,6 +277,11 @@ fun AutoDialog(onDismiss: () -> Unit) {
             return
         }
         val ssid = WifiMonitor.currentSsid(context) ?: ""
+        // 직장 공유기는 3개까지 (이미 등록한 것을 다시 누르면 그대로)
+        if (place == Place.Work && bssid !in s.work.bssids && s.work.bssids.size >= WORK_MAX_BSSIDS) {
+            Toast.makeText(context, context.getString(R.string.auto_wifi_full, WORK_MAX_BSSIDS), Toast.LENGTH_LONG).show()
+            return
+        }
         fun add(p: PlaceSetting) = p.copy(bssids = p.bssids + bssid, ssid = ssid.ifBlank { p.ssid })
         update(if (place == Place.Work) s.copy(work = add(s.work)) else s.copy(home = add(s.home)))
         Toast.makeText(context, context.getString(R.string.auto_wifi_added, ssid, bssid), Toast.LENGTH_SHORT).show()
@@ -316,7 +324,7 @@ fun AutoDialog(onDismiss: () -> Unit) {
                         SwitchRow(R.string.auto_wake_event, R.string.auto_wake_event_desc, s.wakeOnEvent) { update(s.copy(wakeOnEvent = it)) }
                     }
 
-                    // ── 3) 시계 찾기 ──
+                    // ── 3) 분실 폰 찾기 ──
                     Section(Icons.Filled.Watch, R.string.auto_watch_title) {
                         Hint(R.string.auto_watch_desc)
                         ValueRow(
@@ -329,6 +337,7 @@ fun AutoDialog(onDismiss: () -> Unit) {
                     // ── 4) 출근 인사 · 5) 귀가 인사 ──
                     PlaceSection(
                         icon = Icons.Filled.Work, title = R.string.auto_work_title, desc = R.string.auto_work_desc, p = s.work,
+                        maxBssids = WORK_MAX_BSSIDS,
                         onRegisterWifi = { registerWifi(Place.Work) },
                         onChange = { update(s.copy(work = it)) },
                         onPickMusic = { musicFor = "work"; pickOne.launch(arrayOf("audio/*")) },
@@ -498,27 +507,44 @@ private fun PlaceSection(
     onChange: (PlaceSetting) -> Unit,
     onPickMusic: () -> Unit,
     onPickApp: () -> Unit,
+    maxBssids: Int? = null,
 ) {
     Section(icon, title) {
         Hint(desc)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.auto_wifi), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.auto_wifi) + (maxBssids?.let { " (${p.bssids.size}/$it)" } ?: ""),
+                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     if (p.registered) stringResource(R.string.auto_wifi_value, p.ssid.ifBlank { "Wi-Fi" }, p.bssids.size)
                     else stringResource(R.string.auto_none),
                     fontSize = 16.sp, fontWeight = FontWeight.Bold,
                 )
-                if (p.registered) {
-                    Text(p.bssids.joinToString("  "), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
             }
             if (p.registered) TextButton(onClick = { onChange(p.copy(bssids = emptySet(), ssid = "")) }) {
-                Text(stringResource(R.string.auto_clear))
+                Text(stringResource(R.string.auto_clear_all))
             }
         }
-        OutlinedButton(onClick = onRegisterWifi, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.auto_wifi_register))
+        // 등록한 공유기 MAC 하나씩 (✕ 로 그것만 지우기)
+        p.bssids.sorted().forEach { b ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("· $b", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = {
+                    val left = p.bssids - b
+                    onChange(p.copy(bssids = left, ssid = if (left.isEmpty()) "" else p.ssid))
+                }) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.auto_clear), modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+        val full = maxBssids != null && p.bssids.size >= maxBssids
+        OutlinedButton(onClick = onRegisterWifi, enabled = !full, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                if (full) stringResource(R.string.auto_wifi_full, maxBssids!!)
+                else stringResource(R.string.auto_wifi_register),
+            )
         }
         ValueRow(
             R.string.auto_greeting_music, p.musicName.ifBlank { stringResource(R.string.auto_none) },
