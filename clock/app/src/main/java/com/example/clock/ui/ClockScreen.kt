@@ -932,6 +932,24 @@ fun ClockScreen(
         if (showBattery && batteryNow != null) {
             BatteryIndicator(batteryNow, Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 12.dp))
         }
+        // 왼쪽 위 '업무중' / 'Home': 등록한 직장·집 Wi-Fi 에 연결돼 있는 동안 (버튼을 숨긴 시계 화면에서)
+        val place = rememberCurrentPlace()
+        if (place != null && !showControls && !inPip) {
+            PlaceBadge(place, Modifier.align(Alignment.TopStart).padding(top = 8.dp, start = 12.dp))
+        }
+        // 자동 기능 안내 (시계 찾기·출근·귀가·relax): 위쪽 가운데, 누르면 닫힘 (알람음도 멈춤)
+        com.example.clock.auto.AutoUi.banner?.let { text ->
+            if (!inPip) {
+                AutoBanner(
+                    text,
+                    onDismiss = {
+                        com.example.clock.auto.AutoUi.banner = null
+                        com.example.clock.auto.AlarmTone.stop()
+                    },
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 110.dp),
+                )
+            }
+        }
 
         // 배터리 안내 (충전 완료·충전기 빠짐·배터리 부족): 화면 위쪽 가운데, 누르거나 충전기 상태가 바뀌면 닫힘
         batteryAlert?.let { alert ->
@@ -953,6 +971,8 @@ fun ClockScreen(
         if (aboutOpen && !inPip) AboutDialog(onDismiss = { aboutOpen = false })
         // 약 먹는 시간 관리 창 ([시보·알람] → 약 먹을 시간, 또는 30분 지남 알림을 눌러서)
         if (MedicineUi.open && !inPip) MedicineDialog(onDismiss = { MedicineUi.open = false })
+        // 자동 기능 설정 창 ([시보·알람] → 자동 기능)
+        if (AutoDialogUi.open && !inPip) AutoDialog(onDismiss = { AutoDialogUi.open = false })
 
         // 수면등: 빛은 시계 밑(MainActivity 배경 자리)에 깔고, 여기서는 조절 막대와 [뒤로] 키만.
         // 조절 막대는 버튼이 보일 때만 화면 가운데에 (화면을 누르면 나오고, 버튼이 숨으면 같이 숨음)

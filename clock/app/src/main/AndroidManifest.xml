@@ -18,6 +18,20 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 시보: 연주 중 알림 ([정지] 버튼). 거부해도 시보는 울림 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 자동 기능 -->
+    <!-- 시계 찾기·relax 모드: 등록한 블루투스 기기(손목시계·스피커)의 연결·끊김 알기, 페어링된 기기 목록 -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 출근·귀가 인사: 연결된 Wi-Fi 공유기 MAC(BSSID)은 위치 권한이 있어야 보임. 앱이 꺼져 있어도 알려면 "항상 허용" -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 이벤트 때 시계 화면 켜기, 출근·귀가 앱·자동 실행(브라우저·앱): 백그라운드에서 화면을 여는 데 필요 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 위 권한이 없을 때 대신: 화면이 꺼져 있으면 알람처럼 전체 화면으로 시계를 엶 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- 자체 화면 분할 앱 목록에 삼성 홈 화면의 폴더(그룹)를 보여 주려고 홈 화면 배치를 읽음.
          삼성 홈(One UI Home)이 다른 앱용으로 열어 둔 읽기 권한 (일반 권한, 사용자 동의 창 없음).
          삼성 폰이 아니면 권한이 없는 것과 같아서 폴더 없이 앱 목록만 보임. -->
@@ -83,6 +97,23 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- 자동 기능: 블루투스 연결·끊김 (시스템만 보내는 방송) → 시계 찾기 / relax 모드 -->
+        <receiver
+            android:name=".auto.BtReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
+        <!-- 자동 기능: Wi-Fi 연결 (시스템이 PendingIntent 로 보냄) → 출근·귀가 인사 -->
+        <receiver
+            android:name=".auto.WifiReceiver"
+            android:exported="false" />
+        <!-- 자동 기능: 정한 시각 → 인터넷 주소·앱 자동 실행 -->
+        <receiver
+            android:name=".auto.AutoRunReceiver"
+            android:exported="false" />
         <!-- 약 먹을 시간: 30분 지남 확인 알람 + 알림의 [먹었어요] (우리 앱만 보냄) -->
         <receiver
             android:name=".chime.MedReceiver"

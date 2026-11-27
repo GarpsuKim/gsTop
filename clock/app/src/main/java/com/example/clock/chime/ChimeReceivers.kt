@@ -24,6 +24,8 @@ class ChimeAlarmReceiver : BroadcastReceiver() {
         if (s.isSkipped(hour)) return
 
         ChimeService.play(context)
+        // 이벤트 때 화면 켜기: 시계 화면을 켜서 보여 줌 (그 뒤 화면 꺼짐은 시스템 설정대로)
+        com.example.clock.auto.ClockWaker.bring(context, com.example.clock.auto.AutoEvent.CHIME)
     }
 
     private companion object {
@@ -46,6 +48,8 @@ class ChimeRescheduleReceiver : BroadcastReceiver() {
             -> {
                 ChimeScheduler.update(context)
                 MedScheduler.update(context) // 약 먹을 시간 확인 알람
+                com.example.clock.auto.AutoRunScheduler.update(context) // 자동 실행
+                com.example.clock.auto.WifiMonitor.register(context) // 출근·귀가 Wi-Fi 감시
             }
         }
     }

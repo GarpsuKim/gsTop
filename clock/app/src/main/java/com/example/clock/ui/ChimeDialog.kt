@@ -12,6 +12,7 @@ import android.widget.Toast
 import android.provider.AlarmClock
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryStd
@@ -109,6 +110,13 @@ fun ChimeAlarmButton(
                 value = { medicineValue() },
                 // 창은 시계 화면(ClockScreen)이 띄움: 버튼이 숨겨져 있어도 알림으로 열 수 있게
                 action = { MedicineUi.open = true },
+            ),
+            // 자동 기능: 뒤집으면 무음 · 이벤트 때 화면 켜기 · 시계 찾기 · 출근/귀가 인사 · relax · 자동 실행
+            MenuSection(
+                title = R.string.auto_title,
+                icon = Icons.Filled.AutoMode,
+                value = { autoValue() },
+                action = { AutoDialogUi.open = true },
             ),
             MenuSection(
                 title = R.string.chime,

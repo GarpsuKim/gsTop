@@ -40,6 +40,19 @@ import com.example.clock.ui.extractYouTubeUrl
 import com.example.clock.ui.parseYouTube
 import android.widget.Toast
 import android.net.Uri
+import android.content.ComponentName
+import android.os.Build
+import androidx.compose.runtime.DisposableEffect
+import com.example.clock.auto.AlarmTone
+import com.example.clock.auto.AutoEvent
+import com.example.clock.auto.AutoRunScheduler
+import com.example.clock.auto.AutoStore
+import com.example.clock.auto.AutoUi
+import com.example.clock.auto.ClockWaker
+import com.example.clock.auto.FaceDownDetector
+import com.example.clock.auto.GreetingPlayer
+import com.example.clock.auto.RelaxKind
+import com.example.clock.auto.WifiMonitor
 import androidx.activity.viewModels
 import com.example.clock.ui.MusicViewModel
 import com.example.clock.ui.SleepTimer
@@ -91,7 +104,11 @@ class MainActivity : ComponentActivity() {
             requestHomeShortcutOnce()
             receiveShared(intent) // 앱이 꺼져 있을 때 "공유 → 시계" 로 시작된 경우
             receiveWidget(intent) // 앱이 꺼져 있을 때 위젯을 눌러 시작된 경우
+            receiveEvent(intent) // 자동 기능 이벤트(시보·약·시계 찾기·출근·귀가·relax)로 시작된 경우
         }
+        // 자동 기능: 출근·귀가 Wi-Fi 감시와 자동 실행 알람을 다시 맞춤 (강제 중지 등으로 지워졌어도 복구)
+        WifiMonitor.register(this)
+        AutoRunScheduler.update(this)
         setContent {
             // [뒤로] 버튼으로는 앱을 닫지 않음. 앱이 닫히는 경우는 두 가지뿐:
             //  1) 한 손가락 스와이프 (분할 안 됨: 세로 ←→, 가로 ↑↓ / 분할 중: 시계 쪽으로)   2) [닫힘] 시간이 다 됨
@@ -122,6 +139,35 @@ class MainActivity : ComponentActivity() {
 
             // 잠들기 타이머 진행 (음악·동영상 소리를 서서히 줄이고, 끝나면 끔)
             SleepTimerEffect(music, videoBackground)
+
+            // 자동 기능 이벤트 처리 (시계 찾기 알람음·출근/귀가 인사·relax 배경·약 창)
+            LaunchedEffect(AutoUi.pending) {
+                val e = AutoUi.pending ?: return@LaunchedEffect
+                AutoUi.pending = null
+                handleEvent(e, settings) {
+                    settings = it
+                    saveClockSettings(context, it)
+                }
+            }
+            // 안내는 30초 뒤 저절로 닫힘
+            LaunchedEffect(AutoUi.banner) {
+                if (AutoUi.banner != null) {
+                    kotlinx.coroutines.delay(30_000L)
+                    AutoUi.banner = null
+                }
+            }
+            // 뒤집으면 무음 (앱이 떠 있는 동안): 엎으면 이 앱의 소리를 모두 끔
+            val flipMute = remember(AutoStore.version) { AutoStore.load(context).flipMute }
+            DisposableEffect(flipMute) {
+                val d = if (flipMute) FaceDownDetector(context) {
+                    com.example.clock.chime.ChimeService.stop(context)
+                    SleepTimer.muteNow()
+                    GreetingPlayer.stop()
+                    AlarmTone.stop()
+                    Toast.makeText(context, R.string.auto_flip_muted, Toast.LENGTH_SHORT).show()
+                }.also { it.start() } else null
+                onDispose { d?.stop() }
+            }
 
             ClockTheme(darkTheme = true) {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -335,6 +381,7 @@ class MainActivity : ComponentActivity() {
             videoBackground.onAppHidden()
             WhiteNoise.onAppHidden()
             Flashlight.turnOff(this) // 손전등은 앱을 나가면 끔 (배터리·발열)
+            clearShowWhenLocked()
         }
     }
 
@@ -343,10 +390,99 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         receiveShared(intent)
         receiveWidget(intent)
+        receiveEvent(intent)
     }
 
     /** 위젯을 눌러 들어올 때마다 1씩 커짐 → 시계 화면이 버튼을 숨긴 전체화면으로 바뀜. */
     private var widgetLaunch by mutableIntStateOf(0)
+
+    /**
+     * 이벤트(시보·약·시계 찾기·출근·귀가·relax)로 열린 상태.
+     * 이때는 화면 켜짐 유지를 끄고 시스템 화면 꺼짐 시간을 따름. 화면을 만지면 다시 평소처럼 켜짐 유지.
+     */
+    private var eventMode = false
+
+    /** 자동 기능 이벤트로 열림 → 잠금 화면 위로 화면을 켜고, 처리할 이벤트를 넘김. */
+    private fun receiveEvent(intent: Intent?) {
+        val event = intent?.getStringExtra(AutoEvent.EXTRA) ?: return
+        intent.removeExtra(AutoEvent.EXTRA) // 회전 등으로 다시 처리하지 않게
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        }
+        // 그 뒤 화면 꺼짐은 시스템이 관리 (화면을 만지기 전까지).
+        // 단, 시계를 이미 보고 있던 경우(화면 켜짐 + 이 창이 앞)는 평소처럼 켜짐 유지
+        val watching = getSystemService(android.os.PowerManager::class.java)?.isInteractive == true && hasWindowFocus()
+        if (!watching) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            eventMode = true
+        }
+        AutoUi.pending = event
+    }
+
+    /** 이벤트로 열린 뒤 화면을 만지면: 알람음 끄기 + 다시 화면 켜짐 유지 (평소 시계처럼). */
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            AlarmTone.stop()
+            if (eventMode) {
+                eventMode = false
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /** 잠금 화면 위 표시는 이벤트 때만 (화면이 꺼지거나 앱을 나가면 원래대로). */
+    private fun clearShowWhenLocked() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        } else {
+            @Suppress("DEPRECATION")
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        }
+        if (eventMode) {
+            eventMode = false
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /** 이벤트별 처리 (화면이 뜬 뒤). [settings]·[updateSettings]: relax 모드의 유튜브 배경. */
+    private fun handleEvent(event: String, settings: com.example.clock.ui.ClockSettings, updateSettings: (com.example.clock.ui.ClockSettings) -> Unit) {
+        val auto = AutoStore.load(this)
+        when (event) {
+            AutoEvent.MEDICINE -> com.example.clock.ui.MedicineUi.open = true
+            AutoEvent.WATCH_ON, AutoEvent.WATCH_OFF -> {
+                AlarmTone.start(this)
+                AutoUi.banner = ClockWaker.eventTitle(this, event)
+            }
+            AutoEvent.WORK, AutoEvent.HOME -> {
+                val place = if (event == AutoEvent.WORK) auto.work else auto.home
+                AutoUi.banner = ClockWaker.eventTitle(this, event)
+                GreetingPlayer.play(this, place.musicUri)
+                ComponentName.unflattenFromString(place.app)?.let { cn ->
+                    runCatching {
+                        startActivity(
+                            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(cn)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }
+            }
+            AutoEvent.RELAX -> {
+                AutoUi.banner = ClockWaker.eventTitle(this, event)
+                when (auto.relaxKind) {
+                    RelaxKind.Music -> if (auto.relaxMusic.isNotEmpty()) music.play(auto.relaxMusic.map { Uri.parse(it) })
+                    RelaxKind.YouTube -> if (auto.relaxYoutube.isNotBlank()) {
+                        updateSettings(settings.copy(youtubeUrl = auto.relaxYoutube, youtubeSound = true))
+                    }
+                }
+            }
+        }
+    }
 
     private fun receiveWidget(intent: Intent?) {
         if (intent?.getBooleanExtra(EXTRA_FROM_WIDGET, false) == true) widgetLaunch++

@@ -263,9 +263,14 @@ class MedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             MedScheduler.ACTION_CHECK -> {
-                MedScheduler.dueNow(context).forEach { (day, slot, kind) ->
+                val due = MedScheduler.dueNow(context)
+                due.forEach { (day, slot, kind) ->
                     MedStore.markAlerted(context, kind.alertKey(doseKey(day, slot)))
                     MedScheduler.notifyDose(context, day, slot, kind)
+                }
+                // 이벤트 때 화면 켜기: 시계 화면을 켜고 약 먹는 시간 창을 엶
+                if (due.isNotEmpty()) {
+                    com.example.clock.auto.ClockWaker.bring(context, com.example.clock.auto.AutoEvent.MEDICINE)
                 }
             }
             MedScheduler.ACTION_TAKEN -> {

@@ -98,6 +98,7 @@ class ChimeService : Service() {
             return
         }
         focusRequest = request
+        watchFaceDown()
 
         if (s.isBuiltinBell) {
             startBell(attrs, s)
@@ -193,7 +194,19 @@ class ChimeService : Service() {
         }
     }
 
+    /** 뒤집으면 무음: 시보가 울리는 동안만 폰 방향을 지켜봄 (엎어 두면 바로 멈춤). */
+    private var faceDown: com.example.clock.auto.FaceDownDetector? = null
+
+    private fun watchFaceDown() {
+        faceDown?.stop()
+        faceDown = null
+        if (!com.example.clock.auto.AutoStore.load(this).flipMute) return
+        faceDown = com.example.clock.auto.FaceDownDetector(this) { handler.post { stopAll() } }.also { it.start() }
+    }
+
     private fun stopAll() {
+        faceDown?.stop()
+        faceDown = null
         session++ // 만들고 있던 종소리는 버림
         handler.removeCallbacksAndMessages(null)
         releasePlayer()

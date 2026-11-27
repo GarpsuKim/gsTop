@@ -284,6 +284,18 @@ object SleepTimer {
         WhiteNoise.setFade(1f)
     }
 
+    /**
+     * 지금 바로 모든 소리 끔 (뒤집으면 무음): 백색 소음 정지, 음악 일시정지·동영상·유튜브 소리 끔 ([SleepTimerEffect] 가 처리).
+     * 켜져 있던 잠들기 타이머는 끝난 것으로.
+     */
+    fun muteNow() {
+        endAt = null
+        fade = 1f
+        WhiteNoise.stop()
+        WhiteNoise.setFade(1f)
+        soundOff = true
+    }
+
     /** 소리를 다시 켤 때 (새로 재생, 앱을 다시 열 때). */
     fun releaseSoundOff() {
         if (soundOff) soundOff = false
@@ -328,6 +340,13 @@ fun SleepTimerEffect(music: MusicViewModel?, video: VideoBackgroundViewModel?) {
                 break
             }
             delay(if ((SleepTimer.remainingMs() ?: 0L) <= SLEEP_FADE_MS) 250L else 1_000L)
+        }
+    }
+    // 소리 끔 (타이머 끝 또는 뒤집으면 무음): 음악 일시정지, 동영상 소리 끔
+    LaunchedEffect(SleepTimer.soundOff) {
+        if (SleepTimer.soundOff) {
+            music?.pauseIfPlaying()
+            video?.setVolumeFactor(0f)
         }
     }
     // 타이머가 꺼지거나 소리 끔이 풀리면 동영상 소리를 원래대로
