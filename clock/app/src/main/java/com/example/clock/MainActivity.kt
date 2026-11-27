@@ -326,6 +326,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         inMultiWindow = isInMultiWindowMode && !isInPictureInPictureMode
+        // 출근·귀가를 감지했는데 시계가 바로 못 열렸던 경우("다른 앱 위에 표시" 권한 없음 등) → 지금 인사·앱 실행
+        if (AutoUi.pending == null) {
+            com.example.clock.auto.WifiReceiver.takePendingGreeting(this)?.let { AutoUi.pending = it }
+        }
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
@@ -450,6 +454,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 출근·귀가 인사로 등록한 앱을 시계보다 앞에 띄움 (시간 제한 없이 그대로 둠, 시계가 다시 앞으로 오지 않음).
+     * 시계가 앞으로 나오는 동작이 끝난 뒤(1초) 띄워서 순서가 뒤바뀌지 않게 하고,
+     * 잠금 화면이면 시계만 잠금 위에 떠 있으므로 먼저 잠금을 풀어 달라고 한 뒤 띄움.
+     */
+    private fun launchInFront(cn: ComponentName) {
+        val app = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(cn)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        fun go() {
+            // 시계를 잠금 화면 위에 띄우던 설정을 풀어야 앱이 시계 앞으로 옴
+            clearShowWhenLocked()
+            runCatching { startActivity(app) }
+        }
+        android.os.Handler(mainLooper).postDelayed({
+            val km = getSystemService(android.app.KeyguardManager::class.java)
+            if (km?.isKeyguardLocked == true && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                km.requestDismissKeyguard(this, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                    override fun onDismissSucceeded() = go()
+                })
+            } else {
+                go()
+            }
+        }, 1_000L)
+    }
+
     /** 이벤트별 처리 (화면이 뜬 뒤). [settings]·[updateSettings]: relax 모드의 유튜브 배경. */
     private fun handleEvent(event: String, settings: com.example.clock.ui.ClockSettings, updateSettings: (com.example.clock.ui.ClockSettings) -> Unit) {
         val auto = AutoStore.load(this)
@@ -460,17 +489,11 @@ class MainActivity : ComponentActivity() {
                 AutoUi.banner = ClockWaker.eventTitle(this, event)
             }
             AutoEvent.WORK, AutoEvent.HOME -> {
+                com.example.clock.auto.WifiReceiver.clearPendingGreeting(this) // 이 인사는 처리됨
                 val place = if (event == AutoEvent.WORK) auto.work else auto.home
                 AutoUi.banner = ClockWaker.eventTitle(this, event)
                 GreetingPlayer.play(this, place.musicUri)
-                ComponentName.unflattenFromString(place.app)?.let { cn ->
-                    runCatching {
-                        startActivity(
-                            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(cn)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    }
-                }
+                ComponentName.unflattenFromString(place.app)?.let { launchInFront(it) }
             }
             AutoEvent.RELAX -> {
                 AutoUi.banner = ClockWaker.eventTitle(this, event)

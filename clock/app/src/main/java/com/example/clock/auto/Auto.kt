@@ -527,8 +527,33 @@ class WifiReceiver : BroadcastReceiver() {
         val p = AutoStore.prefs(context)
         val today = LocalDate.now().toEpochDay()
         if (p.getString("last_place", null) == place.name && p.getLong("last_place_day", -1L) == today) return
-        p.edit().putString("last_place", place.name).putLong("last_place_day", today).apply()
-        ClockWaker.bring(context, if (place == Place.Work) AutoEvent.WORK else AutoEvent.HOME)
+        val event = if (place == Place.Work) AutoEvent.WORK else AutoEvent.HOME
+        // "인사할 것이 남아 있음" 표시: 시계가 화면에 나오면(바로 열리든, 나중에 사용자가 열든) 그날 한 번 인사
+        p.edit().putString("last_place", place.name).putLong("last_place_day", today)
+            .putString(GREET_PENDING, event).putLong(GREET_PENDING_DAY, today).apply()
+        ClockWaker.bring(context, event)
+    }
+
+    companion object {
+        const val GREET_PENDING = "greet_pending"
+        const val GREET_PENDING_DAY = "greet_pending_day"
+
+        /**
+         * 남아 있는 출근·귀가 인사를 꺼냄 (오늘 것만, 꺼내면 지움).
+         * "다른 앱 위에 표시" 권한이 없어 시계가 바로 못 열린 경우에도, 사용자가 시계를 열면 그때 인사·앱 실행.
+         */
+        fun takePendingGreeting(context: Context): String? {
+            val p = AutoStore.prefs(context)
+            val event = p.getString(GREET_PENDING, null) ?: return null
+            val day = p.getLong(GREET_PENDING_DAY, -1L)
+            p.edit().remove(GREET_PENDING).remove(GREET_PENDING_DAY).apply()
+            return event.takeIf { day == LocalDate.now().toEpochDay() }
+        }
+
+        /** 인사를 처리했으면 남은 표시를 지움 (같은 인사를 두 번 하지 않게). */
+        fun clearPendingGreeting(context: Context) {
+            AutoStore.prefs(context).edit().remove(GREET_PENDING).remove(GREET_PENDING_DAY).apply()
+        }
     }
 }
 

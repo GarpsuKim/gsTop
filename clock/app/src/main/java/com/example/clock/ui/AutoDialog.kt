@@ -99,6 +99,13 @@ import com.example.clock.auto.PlaceSetting
 import com.example.clock.auto.RelaxKind
 import com.example.clock.auto.WifiMonitor
 import com.example.clock.auto.GreetingPlayer
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import com.example.clock.auto.hasBluetoothPermission
@@ -493,8 +500,18 @@ private fun SwitchRow(@StringRes label: Int, @StringRes desc: Int, checked: Bool
 
 /** "이름: 값  [고르기] [지우기]". */
 @Composable
-private fun ValueRow(@StringRes label: Int, value: String, onPick: () -> Unit, onClear: (() -> Unit)?) {
+private fun ValueRow(
+    @StringRes label: Int,
+    value: String,
+    onPick: () -> Unit,
+    onClear: (() -> Unit)?,
+    icon: ImageBitmap? = null, // 앱이면 그 앱 아이콘
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) {
+            Image(icon, contentDescription = null, modifier = Modifier.size(36.dp))
+            Spacer(Modifier.width(10.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(stringResource(label), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 2)
@@ -563,6 +580,7 @@ private fun PlaceSection(
             R.string.auto_open_app, p.appLabel.ifBlank { stringResource(R.string.auto_none) },
             onPick = onPickApp,
             onClear = if (p.app.isNotBlank()) ({ onChange(p.copy(app = "", appLabel = "")) }) else null,
+            icon = rememberAppIcon(p.app),
         )
     }
 }
@@ -616,6 +634,7 @@ private fun RunRow(index: Int, r: AutoRun, onChange: (AutoRun) -> Unit, onPickAp
             ValueRow(
                 R.string.auto_open_app, r.appLabel.ifBlank { stringResource(R.string.auto_none) },
                 onPick = onPickApp, onClear = null,
+                icon = rememberAppIcon(r.app),
             )
         } else {
             var url by remember(r.url) { mutableStateOf(r.url) }
@@ -670,18 +689,26 @@ private fun BluetoothPicker(onPick: (address: String, name: String) -> Unit, onD
 @Composable
 private fun AppPicker(onPick: (component: String, label: String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val apps = remember { launcherApps(context) }
+    // 앱 목록 + 아이콘은 시간이 걸리므로 화면 밖 스레드에서 읽음 (그동안 빈 목록)
+    val apps by produceState(initialValue = emptyList<PickApp>()) {
+        value = withContext(Dispatchers.IO) { launcherApps(context) }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Filled.Apps, contentDescription = null) },
         title = { Text(stringResource(R.string.auto_app_pick_title)) },
         text = {
             LazyColumn(Modifier.heightIn(max = 460.dp)) {
-                items(apps) { (component, label) ->
-                    Text(
-                        label, fontSize = 16.sp,
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(component, label) }.padding(vertical = 10.dp),
-                    )
+                items(apps, key = { it.component }) { app ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(app.component, app.label) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (app.icon != null) Image(app.icon, contentDescription = null, modifier = Modifier.size(40.dp))
+                        else Spacer(Modifier.size(40.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(app.label, fontSize = 16.sp)
+                    }
                 }
             }
         },
@@ -689,10 +716,33 @@ private fun AppPicker(onPick: (component: String, label: String) -> Unit, onDism
     )
 }
 
-private fun launcherApps(context: Context): List<Pair<String, String>> {
+private class PickApp(val component: String, val label: String, val icon: ImageBitmap?)
+
+private fun launcherApps(context: Context): List<PickApp> {
     val pm = context.packageManager
+    val px = (40 * context.resources.displayMetrics.density).toInt()
     return pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
         .filter { it.activityInfo.packageName != context.packageName }
-        .map { ComponentName(it.activityInfo.packageName, it.activityInfo.name).flattenToString() to it.loadLabel(pm).toString() }
-        .sortedBy { it.second.lowercase() }
+        .map {
+            PickApp(
+                component = ComponentName(it.activityInfo.packageName, it.activityInfo.name).flattenToString(),
+                label = it.loadLabel(pm).toString(),
+                icon = runCatching { it.loadIcon(pm).toBitmap(px, px).asImageBitmap() }.getOrNull(),
+            )
+        }
+        .sortedBy { it.label.lowercase() }
+}
+
+/** 등록한 앱의 아이콘 (없거나 지워진 앱이면 null). */
+@Composable
+private fun rememberAppIcon(component: String): ImageBitmap? {
+    val context = LocalContext.current
+    val icon by produceState<ImageBitmap?>(initialValue = null, component) {
+        value = if (component.isBlank()) null else withContext(Dispatchers.IO) {
+            val cn = ComponentName.unflattenFromString(component) ?: return@withContext null
+            val px = (36 * context.resources.displayMetrics.density).toInt()
+            runCatching { context.packageManager.getActivityIcon(cn).toBitmap(px, px).asImageBitmap() }.getOrNull()
+        }
+    }
+    return icon
 }
