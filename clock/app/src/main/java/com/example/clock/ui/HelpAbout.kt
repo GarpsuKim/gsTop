@@ -41,10 +41,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -105,10 +108,20 @@ fun HelpDialog(onDismiss: () -> Unit) {
                 if (page == null) {
                     CircularProgressIndicator()
                 } else {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx -> helpWebView(ctx).also { it.loadDataWithBaseURL(HELP_BASE_URL, page, "text/html", "utf-8", null) } },
-                    )
+                    // 화면 폭이 바뀌면(회전) 웹 화면을 새로 만들어 새 폭에 맞게 다시 그림.
+                    // (그대로 두면 처음 열 때의 배율이 남아 가로로 돌렸을 때 글자가 오른쪽에서 잘림)
+                    // 읽던 위치는 "문서 전체 중 몇 %" 로 기억했다가 새 화면에서 같은 곳으로.
+                    val widthDp = LocalConfiguration.current.screenWidthDp
+                    val scrollFraction = remember { floatArrayOf(0f) } // 다시 그리지 않고 값만 기억
+                    key(widthDp) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                HelpWebView(ctx, restoreFraction = scrollFraction[0]) { scrollFraction[0] = it }
+                                    .also { it.loadDataWithBaseURL(HELP_BASE_URL, page, "text/html", "utf-8", null) }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -118,22 +131,51 @@ fun HelpDialog(onDismiss: () -> Unit) {
 /** 도움말 웹 화면 바탕색 (HTML 의 CSS 와 같게 → 불러오는 동안 하얗게 번쩍이지 않음). */
 private const val HELP_BG = 0xFF121212
 
-@SuppressLint("SetJavaScriptEnabled")
-private fun helpWebView(context: Context): WebView = WebView(context).apply {
-    setBackgroundColor(HELP_BG.toInt())
-    settings.javaScriptEnabled = false
-    settings.builtInZoomControls = true // 두 손가락으로 확대·축소
-    settings.displayZoomControls = false
-    webViewClient = object : WebViewClient() {
-        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            val url = request.url
-            // 문서 안 이동(#제목)은 같은 문서라 여기로 오지 않음. 그 밖에 가짜 주소 안(상대 링크) = 무시
-            if (url.toString().startsWith(HELP_BASE_URL)) return true
-            if (url.scheme == "http" || url.scheme == "https") openBrowser(view.context, url)
-            return true
+/**
+ * 도움말 웹 화면.
+ * [restoreFraction]: 문서를 불러온 뒤 옮겨 갈 위치 (0 = 맨 위, 1 = 맨 아래). 회전으로 새로 만들 때 읽던 곳으로.
+ * [onScrollFraction]: 스크롤할 때마다 지금 위치 (같은 0~1 비율).
+ */
+@SuppressLint("SetJavaScriptEnabled", "ViewConstructor")
+private class HelpWebView(
+    context: Context,
+    restoreFraction: Float,
+    onScrollFraction: (Float) -> Unit,
+) : WebView(context) {
+    /** 스크롤할 수 있는 거리 (px). 문서가 화면보다 짧으면 0. */
+    private val scrollableHeight: Int
+        get() = (computeVerticalScrollRange() - height).coerceAtLeast(0)
+
+    init {
+        setBackgroundColor(HELP_BG.toInt())
+        settings.javaScriptEnabled = false
+        settings.builtInZoomControls = true // 두 손가락으로 확대·축소
+        settings.displayZoomControls = false
+        setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            val range = scrollableHeight
+            if (range > 0) onScrollFraction((scrollY.toFloat() / range).coerceIn(0f, 1f))
+        }
+        webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url
+                // 문서 안 이동(#제목)은 같은 문서라 여기로 오지 않음. 그 밖에 가짜 주소 안(상대 링크) = 무시
+                if (url.toString().startsWith(HELP_BASE_URL)) return true
+                if (url.scheme == "http" || url.scheme == "https") openBrowser(view.context, url)
+                return true
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                // 문서 높이는 그려진 뒤에야 정해지므로 잠깐 기다렸다가 읽던 곳으로
+                if (restoreFraction > 0f) {
+                    postDelayed({ scrollTo(0, (restoreFraction * scrollableHeight).toInt()) }, RESTORE_DELAY_MS)
+                }
+            }
         }
     }
 }
+
+/** 회전 뒤 읽던 위치로 옮기기 전에 기다리는 시간 (문서 높이가 정해질 때까지). */
+private const val RESTORE_DELAY_MS = 200L
 
 private fun openBrowser(context: Context, url: Uri) {
     try {

@@ -8,7 +8,7 @@ rem  - chime_prefs.xml : 시보 설정
 rem 디버그 빌드 앱이어야 함 (run-as 사용)
 
 set "ADB=C:\Android\sdk\platform-tools\adb.exe"
-set "PKG=io.github.garpsukim.clock"
+set "PKG=io.github.garpsukim.clock.debug"
 
 if not exist adb_addr.txt (
     echo adb_addr.txt 가 없습니다. 먼저 _RUN_WIFI.BAT 로 휴대폰을 연결하세요

@@ -7,7 +7,7 @@
 
 - 언어: Kotlin + Jetpack Compose (Material 3), 도움말 표시에 commonmark-java
 - 최소 Android 8.0 (API 26), 대상 API 34
-- 앱 ID: `io.github.garpsukim.clock` (텔레그램 빌드는 `io.github.garpsukim.clock.kja`). 코드 위치(namespace)는 `com.example.clock`
+- 앱 ID: 배포용 릴리스 `io.github.garpsukim.clock`, 개발용 디버그 `io.github.garpsukim.clock.debug` (텔레그램 빌드는 `io.github.garpsukim.clock.kja.debug`). 코드 위치(namespace)는 `com.example.clock`
 
 ---
 
@@ -219,6 +219,7 @@ Android Studio 없이 명령줄로 빌드합니다. (Android SDK: `C:\Android\sd
 | `_BUILD_Telegram.BAT` | 텔레그램 전송용 디버그 APK 빌드 (앱 이름 = 이 파일의 `set "AppIcon=..."`) |
 | `_RUN_TELEGRAM.BAT` | `_BUILD_Telegram.BAT` 로 빌드 → 텔레그램 봇으로 폰에 전송 (`telegram_config.bat`에 `BOT_TOKEN`, `CHAT_ID` 필요) |
 | `_RUN_WIFI.BAT` | `_BUILD_WIFI.BAT` 로 빌드 → adb 무선 디버깅으로 폰에 설치·실행 (IP/포트 입력, 마지막 주소는 `adb_addr.txt`에 기억) |
+| `_BUILD_RELEASE.BAT` | **배포용 릴리스 빌드** (앱 이름 "영원한 시계", 릴리스 키로 서명, 코드 축소). 서명 키 비밀번호를 매번 물음 (저장 안 함) → `app\build\outputs\apk\release\app-release.apk`. `_BUILD_RELEASE.BAT aab` 이면 Play 스토어용 `app-release.aab` 도 |
 | `_DUMP_PREFS.BAT` | 폰에서 지금 쓰는 설정 파일(`clock_prefs.xml`, `chime_prefs.xml`)을 꺼내 `prefs_dump` 폴더에 저장 (와이파이 adb, 디버그 빌드) |
 | `_DUMP_CHIME.BAT` | 시보 진단: 시보 설정, 맞춰진 알람, 정확한 알람 권한, 벨소리 모드, 배터리 제한, 최근 시보 로그를 `prefs_dump\chime_diag.txt` 로 |
 | `_github_push.bat` | 커밋 후 [gsTop/clock](https://github.com/GarpsuKim/gsTop/tree/main/clock) 에 올리기 |
@@ -227,16 +228,21 @@ Android Studio 없이 명령줄로 빌드합니다. (Android SDK: `C:\Android\sd
 
 | 빌드 | 앱 이름 | 앱 ID |
 |---|---|---|
-| `_BUILD_WIFI.BAT` | 영원한_시계 | `io.github.garpsukim.clock` |
-| `_BUILD_Telegram.BAT` | KJA시계 | `io.github.garpsukim.clock.kja` |
+| `_BUILD_WIFI.BAT` (디버그) | 영원한_시계 | `io.github.garpsukim.clock.debug` |
+| `_BUILD_Telegram.BAT` (디버그) | KJA시계 | `io.github.garpsukim.clock.kja.debug` |
+| `_BUILD_RELEASE.BAT` (릴리스, 배포용) | 영원한 시계 | `io.github.garpsukim.clock` |
+
+디버그는 앱 ID 끝에 `.debug` 가 붙어서, 배포용 릴리스(다른 서명 키)와 한 폰에 따로 함께 설치됩니다.
 
 앱 ID 가 달라서 한 폰에 두 앱을 따로 설치할 수 있습니다 (설정·시보·위젯도 각자 따로).
 
 빌드할 때 자동으로 정해지는 것 (`app/build.gradle.kts`):
-- **버전**: 버전 이름 = 빌드 날짜 (`2026.11.26`), 버전 번호 = `yyMMdd` (`261126`), git 커밋 번호 (`a99d6bf`, 커밋 안 한 변경이 있으면 끝에 `+`) → [정보] 창에 표시
+- **버전**: 버전 이름 = 빌드 날짜 (`2026.11.26`), 버전 번호 = `yyMMddHH` (`26112709`, 시 단위라 하루 여러 번 배포 가능), git 커밋 번호 (`a99d6bf`, 커밋 안 한 변경이 있으면 끝에 `+`) → [정보] 창에 표시
 - **도움말**: 맨 위의 `README.md` 를 앱 안(assets)으로 복사 → README 를 고치면 다음 빌드에 반영. 도움말에는 `## 소스 구성` 앞까지만 보임
 
-`local.properties`, `telegram_config.bat`, `adb_addr.txt`, `prefs_dump`, 빌드 결과물은 `.gitignore`로 제외되어 GitHub에 올라가지 않습니다.
+`local.properties`, `telegram_config.bat`, `adb_addr.txt`, `prefs_dump`, 서명 키(`*.jks`), 빌드 결과물은 `.gitignore`로 제외되어 GitHub에 올라가지 않습니다.
+
+**릴리스 서명 키**: `C:\tools\keys\garpsukim-release.jks` (별칭 `garpsukim`, 프로젝트 밖). 이 키로 서명한 앱만 서로 업데이트되므로, **키 파일과 비밀번호를 PC 밖에도 백업**해야 합니다. 잃으면 이미 설치한 사용자에게 업데이트를 줄 수 없습니다.
 
 ---
 

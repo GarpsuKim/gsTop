@@ -13,3 +13,5 @@ adb_addr.txt
 .kotlin
 prefs_dump
 /_issues&Tech/
+*.jks
+*.keystore

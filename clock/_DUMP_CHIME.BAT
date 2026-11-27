@@ -5,11 +5,11 @@ cd /d "%~dp0"
 rem Chime diagnosis: collect phone state over WIFI adb into prefs_dump\chime_diag.txt
 rem  - chime settings (chime_prefs.xml), scheduled alarm, exact alarm permission,
 rem    ringer mode, battery bucket / restrictions, recent chime log lines
-rem Debug build of io.github.garpsukim.clock (WIFI build) is required (run-as).
+rem Debug build io.github.garpsukim.clock.debug (WIFI build) is required (run-as).
 rem NOTE: keep comments ASCII only (Korean in rem lines can break cmd parsing).
 
 set "ADB=C:\Android\sdk\platform-tools\adb.exe"
-set "PKG=io.github.garpsukim.clock"
+set "PKG=io.github.garpsukim.clock.debug"
 set "OUT=prefs_dump\chime_diag.txt"
 
 if not exist adb_addr.txt (

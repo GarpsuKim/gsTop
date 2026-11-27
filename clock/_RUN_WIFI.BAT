@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 set "ADB=C:\Android\sdk\platform-tools\adb.exe"
 set "APK=app\build\outputs\apk\debug\app-debug.apk"
-set "ACTIVITY=io.github.garpsukim.clock/com.example.clock.MainActivity"
+set "ACTIVITY=io.github.garpsukim.clock.debug/com.example.clock.MainActivity"
 
 rem 마지막 주소는 adb_addr.txt 에 ip:port 로 저장
 set "LASTIP="
