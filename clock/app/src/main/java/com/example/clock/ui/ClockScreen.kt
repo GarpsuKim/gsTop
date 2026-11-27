@@ -181,6 +181,10 @@ private const val KEY_TICK_STYLE = "tick_style"
 private const val KEY_DIAL_NUMBER_SIZE = "dial_number_size"
 private const val KEY_DIGITAL_TEXT_SIZE = "digital_text_size"
 private const val KEY_TICK_LENGTH = "tick_length"
+private const val KEY_BATTERY_DISPLAY = "battery_display"
+private const val KEY_BATTERY_FULL = "battery_full_alert"
+private const val KEY_BATTERY_UNPLUG = "battery_unplug_alert"
+private const val KEY_BATTERY_LOW = "battery_low_alert"
 
 /**
  * 아날로그·하이브리드 시계판 테두리 원 굵기 ([디자인] → 테두리 원 굵기). 순서 = 저장값(ordinal).
@@ -332,6 +336,17 @@ data class ClockSettings(
     val dialNumberSize: DialNumberSize = DialNumberSize.Small,
     /** 디지털 글자 크기 (큰 글자 / 작은 글자). */
     val digitalTextSize: DigitalTextSize = DigitalTextSize.Large,
+    /** 시계 화면 오른쪽 위 배터리 표시 (끔 / 충전 중일 때만 / 항상). 버튼이 숨겨졌을 때만 보임. */
+    val batteryDisplay: BatteryDisplay = BatteryDisplay.Charging,
+    /**
+     * 충전 완료 알림 (끔 / 80% / 90% / 100%). 기본 80%: 삼성 배터리 보호(80%에서 충전 멈춤)를 켠 폰은
+     * 100% 에 닿지 않아 100% 알림이 울리지 않으므로 (2026-11-27 사용자 폰에서 확인).
+     */
+    val batteryFullAlert: BatteryFullAlert = BatteryFullAlert.P80,
+    /** 충전기가 빠지면 알림. */
+    val batteryUnplugAlert: Boolean = true,
+    /** 배터리 부족 알림 (끔 / 15% / 20% / 30% 이하). */
+    val batteryLowAlert: BatteryLowAlert = BatteryLowAlert.P20,
 ) {
     /** 이미지·동영상·유튜브 배경이 모두 꺼진 검은 배경인지. */
     val isBlackBackground: Boolean
@@ -400,6 +415,10 @@ fun loadClockSettings(context: Context): ClockSettings {
         tickLength = TickLength.entries.getOrElse(p.getInt(KEY_TICK_LENGTH, d.tickLength.ordinal)) { d.tickLength },
         dialNumberSize = DialNumberSize.entries.getOrElse(p.getInt(KEY_DIAL_NUMBER_SIZE, d.dialNumberSize.ordinal)) { d.dialNumberSize },
         digitalTextSize = DigitalTextSize.entries.getOrElse(p.getInt(KEY_DIGITAL_TEXT_SIZE, d.digitalTextSize.ordinal)) { d.digitalTextSize },
+        batteryDisplay = BatteryDisplay.entries.getOrElse(p.getInt(KEY_BATTERY_DISPLAY, d.batteryDisplay.ordinal)) { d.batteryDisplay },
+        batteryFullAlert = BatteryFullAlert.entries.getOrElse(p.getInt(KEY_BATTERY_FULL, d.batteryFullAlert.ordinal)) { d.batteryFullAlert },
+        batteryUnplugAlert = p.getBoolean(KEY_BATTERY_UNPLUG, d.batteryUnplugAlert),
+        batteryLowAlert = BatteryLowAlert.entries.getOrElse(p.getInt(KEY_BATTERY_LOW, d.batteryLowAlert.ordinal)) { d.batteryLowAlert },
     )
 }
 
@@ -433,6 +452,10 @@ fun saveClockSettings(context: Context, s: ClockSettings) {
         putInt(KEY_TICK_LENGTH, s.tickLength.ordinal)
         putInt(KEY_DIAL_NUMBER_SIZE, s.dialNumberSize.ordinal)
         putInt(KEY_DIGITAL_TEXT_SIZE, s.digitalTextSize.ordinal)
+        putInt(KEY_BATTERY_DISPLAY, s.batteryDisplay.ordinal)
+        putInt(KEY_BATTERY_FULL, s.batteryFullAlert.ordinal)
+        putBoolean(KEY_BATTERY_UNPLUG, s.batteryUnplugAlert)
+        putInt(KEY_BATTERY_LOW, s.batteryLowAlert.ordinal)
     }
 }
 
@@ -538,6 +561,26 @@ fun ClockScreen(
     // [모드] → 도움말 / 정보 창 (화면을 돌려도 유지)
     var helpOpen by rememberSaveable { mutableStateOf(false) }
     var aboutOpen by rememberSaveable { mutableStateOf(false) }
+
+    // 배터리: 지금 상태 + 충전 완료·충전기 빠짐·배터리 부족 안내 (화면 위쪽 가운데에 잠깐, 알림음 한 번)
+    val battery by rememberBatteryState()
+    var batteryAlert by remember { mutableStateOf<BatteryAlert?>(null) }
+    BatteryAlertWatcher(
+        state = battery,
+        full = settings.batteryFullAlert,
+        unplug = settings.batteryUnplugAlert,
+        low = settings.batteryLowAlert,
+    ) { alert ->
+        batteryAlert = alert
+        playBatteryAlertSound(appContext)
+    }
+    // 안내는 저절로 사라지지 않음: 누르거나, 충전기 상태가 바뀌어 더는 필요 없을 때만 지움
+    // (충전 완료 → 충전기를 빼면, 충전기 빠짐·배터리 부족 → 충전기를 꽂으면)
+    LaunchedEffect(battery) {
+        val b = battery
+        val a = batteryAlert
+        if (b != null && a != null && a.isResolvedBy(b)) batteryAlert = null
+    }
 
     // 축소 화면(PIP) 중에는 작은 창에 시계만 보이도록 버튼을 모두 숨김
     val showControls = controlsVisible && !inPip
@@ -762,6 +805,16 @@ fun ClockScreen(
                 // [🔔 시보·알람 ▾] → 시보 설정 (매시 정각 연주, 앱이 꺼져 있어도 울림) + 구분선 + 시스템 알람 화면
                 //                    + 구분선 + 닫힘 (시계 닫히는 시간)  (모든 모드 공통)
                 ChimeAlarmButton(
+                    battery = battery,
+                    batteryDisplay = settings.batteryDisplay,
+                    batteryFull = settings.batteryFullAlert,
+                    batteryUnplug = settings.batteryUnplugAlert,
+                    batteryLow = settings.batteryLowAlert,
+                    onBatteryChange = { d, f, u, l ->
+                        onSettingsChange(
+                            settings.copy(batteryDisplay = d, batteryFullAlert = f, batteryUnplugAlert = u, batteryLowAlert = l),
+                        )
+                    },
                     autoClose = settings.autoClose,
                     onAutoCloseChange = { onSettingsChange(settings.copy(autoClose = it)) },
                 )
@@ -850,6 +903,28 @@ fun ClockScreen(
         }
 
         // 열린 목록 메뉴는 별도 창이 아니라 이 화면 맨 위에 그림 (터치가 뒤로 새지 않도록)
+        // 배터리 표시 (오른쪽 위): 버튼이 숨겨진 깨끗한 시계 화면에서만. 버튼을 보이면 상태바가 돌아오므로 감춤
+        val batteryNow = battery
+        val showBattery = batteryNow != null && !showControls && !inPip && when (settings.batteryDisplay) {
+            BatteryDisplay.Off -> false
+            BatteryDisplay.Charging -> batteryNow.plugged
+            BatteryDisplay.Always -> true
+        }
+        if (showBattery && batteryNow != null) {
+            BatteryIndicator(batteryNow, Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 12.dp))
+        }
+
+        // 배터리 안내 (충전 완료·충전기 빠짐·배터리 부족): 화면 위쪽 가운데, 누르거나 충전기 상태가 바뀌면 닫힘
+        batteryAlert?.let { alert ->
+            if (!inPip) {
+                BatteryAlertBanner(
+                    alert = alert,
+                    onDismiss = { batteryAlert = null },
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp),
+                )
+            }
+        }
+
         InlineMenuLayer(menuHost)
 
         // 사용자 등록 창 (축소 화면에서는 띄우지 않음)
