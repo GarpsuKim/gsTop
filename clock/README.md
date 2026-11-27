@@ -17,7 +17,7 @@
 
 1. 폰에서 위 링크를 눌러 `clock.apk` 를 받습니다.
    버전별 설명을 보고 받으려면 **[시계 앱 릴리스 목록](https://github.com/GarpsuKim/gsTop/releases?q=clock&expanded=true)** 에서 `clock-날짜.apk` 를 받아도 됩니다.
-   (현재 최신: [clock-2026.11.27d](https://github.com/GarpsuKim/gsTop/releases/tag/clock-2026.11.27d))
+   (현재 최신: [clock-2026.11.27e](https://github.com/GarpsuKim/gsTop/releases/tag/clock-2026.11.27e))
 2. 받은 파일을 열고, "출처를 알 수 없는 앱 설치" 를 허용합니다.
 3. Play 프로텍트가 "알 수 없는 앱" 경고를 띄우면 **그래도 설치** 를 누릅니다.
 
