@@ -43,7 +43,10 @@ class ChimeRescheduleReceiver : BroadcastReceiver() {
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
-            -> ChimeScheduler.update(context)
+            -> {
+                ChimeScheduler.update(context)
+                MedScheduler.update(context) // 약 먹을 시간 확인 알람
+            }
         }
     }
 }

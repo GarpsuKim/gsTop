@@ -42,6 +42,12 @@ import android.widget.Toast
 import android.net.Uri
 import androidx.activity.viewModels
 import com.example.clock.ui.MusicViewModel
+import com.example.clock.ui.SleepTimer
+import com.example.clock.ui.SleepTimerEffect
+import com.example.clock.ui.WhiteNoise
+import com.example.clock.ui.Flashlight
+import com.example.clock.ui.NightLight
+import com.example.clock.ui.NightLightBackground
 import com.example.clock.ui.VideoBackground
 import com.example.clock.ui.VideoBackgroundViewModel
 import androidx.compose.runtime.LaunchedEffect
@@ -114,6 +120,9 @@ class MainActivity : ComponentActivity() {
             // 시계 / 앱 목록 비율: 구분선을 끄는 동안은 이 값만 바뀌고, 손을 떼면 설정에 저장
             var liveRatio by remember(settings.splitRatio) { mutableFloatStateOf(settings.splitRatio) }
 
+            // 잠들기 타이머 진행 (음악·동영상 소리를 서서히 줄이고, 끝나면 끔)
+            SleepTimerEffect(music, videoBackground)
+
             ClockTheme(darkTheme = true) {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                 val clockPart = liveRatio
@@ -153,7 +162,12 @@ class MainActivity : ComponentActivity() {
                     if (hasYouTube || hasVideo || settings.backgroundVersion != 0L) {
                         when {
                             hasYouTube ->
-                                YouTubeBackground(settings.youtubeUrl, settings.youtubeSound, Modifier.fillMaxSize())
+                                // 잠들기 타이머가 끝나면 유튜브 소리도 끔 (앱을 다시 열면 원래대로)
+                                YouTubeBackground(
+                                    settings.youtubeUrl,
+                                    settings.youtubeSound && !SleepTimer.soundOff,
+                                    Modifier.fillMaxSize(),
+                                )
                             showVideo ->
                                 // 여러 동영상을 이어서 반복 재생
                                 VideoBackground(
@@ -171,6 +185,15 @@ class MainActivity : ComponentActivity() {
                             Modifier
                                 .fillMaxSize()
                                 .background(Color.Black.copy(alpha = BACKGROUND_DIM)),
+                        )
+                    }
+                    // 수면등: 배경 위, 시계 밑에 단색 빛 (축소 화면에서는 끔)
+                    if (NightLight.on && !inPip) {
+                        NightLightBackground(
+                            color = settings.nightColor,
+                            brightness = settings.nightBrightness,
+                            offTimer = settings.nightOffTimer,
+                            onExit = { NightLight.on = false },
                         )
                     }
                 Scaffold(
@@ -296,16 +319,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // 잠들기 타이머로 소리를 모두 끈 뒤 앱을 다시 열면 → 동영상·유튜브 소리를 원래대로
+        // (음악·백색 소음은 멈춘 채로, 사용자가 다시 켤 때 나옴)
+        SleepTimer.releaseSoundOff()
         music.onAppShown()
         videoBackground.onAppShown()
+        WhiteNoise.onAppShown()
     }
 
     override fun onStop() {
         super.onStop()
-        // 화면 회전 때문에 잠깐 멈추는 경우는 제외하고, 앱을 나가면 음악 일시정지
+        // 화면 회전 때문에 잠깐 멈추는 경우는 제외하고, 앱을 나가면 음악·백색 소음 일시정지
         if (!isChangingConfigurations) {
             music.onAppHidden()
             videoBackground.onAppHidden()
+            WhiteNoise.onAppHidden()
+            Flashlight.turnOff(this) // 손전등은 앱을 나가면 끔 (배터리·발열)
         }
     }
 
@@ -321,6 +350,10 @@ class MainActivity : ComponentActivity() {
 
     private fun receiveWidget(intent: Intent?) {
         if (intent?.getBooleanExtra(EXTRA_FROM_WIDGET, false) == true) widgetLaunch++
+        // 약 알림을 눌러 열린 경우 → 약 먹는 시간 창
+        if (intent?.getBooleanExtra(com.example.clock.chime.MedScheduler.EXTRA_OPEN, false) == true) {
+            com.example.clock.ui.MedicineUi.open = true
+        }
     }
 
     private fun receiveShared(intent: Intent?) {

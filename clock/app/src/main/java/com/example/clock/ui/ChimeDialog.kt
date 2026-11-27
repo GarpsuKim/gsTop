@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import android.provider.AlarmClock
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryStd
@@ -54,6 +55,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -100,6 +102,14 @@ fun ChimeAlarmButton(
 
     SectionedMenuButton(
         sections = listOf(
+            // 약 먹을 시간 (맨 위): 회차별 계획·실행 체크, 30분 지나도 체크 안 하면 알림
+            MenuSection(
+                title = R.string.med_section,
+                icon = Icons.Filled.Medication,
+                value = { medicineValue() },
+                // 창은 시계 화면(ClockScreen)이 띄움: 버튼이 숨겨져 있어도 알림으로 열 수 있게
+                action = { MedicineUi.open = true },
+            ),
             MenuSection(
                 title = R.string.chime,
                 icon = if (enabled) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,

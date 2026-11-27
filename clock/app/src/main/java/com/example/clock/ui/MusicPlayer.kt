@@ -56,12 +56,30 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
     private var player: MediaPlayer? = null
     private var prepared = false
     private var pausedByApp = false // 앱을 나가서 멈춘 경우 → 돌아오면 이어서 재생
+    private var volumeFactor = 1f   // 잠들기 타이머가 끝나기 전 서서히 줄임 (1 = 그대로)
+
+    /** 소리 크기 배율 (0~1). 잠들기 타이머가 끝나기 30초 전부터 줄임. 다음 곡에도 그대로 적용. */
+    fun setVolumeFactor(f: Float) {
+        volumeFactor = f.coerceIn(0f, 1f)
+        if (prepared) player?.setVolume(volumeFactor, volumeFactor)
+    }
+
+    /** 잠들기 타이머가 끝났을 때: 나오고 있으면 일시정지 ([재생] 으로 다시 들을 수 있음). */
+    fun pauseIfPlaying() {
+        val mp = player ?: return
+        if (prepared && mp.isPlaying) {
+            mp.pause()
+            isPlaying = false
+        }
+        pausedByApp = false
+    }
 
     private val context: Context get() = getApplication()
 
     /** 새 곡 목록으로 바꾸고 첫 곡부터 재생. */
     fun play(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        SleepTimer.releaseSoundOff()
         tracks = uris.map { Track(it, displayName(it)) }
         startAt(0, failures = 0)
     }
@@ -73,6 +91,7 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
             mp.pause()
             isPlaying = false
         } else {
+            SleepTimer.releaseSoundOff() // 잠들기 타이머로 꺼진 뒤 다시 듣는 것
             mp.start()
             isPlaying = true
         }
@@ -142,6 +161,7 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
             mp.isLooping = tracks.size == 1
             mp.setOnPreparedListener {
                 prepared = true
+                it.setVolume(volumeFactor, volumeFactor)
                 it.start()
                 isPlaying = true
             }

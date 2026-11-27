@@ -83,6 +83,10 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- 약 먹을 시간: 30분 지남 확인 알람 + 알림의 [먹었어요] (우리 앱만 보냄) -->
+        <receiver
+            android:name=".chime.MedReceiver"
+            android:exported="false" />
         <!-- 시보 연주 (앱이 꺼져 있어도) -->
         <service
             android:name=".chime.ChimeService"

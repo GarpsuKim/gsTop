@@ -89,7 +89,24 @@ class VideoBackgroundViewModel(app: Application) : AndroidViewModel(app) {
             p.seekTo(0, 0L)
             p.play()
         }
-        p.volume = if (sound) 1f else 0f
+        this.sound = sound
+        applyVolume()
+    }
+
+    /** 설정의 [소리] 켜짐 여부 (마지막으로 받은 값). */
+    private var sound = true
+
+    /** 잠들기 타이머 배율 (1 = 그대로, 0 = 소리 없음). */
+    private var volumeFactor = 1f
+
+    /** 잠들기 타이머가 끝나기 전 서서히 줄이고, 끝나면 0 (다시 소리를 켜기 전까지). */
+    fun setVolumeFactor(f: Float) {
+        volumeFactor = f.coerceIn(0f, 1f)
+        applyVolume()
+    }
+
+    private fun applyVolume() {
+        exo?.volume = (if (sound) 1f else 0f) * volumeFactor
     }
 
     /** 지금 재생 중인 동영상의 위치 (밀리초). */

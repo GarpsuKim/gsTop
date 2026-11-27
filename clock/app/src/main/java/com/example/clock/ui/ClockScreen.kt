@@ -50,6 +50,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.annotation.StringRes
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Nightlight
+import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.FlashlightOff
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Timer
@@ -185,6 +191,9 @@ private const val KEY_BATTERY_DISPLAY = "battery_display"
 private const val KEY_BATTERY_FULL = "battery_full_alert"
 private const val KEY_BATTERY_UNPLUG = "battery_unplug_alert"
 private const val KEY_BATTERY_LOW = "battery_low_alert"
+private const val KEY_NIGHT_COLOR = "night_color"
+private const val KEY_NIGHT_BRIGHTNESS = "night_brightness"
+private const val KEY_NIGHT_TIMER = "night_timer"
 
 /**
  * 아날로그·하이브리드 시계판 테두리 원 굵기 ([디자인] → 테두리 원 굵기). 순서 = 저장값(ordinal).
@@ -347,6 +356,10 @@ data class ClockSettings(
     val batteryUnplugAlert: Boolean = true,
     /** 배터리 부족 알림 (끔 / 15% / 20% / 30% 이하). */
     val batteryLowAlert: BatteryLowAlert = BatteryLowAlert.P20,
+    /** 수면등 색·밝기·자동 꺼짐 ([화면] → 수면등, 조절 막대에서 바꿈). */
+    val nightColor: NightColor = NightColor.Pink,
+    val nightBrightness: NightBrightness = NightBrightness.Normal,
+    val nightOffTimer: NightOffTimer = NightOffTimer.Never,
 ) {
     /** 이미지·동영상·유튜브 배경이 모두 꺼진 검은 배경인지. */
     val isBlackBackground: Boolean
@@ -419,6 +432,9 @@ fun loadClockSettings(context: Context): ClockSettings {
         batteryFullAlert = BatteryFullAlert.entries.getOrElse(p.getInt(KEY_BATTERY_FULL, d.batteryFullAlert.ordinal)) { d.batteryFullAlert },
         batteryUnplugAlert = p.getBoolean(KEY_BATTERY_UNPLUG, d.batteryUnplugAlert),
         batteryLowAlert = BatteryLowAlert.entries.getOrElse(p.getInt(KEY_BATTERY_LOW, d.batteryLowAlert.ordinal)) { d.batteryLowAlert },
+        nightColor = NightColor.entries.getOrElse(p.getInt(KEY_NIGHT_COLOR, d.nightColor.ordinal)) { d.nightColor },
+        nightBrightness = NightBrightness.entries.getOrElse(p.getInt(KEY_NIGHT_BRIGHTNESS, d.nightBrightness.ordinal)) { d.nightBrightness },
+        nightOffTimer = NightOffTimer.entries.getOrElse(p.getInt(KEY_NIGHT_TIMER, d.nightOffTimer.ordinal)) { d.nightOffTimer },
     )
 }
 
@@ -456,6 +472,9 @@ fun saveClockSettings(context: Context, s: ClockSettings) {
         putInt(KEY_BATTERY_FULL, s.batteryFullAlert.ordinal)
         putBoolean(KEY_BATTERY_UNPLUG, s.batteryUnplugAlert)
         putInt(KEY_BATTERY_LOW, s.batteryLowAlert.ordinal)
+        putInt(KEY_NIGHT_COLOR, s.nightColor.ordinal)
+        putInt(KEY_NIGHT_BRIGHTNESS, s.nightBrightness.ordinal)
+        putInt(KEY_NIGHT_TIMER, s.nightOffTimer.ordinal)
     }
 }
 
@@ -932,6 +951,24 @@ fun ClockScreen(
         // 도움말 / 정보 창 (축소 화면에서는 띄우지 않음)
         if (helpOpen && !inPip) HelpDialog(onDismiss = { helpOpen = false })
         if (aboutOpen && !inPip) AboutDialog(onDismiss = { aboutOpen = false })
+        // 약 먹는 시간 관리 창 ([시보·알람] → 약 먹을 시간, 또는 30분 지남 알림을 눌러서)
+        if (MedicineUi.open && !inPip) MedicineDialog(onDismiss = { MedicineUi.open = false })
+
+        // 수면등: 빛은 시계 밑(MainActivity 배경 자리)에 깔고, 여기서는 조절 막대와 [뒤로] 키만.
+        // 조절 막대는 버튼이 보일 때만 화면 가운데에 (화면을 누르면 나오고, 버튼이 숨으면 같이 숨음)
+        if (NightLight.on && !inPip) {
+            BackHandler { NightLight.on = false }
+            if (showControls) {
+                NightLightPanel(
+                    color = settings.nightColor,
+                    brightness = settings.nightBrightness,
+                    offTimer = settings.nightOffTimer,
+                    onChange = { c, b, t -> onSettingsChange(settings.copy(nightColor = c, nightBrightness = b, nightOffTimer = t)) },
+                    onExit = { NightLight.on = false },
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+        }
     }
     }
 }
@@ -1041,6 +1078,19 @@ private fun ScreenMenu(
                     }
                 }
             }
+        }
+        // ── 수면등 / 손전등 ──
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        MenuItem(R.string.night_light, Icons.Filled.Nightlight) {
+            close()
+            NightLight.on = true
+        }
+        MenuItem(
+            if (Flashlight.on) R.string.flashlight_off else R.string.flashlight_on,
+            if (Flashlight.on) Icons.Filled.FlashlightOff else Icons.Filled.FlashlightOn,
+            checked = Flashlight.on,
+        ) {
+            Flashlight.toggle(context)
         }
     }
 }
@@ -1168,6 +1218,8 @@ private fun ModeMenu(
  *  - 동영상: 지금 파일 / 재생 위치 / 동영상 선택 / 무한 반복 / 소리 / 끄기   ([VideoBackgroundItems])
  *  - 음악:   현재 곡 / 재생 위치 / 재생·일시정지 / 다음 곡 / 다른 음악 / 끄기 ([MusicItems])
  *  - 유튜브: 유튜브 주소 입력… / 끄기 ([YouTubeItems])
+ *  - 백색 소음: 빗소리 / 파도 / 선풍기 / 백색 / 핑크 / 갈색 / ── 크기 / ── 끄기 ([WhiteNoiseItems])
+ *  - 잠들기 타이머 (23분 남음): 15 ~ 120분 / 끄기 ([SleepTimerItems]) → 끝나면 모든 소리 끔
  * 고르기 창(사진·동영상·음악)과 유튜브 주소 입력 창은 메뉴가 닫혀도 동작하도록 메뉴 바깥(이 버튼)에 둔다.
  * [incomingYouTube]: 다른 앱에서 "공유 → 시계" 로 받은 유튜브 주소 → 주소 입력 창을 바로 엶.
  */
@@ -1338,16 +1390,44 @@ private fun BackgroundButton(
                 )
             },
         )
+        // ── 백색 소음 ── (빗소리·파도·선풍기·백색·핑크·갈색, 앱이 직접 만든 소리)
+        add(
+            MenuSection(
+                title = R.string.white_noise,
+                icon = Icons.Filled.GraphicEq,
+                value = { WhiteNoise.type?.let { stringResource(it.label) } ?: onOff(false) },
+            ) { close ->
+                WhiteNoiseItems(close)
+            },
+        )
+        // ── 잠들기 타이머 ── (정한 시간 뒤 모든 소리 끔)
+        add(
+            MenuSection(
+                title = R.string.sleep_timer,
+                icon = Icons.Filled.Bedtime,
+                value = { sleepTimerValue() },
+            ) { close ->
+                SleepTimerItems(close)
+            },
+        )
     }
 
     SectionedMenuButton(sections) {
         Icon(Icons.Filled.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(R.string.background_menu), style = MaterialTheme.typography.labelMedium)
-        // 음악이 나오는 중이면 버튼에도 표시
+        // 음악·백색 소음이 나오는 중이거나 잠들기 타이머가 켜져 있으면 버튼에도 표시
         if (music?.isPlaying == true) {
             Spacer(Modifier.width(4.dp))
             Icon(Icons.Filled.MusicNote, contentDescription = null, modifier = Modifier.size(14.dp))
+        }
+        if (WhiteNoise.type != null) {
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Filled.GraphicEq, contentDescription = null, modifier = Modifier.size(14.dp))
+        }
+        if (SleepTimer.endAt != null) {
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Filled.Bedtime, contentDescription = null, modifier = Modifier.size(14.dp))
         }
     }
 }
