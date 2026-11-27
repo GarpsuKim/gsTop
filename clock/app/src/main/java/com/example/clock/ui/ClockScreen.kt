@@ -961,6 +961,8 @@ fun ClockScreen(
                 )
             }
         }
+        // 충전기를 꽂으면 삼성 배터리 화면을 열고 10초 뒤 시계로 복귀 (축소 화면에서는 안 함)
+        if (!inPip) ChargerConnectedEffect(battery)
 
         InlineMenuLayer(menuHost)
 

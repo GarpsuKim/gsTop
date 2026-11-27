@@ -271,7 +271,7 @@
     <string name="med_past_header">지난 기록</string>
     <string name="med_reset_button">기록 초기화</string>
     <string name="med_reset_title">기록을 초기화할까요?</string>
-    <string name="med_reset_desc">오늘을 1회차로 다시 시작하고, 먹음 체크와 건너뛴 회차를 모두 지웁니다. [저장] 을 눌러야 반영됩니다.</string>
+    <string name="med_reset_desc">먹음 체크와 건너뛴 회차를 모두 지우고 약 먹을 시간을 끕니다 (알림도 꺼짐). 다시 쓰려면 시각을 확인하고 [저장] 을 누르세요. 그날이 1회차가 됩니다.</string>
     <string name="med_reset">초기화</string>
     <string name="med_col_plan">계획</string>
     <string name="med_morning">아침</string>

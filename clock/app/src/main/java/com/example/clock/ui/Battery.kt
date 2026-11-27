@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.media.RingtoneManager
 import android.os.BatteryManager
 import androidx.annotation.StringRes
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -125,6 +126,91 @@ private fun batteryStateOf(intent: Intent): BatteryState? {
     if (level < 0 || scale <= 0) return null
     val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
     return BatteryState(percent = (level * 100f / scale).toInt().coerceIn(0, 100), plugged = plugged)
+}
+
+private const val BATTERY_SCREEN_REQUEST = 7301
+
+private tailrec fun Context.findActivityOrNull(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivityOrNull()
+    else -> null
+}
+
+/**
+ * 배터리 화면 열기: ① 삼성 배터리 (디바이스 케어) ② 같은 화면을 이름으로 ③ 표준 "배터리 사용량".
+ * 시계 화면에서 결과를 기다리는 방식으로 열어서 (같은 작업 안), 10초 뒤 시계가 직접 닫을 수 있게 함.
+ * 하나도 못 열면 false.
+ */
+@Suppress("DEPRECATION")
+fun openBatteryScreen(activity: android.app.Activity): Boolean {
+    val candidates = listOf(
+        Intent("com.samsung.android.sm.ACTION_BATTERY"),
+        Intent().setComponent(
+            android.content.ComponentName("com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"),
+        ),
+        Intent(Intent.ACTION_POWER_USAGE_SUMMARY),
+    )
+    for (intent in candidates) {
+        try {
+            activity.startActivityForResult(intent, BATTERY_SCREEN_REQUEST)
+            return true
+        } catch (_: android.content.ActivityNotFoundException) {
+        } catch (_: SecurityException) {
+        }
+    }
+    return false
+}
+
+/**
+ * 10초 뒤 시계로 복귀: 시계가 연 배터리 화면을 닫음. 배터리 화면이 따로 열려 닫을 수 없었으면
+ * 시계를 다시 앞으로 (다른 앱 위에 표시 권한이 있거나 시스템이 허용하는 경우).
+ */
+@Suppress("DEPRECATION")
+private fun returnFromBatteryScreen(activity: android.app.Activity) {
+    activity.finishActivity(BATTERY_SCREEN_REQUEST)
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        val resumed = (activity as? androidx.lifecycle.LifecycleOwner)?.lifecycle?.currentState
+            ?.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) == true
+        if (!resumed && !activity.isFinishing) {
+            runCatching {
+                activity.startActivity(
+                    Intent(activity, activity.javaClass)
+                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                )
+            }
+        }
+    }, 600L)
+}
+
+/**
+ * 충전기를 꽂으면 삼성 배터리 화면을 열어 충전 상태(충전 방식·남은 시간 등은 삼성 화면이 보여 줌)를 보여 주고,
+ * 10초 뒤 시계 화면으로 돌아옴. 그 전에 스스로 돌아오면 그대로 둠.
+ * 앱을 켤 때 이미 꽂혀 있던 경우는 하지 않음 (꽂는 순간에만). 화면에는 아무것도 그리지 않음.
+ */
+@Composable
+fun ChargerConnectedEffect(state: BatteryState?) {
+    val context = LocalContext.current
+    var prevPlugged by remember { mutableStateOf<Boolean?>(null) }
+    var trigger by remember { mutableStateOf(0) }
+    LaunchedEffect(state?.plugged) {
+        val now = state?.plugged ?: return@LaunchedEffect
+        val before = prevPlugged
+        prevPlugged = now
+        if (before == false && now) trigger++ // 빠져 있다가 꽂힘
+    }
+    LaunchedEffect(trigger) {
+        if (trigger == 0) return@LaunchedEffect
+        val activity = context.findActivityOrNull() ?: return@LaunchedEffect
+        if (!openBatteryScreen(activity)) return@LaunchedEffect
+        val lifecycle = (activity as? androidx.lifecycle.LifecycleOwner)?.lifecycle
+        var cameBack = false
+        repeat(10) { i ->
+            delay(1_000L)
+            // 사용자가 10초 전에 스스로 시계로 돌아왔으면 그대로 둠
+            if (i >= 1 && lifecycle?.currentState?.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) == true) cameBack = true
+        }
+        if (!cameBack) returnFromBatteryScreen(activity)
+    }
 }
 
 /**

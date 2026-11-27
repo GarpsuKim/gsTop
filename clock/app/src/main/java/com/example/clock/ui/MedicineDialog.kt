@@ -196,7 +196,9 @@ fun MedicineDialog(onDismiss: () -> Unit) {
     // 알림 권한 (Android 13+): 약 알림이 보이도록. 저장할 때 한 번 물음
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun save() {
-        MedStore.save(context, s.copy(active = true))
+        // 꺼져 있던 상태(처음, 또는 기록 초기화 뒤)에서 기록 없이 켜면 저장하는 날이 1회차
+        val start = if (!s.active && s.taken.isEmpty()) LocalDate.now().toEpochDay() else s.startDay
+        MedStore.save(context, s.copy(active = true, startDay = start))
         MedScheduler.update(context)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -233,7 +235,15 @@ fun MedicineDialog(onDismiss: () -> Unit) {
             text = { Text(stringResource(R.string.med_reset_desc)) },
             confirmButton = {
                 TextButton(onClick = {
-                    s = s.copy(startDay = LocalDate.now().toEpochDay(), skipped = emptySet(), taken = emptyMap())
+                    // 기록 초기화 = 약 먹을 시간 끔: 바로 저장하고 알람·알림도 끔 (다시 쓰려면 [저장])
+                    s = s.copy(
+                        active = false,
+                        startDay = LocalDate.now().toEpochDay(),
+                        skipped = emptySet(),
+                        taken = emptyMap(),
+                    )
+                    MedStore.save(context, s)
+                    MedScheduler.update(context) // active=false → 확인 알람 취소
                     confirmReset = false
                 }) { Text(stringResource(R.string.med_reset), color = LateRed) }
             },
