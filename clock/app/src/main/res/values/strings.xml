@@ -248,6 +248,8 @@
     <string name="chime_close">닫기</string>
     <string name="chime_playing">시보 연주 중</string>
     <string name="chime_channel">시보</string>
+    <string name="timetable">시간표</string>
+    <string name="anniversary">기념일</string>
     <string name="med_section">약 먹을 시간</string>
     <string name="med_title">약 먹는 시간</string>
     <string name="med_today">오늘</string>

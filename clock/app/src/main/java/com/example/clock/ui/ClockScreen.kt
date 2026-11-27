@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.Wallpaper
@@ -934,8 +935,17 @@ fun ClockScreen(
         }
         // 왼쪽 위 '업무중' / 'Home': 등록한 직장·집 Wi-Fi 에 연결돼 있는 동안 (버튼을 숨긴 시계 화면에서)
         val place = rememberCurrentPlace()
-        if (place != null && !showControls && !inPip) {
-            PlaceBadge(place, Modifier.align(Alignment.TopStart).padding(top = 8.dp, start = 12.dp))
+        // 그 밑에 시간표 상황: "근무 중 · 본사 (~18:00)" / "다음: 3교시 영어 11:00 (25분 후)"
+        if (!showControls && !inPip) {
+            Column(
+                Modifier.align(Alignment.TopStart).padding(top = 8.dp, start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (place != null) PlaceBadge(place)
+                ScheduleStatusText()
+            }
+            // 왼쪽 아래: 기념일 (오늘인 것 · D-day · 경과 일수, 1시간마다 다시 계산)
+            AnniversaryLines(Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 12.dp).navigationBarsPadding())
         }
         // 자동 기능 안내 (시계 찾기·출근·귀가·relax): 위쪽 가운데, 누르면 닫힘 (알람음도 멈춤)
         com.example.clock.auto.AutoUi.banner?.let { text ->
@@ -975,6 +985,10 @@ fun ClockScreen(
         if (MedicineUi.open && !inPip) MedicineDialog(onDismiss = { MedicineUi.open = false })
         // 자동 기능 설정 창 ([시보·알람] → 자동 기능)
         if (AutoDialogUi.open && !inPip) AutoDialog(onDismiss = { AutoDialogUi.open = false })
+        // 시간표 창 ([시보·알람] → 시간표: 근무 · 학교 · 학원)
+        if (TimetableUi.open && !inPip) TimetableDialog(onDismiss = { TimetableUi.open = false })
+        // 기념일 창 ([시보·알람] → 기념일)
+        if (AnniversaryUi.open && !inPip) AnniversaryDialog(onDismiss = { AnniversaryUi.open = false })
 
         // 수면등: 빛은 시계 밑(MainActivity 배경 자리)에 깔고, 여기서는 조절 막대와 [뒤로] 키만.
         // 조절 막대는 버튼이 보일 때만 화면 가운데에 (화면을 누르면 나오고, 버튼이 숨으면 같이 숨음)

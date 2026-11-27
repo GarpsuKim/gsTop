@@ -97,6 +97,10 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- 시간표: 출근·퇴근·수업 몇 분 전 알림 (우리 앱만 보냄) -->
+        <receiver
+            android:name=".schedule.ScheduleReceiver"
+            android:exported="false" />
         <!-- 자동 기능: 블루투스 연결·끊김 (시스템만 보내는 방송) → 시계 찾기 / relax 모드 -->
         <receiver
             android:name=".auto.BtReceiver"

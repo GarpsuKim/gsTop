@@ -13,6 +13,8 @@ import android.provider.AlarmClock
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.AutoMode
+import androidx.compose.material.icons.filled.CalendarViewWeek
+import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryStd
@@ -110,6 +112,20 @@ fun ChimeAlarmButton(
                 value = { medicineValue() },
                 // 창은 시계 화면(ClockScreen)이 띄움: 버튼이 숨겨져 있어도 알림으로 열 수 있게
                 action = { MedicineUi.open = true },
+            ),
+            // 시간표: 근무 · 학교 수업 · 학원 수업 (지금 상황 표시, 출근·퇴근·수업 알림)
+            MenuSection(
+                title = R.string.timetable,
+                icon = Icons.Filled.CalendarViewWeek,
+                value = { timetableValue() },
+                action = { TimetableUi.open = true },
+            ),
+            // 기념일: 생일·첫 만남·기념일 (경과 일수 D+, 다음 회까지 D-)
+            MenuSection(
+                title = R.string.anniversary,
+                icon = Icons.Filled.Cake,
+                value = { anniversaryValue() },
+                action = { AnniversaryUi.open = true },
             ),
             // 자동 기능: 뒤집으면 무음 · 이벤트 때 화면 켜기 · 시계 찾기 · 출근/귀가 인사 · relax · 자동 실행
             MenuSection(

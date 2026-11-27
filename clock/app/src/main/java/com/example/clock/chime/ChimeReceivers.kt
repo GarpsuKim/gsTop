@@ -50,6 +50,7 @@ class ChimeRescheduleReceiver : BroadcastReceiver() {
                 MedScheduler.update(context) // 약 먹을 시간 확인 알람
                 com.example.clock.auto.AutoRunScheduler.update(context) // 자동 실행
                 com.example.clock.auto.WifiMonitor.register(context) // 출근·귀가 Wi-Fi 감시
+                com.example.clock.schedule.ScheduleAlarm.update(context) // 시간표 알림
             }
         }
     }

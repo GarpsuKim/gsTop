@@ -191,6 +191,8 @@ object AutoEvent {
     const val WORK = "work"
     const val HOME = "home"
     const val RELAX = "relax"
+    /** 시간표 알림의 팝업창 (출근·퇴근·수업 몇 분 전). */
+    const val SCHEDULE = "schedule"
 }
 
 /** 화면에 보여 줄 것 (MainActivity·시계 화면이 읽음). */
@@ -200,6 +202,10 @@ object AutoUi {
 
     /** 화면 위쪽 안내 (누르면 닫힘). */
     var banner by mutableStateOf<String?>(null)
+
+    /** 시계 화면이 지금 보이는지 (MainActivity onStart/onStop). 보이면 권한 없이도 바로 띄울 수 있음. */
+    @Volatile
+    var appVisible = false
 }
 
 object ClockWaker {
@@ -236,7 +242,8 @@ object ClockWaker {
         val intent = Intent(context, MainActivity::class.java)
             .putExtra(AutoEvent.EXTRA, event)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        if (Settings.canDrawOverlays(context)) {
+        // 권한이 있거나, 시계가 이미 화면에 보이면 (보이는 앱은 화면을 열 수 있음) 바로 처리
+        if (Settings.canDrawOverlays(context) || AutoUi.appVisible) {
             try {
                 context.startActivity(intent)
                 return

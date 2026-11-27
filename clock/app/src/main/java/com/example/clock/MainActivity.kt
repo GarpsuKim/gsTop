@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
         // 자동 기능: 출근·귀가 Wi-Fi 감시와 자동 실행 알람을 다시 맞춤 (강제 중지 등으로 지워졌어도 복구)
         WifiMonitor.register(this)
         AutoRunScheduler.update(this)
+        com.example.clock.schedule.ScheduleAlarm.update(this) // 시간표 알림
         setContent {
             // [뒤로] 버튼으로는 앱을 닫지 않음. 앱이 닫히는 경우는 두 가지뿐:
             //  1) 한 손가락 스와이프 (분할 안 됨: 세로 ←→, 가로 ↑↓ / 분할 중: 시계 쪽으로)   2) [닫힘] 시간이 다 됨
@@ -369,6 +370,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        AutoUi.appVisible = true
         // 잠들기 타이머로 소리를 모두 끈 뒤 앱을 다시 열면 → 동영상·유튜브 소리를 원래대로
         // (음악·백색 소음은 멈춘 채로, 사용자가 다시 켤 때 나옴)
         SleepTimer.releaseSoundOff()
@@ -379,6 +381,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        AutoUi.appVisible = false
         // 화면 회전 때문에 잠깐 멈추는 경우는 제외하고, 앱을 나가면 음악·백색 소음 일시정지
         if (!isChangingConfigurations) {
             music.onAppHidden()
@@ -494,6 +497,10 @@ class MainActivity : ComponentActivity() {
                 AutoUi.banner = ClockWaker.eventTitle(this, event)
                 GreetingPlayer.play(this, place.musicUri)
                 ComponentName.unflattenFromString(place.app)?.let { launchInFront(it) }
+            }
+            AutoEvent.SCHEDULE -> {
+                // 시간표 알림 팝업창: 위쪽 안내로 보여 줌
+                com.example.clock.schedule.ScheduleAlarm.takePopupText(this)?.let { AutoUi.banner = "⏰ $it" }
             }
             AutoEvent.RELAX -> {
                 AutoUi.banner = ClockWaker.eventTitle(this, event)
