@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
@@ -93,6 +97,15 @@ enum class DigitalDate(@StringRes val label: Int) {
     Bottom(R.string.date_bottom), // 날짜(하): 시각 아래
 }
 
+/**
+ * 디지털 글자 크기 ([글자 ▾] → 크기). 순서 = 저장값(ordinal) → 새 항목은 끝에 추가할 것.
+ * [scale]: 화면에 꽉 차는 크기 대비 비율.
+ */
+enum class DigitalTextSize(@StringRes val label: Int, val scale: Float) {
+    Large(R.string.digital_size_large, 1f),   // 큰 글자: 화면에 꽉 차게 (예전 그대로)
+    Small(R.string.digital_size_small, 0.6f), // 작은 글자
+}
+
 /** 날짜 줄 글자 크기 = 시분초 글자의 이 비율. */
 private const val DATE_RATIO = 0.5f
 
@@ -126,6 +139,10 @@ fun BigDigitalClock(
     date: LocalDate = LocalDate.now(),
     /** 날짜·요일 줄: 끔 / 시각 위 / 시각 아래. */
     datePosition: DigitalDate = DigitalDate.Off,
+    /** 글자 크기: 큰 글자 = 화면에 꽉 차게, 작은 글자 = 그보다 작게. */
+    textSize: DigitalTextSize = DigitalTextSize.Large,
+    /** 글자(시각·날짜)를 끌었다 놓았을 때 새 스크롤 방향. */
+    onScrollChange: (DigitalScroll) -> Unit = {},
 ) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -146,7 +163,7 @@ fun BigDigitalClock(
         val maxH = constraints.maxHeight.toFloat()
         // 날짜 줄을 켜면 그 높이(시분초의 절반)까지 합쳐서 화면에 들어가게
         val showDate = datePosition != DigitalDate.Off
-        val timeSize = remember(maxW, maxH, baseStyle, showDate) {
+        val timeSize = remember(maxW, maxH, baseStyle, showDate, textSize) {
             val base = 100.sp
             val probe = measurer.measure(
                 text("AM", "00:00:00", base),
@@ -168,7 +185,7 @@ fun BigDigitalClock(
             val scale = minOf(
                 maxW * 0.97f / width,
                 maxH * 0.9f / height,
-            )
+            ) * textSize.scale
             with(density) { (base.toPx() * scale).toSp() }
         }
         val amPm = if (time.hour < 12) "AM" else "PM"
@@ -207,11 +224,14 @@ fun BigDigitalClock(
         val latestMaxH by rememberUpdatedState(maxH)
 
         // 글자 왼쪽 위 모서리의 위치 (x, y). NaN = 가운데.
-        // 스크롤이 이 값을 움직이므로, 방향을 바꿔도 글자가 튀지 않고 그 자리에서 이어짐.
-        // (글자를 손가락으로 끄는 기능은 없앰: 한 손가락 스와이프는 화면 분할·앱 종료)
+        // 스크롤·드래그 모두 이 값을 움직이므로, 방향을 바꾸거나 손을 떼도 글자가 튀지 않고 그 자리에서 이어짐.
         var x by remember { mutableFloatStateOf(Float.NaN) }
         var y by remember { mutableFloatStateOf(Float.NaN) }
+        var dragging by remember { mutableStateOf(false) }
         var bounceDir by remember { mutableFloatStateOf(-1f) } // ↔ 에서 지금 가는 방향 (-1 = 왼쪽)
+        val latestOnScrollChange by rememberUpdatedState(onScrollChange)
+        val latestScroll by rememberUpdatedState(scroll)
+        val swipeMinPx = with(density) { 48.dp.toPx() }
 
         // 스크롤을 끄면 가운데로
         LaunchedEffect(scroll) {
@@ -231,7 +251,7 @@ fun BigDigitalClock(
                 val now = SystemClock.elapsedRealtime()
                 val dt = (now - last).coerceAtMost(200L) // 잠깐 멈췄다 돌아와도 크게 튀지 않게
                 last = now
-                if (contentWidth == 0 || contentHeight == 0) continue
+                if (dragging || contentWidth == 0 || contentHeight == 0) continue
                 // 글자 크기·화면 크기는 실행 중에 바뀔 수 있으므로 (첫 측정, 회전) 매번 최신 값으로 계산
                 val w = latestMaxW
                 val h = latestMaxH
@@ -297,6 +317,56 @@ fun BigDigitalClock(
                     .graphicsLayer {
                         translationX = if (x.isNaN()) centerX else x
                         translationY = if (y.isNaN()) centerY else y
+                    }
+                    // 글자(시각·날짜) 위에서 시작한 끌기만: 손가락을 따라 이동, 손을 떼면 끈 방향
+                    // (상하좌우 중 많이 움직인 쪽)으로 스크롤 (설정에 저장).
+                    // 글자 상자에만 붙어 있으므로 빈 공간에서 민 것은 여기로 오지 않고 화면 분할·앱 종료 스와이프가 됨.
+                    // 여기서 끌기를 가져가면(consume) 바깥 스와이프 감지기는 "이미 받은 끌기"로 보고 무시함.
+                    .pointerInput(Unit) {
+                        var dragX = 0f
+                        var dragY = 0f
+                        fun backToCenterIfOff() {
+                            if (latestScroll == DigitalScroll.Off) {
+                                x = Float.NaN
+                                y = Float.NaN
+                            }
+                        }
+                        detectDragGestures(
+                            onDragStart = {
+                                dragX = 0f
+                                dragY = 0f
+                                if (x.isNaN()) x = (latestMaxW - contentWidth) / 2f
+                                if (y.isNaN()) y = (latestMaxH - contentHeight) / 2f
+                                dragging = true
+                            },
+                            onDragEnd = {
+                                dragging = false
+                                val horizontal = abs(dragX) >= abs(dragY)
+                                val dir = when {
+                                    horizontal && dragX <= -swipeMinPx -> DigitalScroll.Left
+                                    horizontal && dragX >= swipeMinPx -> DigitalScroll.Right
+                                    !horizontal && dragY <= -swipeMinPx -> DigitalScroll.Up
+                                    !horizontal && dragY >= swipeMinPx -> DigitalScroll.Down
+                                    else -> null
+                                }
+                                // 조금만 끌었고 스크롤도 꺼져 있으면 가운데로 돌아감
+                                if (dir == null) {
+                                    backToCenterIfOff()
+                                } else if (dir != latestScroll) {
+                                    latestOnScrollChange(dir)
+                                }
+                            },
+                            onDragCancel = {
+                                dragging = false
+                                backToCenterIfOff()
+                            },
+                        ) { change, amount ->
+                            change.consume()
+                            dragX += amount.x
+                            dragY += amount.y
+                            x += amount.x
+                            y += amount.y
+                        }
                     },
             ) {
                 clockText()

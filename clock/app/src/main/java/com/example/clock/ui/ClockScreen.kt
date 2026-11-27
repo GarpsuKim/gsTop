@@ -55,6 +55,9 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Pin
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
@@ -173,6 +176,55 @@ private const val KEY_DIGITAL_DATE = "digital_date"
 private const val KEY_DIGITAL_DATE_COLOR = "digital_date_color"
 private const val KEY_SPLIT_SIDE = "split_side"
 private const val KEY_SPLIT_RATIO = "split_ratio"
+private const val KEY_RIM_WIDTH = "rim_width"
+private const val KEY_TICK_STYLE = "tick_style"
+private const val KEY_DIAL_NUMBER_SIZE = "dial_number_size"
+private const val KEY_DIGITAL_TEXT_SIZE = "digital_text_size"
+private const val KEY_TICK_LENGTH = "tick_length"
+
+/**
+ * 아날로그·하이브리드 시계판 테두리 원 굵기 ([디자인] → 테두리 원 굵기). 순서 = 저장값(ordinal).
+ * [ratio]: 시계판 반지름 대비 굵기 (0 = 그리지 않음). 눈금·숫자 자리는 굵기와 상관없이 그대로.
+ */
+enum class RimWidth(@StringRes val label: Int, val ratio: Float) {
+    Thick(R.string.rim_thick, 0.055f),
+    Medium(R.string.rim_medium, 0.035f), // 예전 그대로
+    Thin(R.string.rim_thin, 0.018f),
+    Off(R.string.rim_off, 0f),
+}
+
+/**
+ * 시계판 눈금 ([디자인] → 눈금 굵기). 순서 = 저장값(ordinal).
+ *  - 굵게: 예전 그대로 (시 눈금 굵게, 분 눈금 가늘게)
+ *  - 가늘게: 모든 눈금을 그 절반 정도로
+ *  - 시간 off: 시 눈금(5분마다)을 그리지 않고 분 눈금만
+ *  - 分 off: 분 눈금을 그리지 않고 시 눈금만
+ */
+enum class TickStyle(@StringRes val label: Int) {
+    Thick(R.string.tick_thick),
+    Thin(R.string.tick_thin),
+    HourOff(R.string.tick_hour_off),
+    MinuteOff(R.string.tick_minute_off),
+}
+
+/**
+ * 시계판 눈금 길이 ([디자인] → 눈금 길이). 순서 = 저장값(ordinal).
+ * [scale]: 길게(예전 그대로) 대비 비율. 0 = 눈금을 그리지 않음 (눈금 굵기 설정과 상관없이).
+ * 눈금은 테두리 쪽 끝을 그대로 두고 안쪽 끝만 짧아짐. 숫자 자리는 길이와 상관없이 그대로.
+ */
+enum class TickLength(@StringRes val label: Int, val scale: Float) {
+    Long(R.string.tick_length_long, 1f),
+    Medium(R.string.tick_length_medium, 0.7f),
+    Short(R.string.tick_length_short, 0.45f),
+    Off(R.string.tick_length_off, 0f),
+}
+
+/** 시계판 숫자 크기 ([디자인] → 숫자). [scale]: 작은 글씨(예전 그대로) 대비 비율. 순서 = 저장값(ordinal). */
+enum class DialNumberSize(@StringRes val label: Int, val scale: Float) {
+    Small(R.string.number_size_small, 1f),
+    Medium(R.string.number_size_medium, 1.25f),
+    Large(R.string.number_size_large, 1.5f),
+}
 
 /** 아날로그·하이브리드 시계판 숫자. 순서 = 저장값(ordinal) → 새 항목은 끝에 추가할 것. */
 enum class DialNumbers(@StringRes val label: Int) {
@@ -270,6 +322,16 @@ data class ClockSettings(
     val splitSide: SplitSide? = null,
     /** 자체 화면 분할: 시계가 차지하는 비율 (구분선을 끌어 조절, 두 번 누르면 반반). */
     val splitRatio: Float = SplitSide.DEFAULT_RATIO,
+    /** 아날로그·하이브리드 테두리 원 굵기 (굵게 / 중간 / 가늘게 / off). */
+    val rimWidth: RimWidth = RimWidth.Medium,
+    /** 아날로그·하이브리드 눈금 (굵게 / 가늘게 / 시간 off / 分 off). */
+    val tickStyle: TickStyle = TickStyle.Thick,
+    /** 아날로그·하이브리드 눈금 길이 (길게 / 중간 / 짧게 / off). */
+    val tickLength: TickLength = TickLength.Long,
+    /** 아날로그·하이브리드 숫자 크기 (작은 / 보통 / 큰 글씨). */
+    val dialNumberSize: DialNumberSize = DialNumberSize.Small,
+    /** 디지털 글자 크기 (큰 글자 / 작은 글자). */
+    val digitalTextSize: DigitalTextSize = DigitalTextSize.Large,
 ) {
     /** 이미지·동영상·유튜브 배경이 모두 꺼진 검은 배경인지. */
     val isBlackBackground: Boolean
@@ -333,6 +395,11 @@ fun loadClockSettings(context: Context): ClockSettings {
         digitalDateColor = DigitalColor.entries.getOrElse(p.getInt(KEY_DIGITAL_DATE_COLOR, d.digitalDateColor.ordinal)) { d.digitalDateColor },
         splitSide = SplitSide.entries.getOrNull(p.getInt(KEY_SPLIT_SIDE, -1)), // -1 = 분할 안 함
         splitRatio = p.getFloat(KEY_SPLIT_RATIO, d.splitRatio).coerceIn(SplitSide.MIN_RATIO, SplitSide.MAX_RATIO),
+        rimWidth = RimWidth.entries.getOrElse(p.getInt(KEY_RIM_WIDTH, d.rimWidth.ordinal)) { d.rimWidth },
+        tickStyle = TickStyle.entries.getOrElse(p.getInt(KEY_TICK_STYLE, d.tickStyle.ordinal)) { d.tickStyle },
+        tickLength = TickLength.entries.getOrElse(p.getInt(KEY_TICK_LENGTH, d.tickLength.ordinal)) { d.tickLength },
+        dialNumberSize = DialNumberSize.entries.getOrElse(p.getInt(KEY_DIAL_NUMBER_SIZE, d.dialNumberSize.ordinal)) { d.dialNumberSize },
+        digitalTextSize = DigitalTextSize.entries.getOrElse(p.getInt(KEY_DIGITAL_TEXT_SIZE, d.digitalTextSize.ordinal)) { d.digitalTextSize },
     )
 }
 
@@ -361,6 +428,11 @@ fun saveClockSettings(context: Context, s: ClockSettings) {
         putInt(KEY_DIGITAL_DATE_COLOR, s.digitalDateColor.ordinal)
         putInt(KEY_SPLIT_SIDE, s.splitSide?.ordinal ?: -1)
         putFloat(KEY_SPLIT_RATIO, s.splitRatio)
+        putInt(KEY_RIM_WIDTH, s.rimWidth.ordinal)
+        putInt(KEY_TICK_STYLE, s.tickStyle.ordinal)
+        putInt(KEY_TICK_LENGTH, s.tickLength.ordinal)
+        putInt(KEY_DIAL_NUMBER_SIZE, s.dialNumberSize.ordinal)
+        putInt(KEY_DIGITAL_TEXT_SIZE, s.digitalTextSize.ordinal)
     }
 }
 
@@ -610,8 +682,14 @@ fun ClockScreen(
         },
     ) {
         if (digitalOnly) {
+            // 디지털: 글자(시각·날짜)를 끌면 손가락을 따라 움직이고, 놓으면 그 방향으로 스크롤 (설정에 저장됨).
+            // 글자 밖 빈 공간에서 밀면 한 손가락 스와이프 (화면 분할·앱 종료)
+            val dragSettings by rememberUpdatedState(settings)
+            val dragOnChange by rememberUpdatedState(onSettingsChange)
             BigDigitalClock(
                 time = now,
+                textSize = settings.digitalTextSize,
+                onScrollChange = { dragOnChange(dragSettings.copy(digitalScroll = it)) },
                 color = settings.digitalColor,
                 bold = settings.digitalBold,
                 neon = settings.digitalNeon,
@@ -1306,9 +1384,12 @@ private fun SecondHandMenu(
 
 /**
  * 아날로그·하이브리드 [🎨 디자인 ▾] 버튼 (2단계 메뉴, [SectionedMenuButton]):
- *  1. 영역 목록: [테마 › 오션] [애니메이션 › 눈 내리는 밤] [숫자 › 숫자 끔]   ← 이름 + 지금 값만
+ *  1. 영역 목록: [테마 › 오션] [애니메이션 › 눈 내리는 밤] [숫자 › 숫자 끔] [테두리 원 굵기 › 중간] [눈금 굵기 › 굵게]
+ *     [눈금 길이 › 길게]   ← 이름 + 지금 값만
  *  2. 영역 팝업: 테마 → 기본 / 무지개 / 네온 / 오션 …,  애니메이션 → 끄기 / 별빛 반짝임 …,
- *               숫자 → 숫자 끔 / 숫자 3·6·9·12 / 숫자 전부
+ *               숫자 → 숫자 끔 / 숫자 3·6·9·12 / 숫자 전부 / ── / 작은 글씨 / 보통 글씨 / 큰 글씨,
+ *               테두리 원 굵기 → 굵게 / 중간 / 가늘게 / off,  눈금 굵기 → 굵게 / 가늘게 / 시간 off / 分 off,
+ *               눈금 길이 → 길게 / 중간 / 짧게 / off
  * 영역 팝업에서 골라도 팝업은 열려 있어서 여러 개를 바로 바꿔 볼 수 있음.
  */
 @Composable
@@ -1347,13 +1428,67 @@ private fun DesignMenu(settings: ClockSettings, onSettingsChange: (ClockSettings
             MenuSection(
                 title = R.string.design_section_numbers,
                 icon = Icons.Filled.Pin,
-                value = { stringResource(settings.dialNumbers.label) },
+                value = {
+                    // 숫자를 켰으면 크기도 함께 (예: "숫자 전부 · 작은 글씨")
+                    val shown = stringResource(settings.dialNumbers.label)
+                    if (settings.dialNumbers == DialNumbers.Off) shown
+                    else "$shown · ${stringResource(settings.dialNumberSize.label)}"
+                },
             ) {
+                // 1그룹: 보일 숫자
                 DialNumbers.entries.forEach { n ->
                     DropdownMenuItem(
                         text = { Text(stringResource(n.label), style = MaterialTheme.typography.bodyMedium) },
                         trailingIcon = if (n == settings.dialNumbers) checkIcon else null,
                         onClick = { onSettingsChange(settings.copy(dialNumbers = n)) },
+                    )
+                }
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                // 2그룹: 숫자 크기 (숫자를 껐을 때도 미리 골라 둘 수 있음)
+                DialNumberSize.entries.forEach { s ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(s.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (s == settings.dialNumberSize) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(dialNumberSize = s)) },
+                    )
+                }
+            },
+            MenuSection(
+                title = R.string.design_section_rim,
+                icon = Icons.Filled.RadioButtonUnchecked,
+                value = { stringResource(settings.rimWidth.label) },
+            ) {
+                RimWidth.entries.forEach { r ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(r.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (r == settings.rimWidth) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(rimWidth = r)) },
+                    )
+                }
+            },
+            MenuSection(
+                title = R.string.design_section_ticks,
+                icon = Icons.Filled.Straighten,
+                value = { stringResource(settings.tickStyle.label) },
+            ) {
+                TickStyle.entries.forEach { t ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(t.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (t == settings.tickStyle) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(tickStyle = t)) },
+                    )
+                }
+            },
+            MenuSection(
+                title = R.string.design_section_tick_length,
+                icon = Icons.Filled.Height,
+                value = { stringResource(settings.tickLength.label) },
+            ) {
+                TickLength.entries.forEach { l ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(l.label), style = MaterialTheme.typography.bodyMedium) },
+                        trailingIcon = if (l == settings.tickLength) checkIcon else null,
+                        onClick = { onSettingsChange(settings.copy(tickLength = l)) },
                     )
                 }
             },
@@ -1461,13 +1596,16 @@ private fun AnalogClockArea(
             val fullSize = minOf(maxWidth, maxHeight)
             // [숫자 전부]: 숫자를 시계판 바깥 테두리에 붙여 놓으므로, 숫자 자리만큼 시계판을 줄임
             val outsideNumbers = settings.dialNumbers == DialNumbers.All
-            val dialSize = if (outsideNumbers) fullSize / OutsideNumbersScale else fullSize
+            val numberScale = settings.dialNumberSize.scale
+            val dialSize = if (outsideNumbers) fullSize / outsideNumbersScale(numberScale) else fullSize
             if (outsideNumbers) {
-                DialNumberLayer(style, settings.dialNumbers, outside = true, modifier = Modifier.size(fullSize))
+                DialNumberLayer(style, settings.dialNumbers, outside = true, sizeScale = numberScale, modifier = Modifier.size(fullSize))
             }
             Box(modifier = Modifier.size(dialSize), contentAlignment = Alignment.Center) {
-                DialFace(style, Modifier.fillMaxSize())
-                if (!outsideNumbers) DialNumberLayer(style, settings.dialNumbers, outside = false, modifier = Modifier.fillMaxSize())
+                DialFace(style, settings.rimWidth, settings.tickStyle, settings.tickLength, Modifier.fillMaxSize())
+                if (!outsideNumbers) {
+                    DialNumberLayer(style, settings.dialNumbers, outside = false, sizeScale = numberScale, modifier = Modifier.fillMaxSize())
+                }
                 if (settings.mode == DisplayMode.Hybrid) {
                     // 시계판 안쪽: 위에 요일(AM/PM), 아래에 년월일
                     val amPm = if (now.hour < 12) "AM" else "PM"
@@ -1496,6 +1634,8 @@ private fun AnalogClockArea(
  * 디지털 [🔤 글자 ▾] 버튼 (한 단계 목록, 버튼에는 지금 글자색 견본):
  *  ☑ 굵게 / ☑ 네온사인   ← 누를 때마다 켜기·끄기
  *  ── 구분선 ──
+ *  크기: 큰 글자 / 작은 글자 (지금 값에 ✓)
+ *  ── 구분선 ──
  *  글자색: 흰색 / 빨강 / … / 무지개 (지금 값에 ✓)
  * 무엇을 눌러도 목록은 열려 있어서 바로 바뀐 모습을 보며 여러 개를 고를 수 있음.
  */
@@ -1521,6 +1661,18 @@ private fun DigitalTextMenu(settings: ClockSettings, onSettingsChange: (ClockSet
         CheckItem(R.string.digital_bold, settings.digitalBold) { onSettingsChange(settings.copy(digitalBold = it)) }
         CheckItem(R.string.digital_neon, settings.digitalNeon) { onSettingsChange(settings.copy(digitalNeon = it)) }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        // 크기: 큰 글자 (화면에 꽉 차게) / 작은 글자. 글자색 목록이 길어서 그 위에
+        MenuSectionTitle(R.string.digital_text_size)
+        DigitalTextSize.entries.forEach { s ->
+            DropdownMenuItem(
+                text = { Text(stringResource(s.label), style = MaterialTheme.typography.bodyMedium) },
+                trailingIcon = if (s == settings.digitalTextSize) {
+                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else null,
+                onClick = { onSettingsChange(settings.copy(digitalTextSize = s)) },
+            )
+        }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
         MenuSectionTitle(R.string.digital_text_color)
         DigitalColor.entries.forEach { c ->
             DropdownMenuItem(
@@ -1539,24 +1691,34 @@ private fun DigitalTextMenu(settings: ClockSettings, onSettingsChange: (ClockSet
 private const val OutsideNumberFont = 0.13f
 /** [숫자 전부] 의 시계판 테두리와 숫자 사이 틈 (시계판 반지름 대비). */
 private const val OutsideNumberGap = 0.02f
-/** [숫자 전부]: (시계판 + 바깥 숫자) 전체 크기 ÷ 시계판 크기. 숫자 한 줄 높이(글자 크기의 약 1.2배)까지 들어가게. */
-private const val OutsideNumbersScale = 1f + OutsideNumberGap + OutsideNumberFont * 1.25f
+/**
+ * [숫자 전부]: (시계판 + 바깥 숫자) 전체 크기 ÷ 시계판 크기. 숫자 한 줄 높이(글자 크기의 약 1.2배)까지 들어가게.
+ * [sizeScale] = 숫자 크기 비율 ([DialNumberSize]) → 숫자가 클수록 시계판을 더 줄임.
+ */
+private fun outsideNumbersScale(sizeScale: Float) = 1f + OutsideNumberGap + OutsideNumberFont * sizeScale * 1.25f
 
 /**
  * 시계판 숫자. 색은 테마 글자색, 크기는 시계판에 비례.
  *  - [outside] = false ([숫자 3·6·9·12]): 긴 눈금(3·6·9·12) 바로 안쪽 원 위에.
  *    하이브리드의 요일·날짜 글자(중심에서 위아래 0.44r)와 겹치지 않는 위치·크기.
- *  - [outside] = true ([숫자 전부]): 시계판 바깥 테두리에 딱 붙여서 (이 층은 [OutsideNumbersScale] 만큼 큰 상자).
+ *  - [outside] = true ([숫자 전부]): 시계판 바깥 테두리에 딱 붙여서 (이 층은 [outsideNumbersScale] 만큼 큰 상자).
  *    숫자마다 글자 상자의 시계판 쪽 끝이 테두리에서 [OutsideNumberGap] 만큼만 떨어지도록.
+ * [sizeScale]: 숫자 크기 비율 (작은 글씨 1 / 보통 1.25 / 큰 글씨 1.5).
  */
 @Composable
-private fun DialNumberLayer(style: DialStyle, numbers: DialNumbers, outside: Boolean, modifier: Modifier = Modifier) {
+private fun DialNumberLayer(
+    style: DialStyle,
+    numbers: DialNumbers,
+    outside: Boolean,
+    sizeScale: Float,
+    modifier: Modifier = Modifier,
+) {
     if (numbers == DialNumbers.Off) return
     val measurer = rememberTextMeasurer()
     val hours = if (numbers == DialNumbers.Quarters) listOf(12, 3, 6, 9) else (1..12).toList()
     Canvas(modifier) {
-        val radius = if (outside) size.minDimension / 2f / OutsideNumbersScale else size.minDimension / 2f
-        val fontPx = radius * if (outside) OutsideNumberFont else 0.15f
+        val radius = if (outside) size.minDimension / 2f / outsideNumbersScale(sizeScale) else size.minDimension / 2f
+        val fontPx = radius * sizeScale * if (outside) OutsideNumberFont else 0.15f
         val textStyle = TextStyle(fontSize = fontPx.toSp(), fontWeight = FontWeight.Bold)
         // 안쪽: 눈금 바깥 끝(DialFace 와 같은 계산) → 긴 눈금 길이 → 조금 띄우고 → 글자 반 높이만큼 안쪽
         val tickOuter = radius - radius * 0.035f - radius * 0.025f
@@ -1794,32 +1956,53 @@ private fun monoStyle(main: Color, dim: Color, accent: Color, rimColors: List<Co
         textBrush = SolidColor(main),
     )
 
-/** 시계판: 바탕, 테두리, 눈금. 크기에 비례해서 굵기를 정한다. */
+/**
+ * 시계판: 바탕, 테두리, 눈금. 크기에 비례해서 굵기를 정한다.
+ * [rimWidth]: 테두리 원 굵기 (off = 그리지 않음). [ticks]: 눈금 굵기 / 시 눈금 off / 분 눈금 off.
+ * [tickLength]: 눈금 길이 (테두리 쪽 끝은 그대로, 안쪽 끝만 짧아짐. off = 눈금을 그리지 않음).
+ * 눈금 자리는 테두리가 중간 이하이면 예전 그대로, 굵게일 때만 테두리에 닿지 않게 조금 안쪽으로.
+ */
 @Composable
-private fun DialFace(style: DialStyle, modifier: Modifier = Modifier) {
+private fun DialFace(
+    style: DialStyle,
+    rimWidth: RimWidth,
+    ticks: TickStyle,
+    tickLength: TickLength,
+    modifier: Modifier = Modifier,
+) {
     Canvas(modifier) {
         val radius = size.minDimension / 2f
-        val rimWidth = radius * 0.035f
+        val rimPx = radius * rimWidth.ratio
         // 시계판 바탕은 칠하지 않음: 앱 바탕(검정)과 뒤의 애니메이션이 그대로 보이게
 
         // 테두리 (무지개는 12시가 빨강이 되도록 -90도 회전)
-        style.rim?.let { rim ->
+        val rim = style.rim
+        if (rim != null && rimPx > 0f) {
             rotate(-90f) {
                 drawCircle(
                     brush = rim,
-                    radius = radius - rimWidth / 2f,
-                    style = Stroke(width = rimWidth),
+                    radius = radius - rimPx / 2f,
+                    style = Stroke(width = rimPx),
                 )
             }
         }
 
         // 눈금: 3·6·9·12시는 길게, 나머지 시 눈금은 조금 짧게, 분 눈금은 가장 짧게
-        val outer = radius - rimWidth - radius * 0.025f
-        for (i in 0 until 60) {
+        val layoutRim = radius * maxOf(rimWidth.ratio, RimWidth.Medium.ratio)
+        val outer = radius - layoutRim - radius * 0.025f
+        // 가늘게 = 굵게(예전)의 약 절반
+        val thin = ticks == TickStyle.Thin
+        val hourStroke = radius * if (thin) 0.02f else 0.04f
+        val minuteStroke = radius * if (thin) 0.009f else 0.016f
+        val lengthScale = tickLength.scale
+        // 눈금 길이 off: 눈금을 하나도 그리지 않음
+        if (lengthScale > 0f) for (i in 0 until 60) {
             val isHour = i % 5 == 0
+            if (isHour && ticks == TickStyle.HourOff) continue     // 시간 off: 시 눈금 없이 분 눈금만
+            if (!isHour && ticks == TickStyle.MinuteOff) continue  // 分 off: 분 눈금 없이 시 눈금만
             val isQuarter = i % 15 == 0
             val angle = Math.toRadians(i * 6.0 - 90.0)
-            val length = when {
+            val length = lengthScale * when {
                 isQuarter -> radius * 0.18f
                 isHour -> radius * 0.11f
                 else -> radius * 0.06f
@@ -1829,7 +2012,7 @@ private fun DialFace(style: DialStyle, modifier: Modifier = Modifier) {
                 color = style.tickColor(i),
                 start = center + polar(angle, inner),
                 end = center + polar(angle, outer),
-                strokeWidth = if (isHour) radius * 0.04f else radius * 0.016f,
+                strokeWidth = if (isHour) hourStroke else minuteStroke,
                 cap = StrokeCap.Round,
             )
         }

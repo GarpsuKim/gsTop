@@ -43,6 +43,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -154,6 +156,35 @@ private fun AppCell(app: LauncherApp, isPinned: Boolean, onClick: () -> Unit, on
 /** 아이콘 크기. */
 private val AppIconSize = 48.dp
 
+/** [▾ 모든 앱 보기 (123)] / [▴ 모든 앱 접기] 버튼 줄 (목록 칸 너비 전체). */
+@Composable
+private fun AllAppsToggle(expanded: Boolean, count: Int, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x33FFFFFF))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            if (expanded) stringResource(R.string.app_all_hide) else stringResource(R.string.app_all_show, count),
+            style = MaterialTheme.typography.labelLarge,
+            color = Color.White,
+        )
+    }
+}
+
 /** 홈 화면 폴더를 이 목록의 앱으로 바꾼 것. */
 private class FolderView(val id: Long, val title: String, val apps: List<LauncherApp>)
 
@@ -203,7 +234,9 @@ private val FolderMiniIconSize = 17.dp
 
 /**
  * 자체 화면 분할의 빈 절반: 폰에 설치된 앱 목록 (홈 화면 앱 서랍과 같은 목록, 이름순).
- * 위에 검색창: 이름 일부 또는 초성으로 거름. 키보드가 뜨면 목록이 키보드 위로 줄어듦 (safeDrawing 여백).
+ * 순서: [고정] → [홈 화면 폴더] → [▾ 모든 앱 보기] (처음에는 접혀 있고 눌러야 펼침).
+ * 위에 검색창: 이름 일부 또는 초성으로 거름 (검색 중에는 맞는 앱이 접지 않고 바로 보임).
+ * 키보드가 뜨면 목록이 키보드 위로 줄어듦 (safeDrawing 여백).
  * 누르면 그 앱을 열고, 기기가 지원하면 시스템 화면 분할로 시계 옆에 엶 (FLAG_ACTIVITY_LAUNCH_ADJACENT).
  * 지원하지 않는 기기에서는 그냥 그 앱이 열림.
  */
@@ -236,6 +269,8 @@ fun AppListPanel(modifier: Modifier = Modifier) {
     BackHandler(enabled = openFolder != null) { openFolderId = null }
     // 전체 목록 스크롤 위치 (폴더를 여는 동안 목록이 화면에서 빠져도 기억)
     val mainGridState = rememberLazyGridState()
+    // [모든 앱] 펼침 여부: 처음에는 접힘 (분할할 때마다 새로 접힌 채로, 화면 회전에는 유지)
+    var showAllApps by rememberSaveable { mutableStateOf(false) }
 
     // 검색어 (화면을 돌려도 유지)
     var query by rememberSaveable { mutableStateOf("") }
@@ -356,8 +391,6 @@ fun AppListPanel(modifier: Modifier = Modifier) {
                     items(pinnedList, key = { "pin:" + it.key }) { app ->
                         AppCell(app, isPinned = true, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
                     }
-                    // "모든 앱" 제목은 폴더 구역이 있으면 그 아래에서 (제목이 두 번 나오지 않게)
-                    if (restList.isNotEmpty() && !showFolders) sectionHeader(R.string.app_section_all)
                 } else if (pinned.isEmpty() && query.isBlank()) {
                     // 아직 고정한 앱이 없으면 방법 안내
                     item(key = "hint", span = { GridItemSpan(maxLineSpan) }) {
@@ -376,10 +409,25 @@ fun AppListPanel(modifier: Modifier = Modifier) {
                     items(folders, key = { "folder:" + it.id }) { folder ->
                         FolderCell(folder, onClick = { openFolderId = folder.id })
                     }
-                    if (restList.isNotEmpty()) sectionHeader(R.string.app_section_all)
                 }
-                items(restList, key = { it.key }) { app ->
-                    AppCell(app, isPinned = false, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
+                if (query.isBlank()) {
+                    // 모든 앱: 처음에는 접어 둠. [모든 앱 보기] 를 눌러야 펼침 (분할할 때마다 다시 접힌 채로 시작)
+                    if (restList.isNotEmpty()) {
+                        item(key = "all-toggle", span = { GridItemSpan(maxLineSpan) }) {
+                            AllAppsToggle(expanded = showAllApps, count = restList.size) { showAllApps = !showAllApps }
+                        }
+                    }
+                    if (showAllApps) {
+                        items(restList, key = { it.key }) { app ->
+                            AppCell(app, isPinned = false, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
+                        }
+                    }
+                } else {
+                    // 검색 중: 맞는 앱은 접지 않고 바로 보임 (고정한 앱이 함께 나오면 구역 제목으로 구분)
+                    if (restList.isNotEmpty() && pinnedList.isNotEmpty()) sectionHeader(R.string.app_section_all)
+                    items(restList, key = { it.key }) { app ->
+                        AppCell(app, isPinned = false, onClick = { launchApp(context, app.component) }, onLongClick = { togglePin(app) })
+                    }
                 }
             }
         }
