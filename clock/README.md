@@ -13,7 +13,10 @@
 
 ## 설치하기
 
-1. 폰에서 **[시계 앱 릴리스 목록](https://github.com/GarpsuKim/gsTop/releases?q=clock&expanded=true)** 을 열고, 가장 위(최신) 릴리스의 **Assets** 에서 `clock-날짜.apk` 를 받습니다.
+**바로 다운로드 (항상 최신 버전):** https://github.com/GarpsuKim/gsTop/releases/download/clock-latest/clock.apk
+
+1. 폰에서 위 링크를 눌러 `clock.apk` 를 받습니다.
+   버전별 설명을 보고 받으려면 **[시계 앱 릴리스 목록](https://github.com/GarpsuKim/gsTop/releases?q=clock&expanded=true)** 에서 `clock-날짜.apk` 를 받아도 됩니다.
    (현재 최신: [clock-2026.11.27](https://github.com/GarpsuKim/gsTop/releases/tag/clock-2026.11.27))
 2. 받은 파일을 열고, "출처를 알 수 없는 앱 설치" 를 허용합니다.
 3. Play 프로텍트가 "알 수 없는 앱" 경고를 띄우면 **그래도 설치** 를 누릅니다.
@@ -21,6 +24,7 @@
 - **업데이트**: 새 버전 APK 를 받아 같은 방법으로 설치하면 기존 앱 위에 덮어쓰고 설정도 유지됩니다.
 - Android 8.0 이상. 홈 화면 폴더 표시·화면 분할 일부 기능은 삼성 폰 기준입니다.
 - 이 저장소(gsTop)에는 다른 프로젝트도 있어서, 시계 앱 릴리스는 이름이 `clock-` 으로 시작합니다.
+  `clock-latest` 는 위 고정 링크용 릴리스로, 새 버전이 나오면 그 안의 `clock.apk` 만 바뀝니다.
 - 받은 파일이 맞는지 확인하려면 릴리스 설명의 APK SHA-256 과 비교하세요. 서명 인증서 SHA-256 은 늘 `844dbff3…c4fe34c3f` 입니다 (다르면 설치하지 마세요).
 
 ---
