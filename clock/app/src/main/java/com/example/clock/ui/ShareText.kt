@@ -168,7 +168,7 @@ private fun alertText(label: String, a: AlertSetting): String {
 fun workShareText(w: WorkSchedule): String = buildString {
     appendLine("🗓 근무 시간표")
     memoLines(w.memo)
-    visibleDays(w.weekend).forEach { i ->
+    visibleDays(w.sat, w.sun).forEach { i ->
         val d = w.days[i]
         append("${DAY_NAMES[i]}요일: ")
         if (!d.on) appendLine("쉼")
@@ -184,7 +184,7 @@ fun workShareText(w: WorkSchedule): String = buildString {
 
 /** 수업 시간표 하나의 본문: 요일마다 수업 있는 교시만. 수업이 없으면 빈 글자. */
 private fun StringBuilder.classLines(t: ClassTable, rowName: String) {
-    visibleDays(t.weekend).forEach { d ->
+    visibleDays(t.sat, t.sun).forEach { d ->
         val rows = t.periods.indices.filter { p -> t.cells[p][d].hasClass }
         if (rows.isEmpty()) return@forEach
         append("■ ${DAY_NAMES[d]}요일")

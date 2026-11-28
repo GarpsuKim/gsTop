@@ -73,7 +73,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.core.content.edit
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -101,7 +100,7 @@ class MainActivity : ComponentActivity() {
         // 시보 정각 알람 다시 맞춤 (강제 중지 등으로 알람이 지워졌어도 앱을 열면 복구)
         ChimeScheduler.update(this)
         if (savedInstanceState == null) {
-            requestHomeShortcutOnce()
+            updateHomeShortcut()
             receiveShared(intent) // 앱이 꺼져 있을 때 "공유 → 시계" 로 시작된 경우
             receiveWidget(intent) // 앱이 꺼져 있을 때 위젯을 눌러 시작된 경우
             receiveEvent(intent) // 자동 기능 이벤트(시보·약·분실 폰 찾기·출근·귀가·relax)로 시작된 경우
@@ -543,20 +542,12 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * adb 로 설치하면 런처가 홈 화면에 아이콘을 자동으로 만들지 않으므로,
-     * 첫 실행 때 한 번만 "홈 화면에 추가" 시스템 요청을 띄운다.
+     * 예전 버전이 첫 실행 때 만들게 했던 홈 화면 바로가기가 있으면 이름만 앱 이름에 맞춰 고침.
+     * (새로 만들라는 "홈 화면에 추가" 요청은 띄우지 않음: 설치하면 런처가 아이콘을 이미 만들어서 아이콘이 2개 됨)
      */
-    private fun requestHomeShortcutOnce() {
-        val prefs = getSharedPreferences("clock_prefs", MODE_PRIVATE)
-        val shortcut = homeShortcut()
-        if (prefs.getBoolean(KEY_SHORTCUT_REQUESTED, false)) {
-            // 이미 만든 홈 화면 바로가기는 만들 때의 이름을 기억하므로, 앱 이름이 바뀌면 같이 고쳐 줌
-            runCatching { ShortcutManagerCompat.updateShortcuts(this, listOf(shortcut)) }
-            return
-        }
-        prefs.edit { putBoolean(KEY_SHORTCUT_REQUESTED, true) }
-        if (!ShortcutManagerCompat.isRequestPinShortcutSupported(this)) return
-        ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
+    private fun updateHomeShortcut() {
+        if (!getSharedPreferences("clock_prefs", MODE_PRIVATE).getBoolean(KEY_SHORTCUT_REQUESTED, false)) return
+        runCatching { ShortcutManagerCompat.updateShortcuts(this, listOf(homeShortcut())) }
     }
 
     /** 홈 화면 바로가기 (이름 = 앱 이름). */

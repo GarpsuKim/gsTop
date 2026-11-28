@@ -241,7 +241,11 @@ fun TimetableDialog(onDismiss: () -> Unit) {
                         }
                         1 -> {
                             Card {
-                                TitleWithWeekend("학교 수업 시간표", t.school.weekend) { update(t.copy(school = t.school.copy(weekend = it))) }
+                                TitleWithWeekend(
+                                    "학교 수업 시간표", t.school.sat, t.school.sun,
+                                    onSat = { update(t.copy(school = t.school.copy(sat = it))) },
+                                    onSun = { update(t.copy(school = t.school.copy(sun = it))) },
+                                )
                                 Memo(t.school.memo) { update(t.copy(school = t.school.copy(memo = it))) }
                                 Hint("칸을 누르면 내용, 길게 누르면 편집·복사·붙여넣기. 교시를 누르면 시각을 바꿉니다. 빨강 = 수업, 파랑 = 빈 시간")
                                 ClassGrid(t.school, rowName = "강의실", clip = clip, onCopy = { clip = it }, onChange = { update(t.copy(school = it)) })
@@ -257,7 +261,7 @@ fun TimetableDialog(onDismiss: () -> Unit) {
                                 Card {
                                     val a = t.academies[i]
                                     fun setA(n: ClassTable) = update(t.copy(academies = t.academies.mapIndexed { j, x -> if (j == i) n else x }))
-                                    TitleWithWeekend("학원${i + 1}", a.weekend) { setA(a.copy(weekend = it)) }
+                                    TitleWithWeekend("학원${i + 1}", a.sat, a.sun, onSat = { setA(a.copy(sat = it)) }, onSun = { setA(a.copy(sun = it)) })
                                     Memo(a.memo) { setA(a.copy(memo = it)) }
                                     ClassGrid(
                                         t.academies[i], rowName = "학원명", clip = clip, onCopy = { clip = it },
@@ -354,14 +358,17 @@ private fun Title(text: String) = Text(text, fontSize = 17.sp, fontWeight = Font
 @Composable
 private fun Hint(text: String) = Text(text, fontSize = 12.sp, color = SubInk)
 
-/** 제목 + 오른쪽 "주말" 스위치 (켜면 일요일·토요일도, 기본 꺼짐 = 월~금만). */
+/**
+ * 제목 + 오른쪽 [토] [일] 버튼 (따로 켜고 끔). 켜면 그 요일도 표·카드에 나오고 일정·알림에 들어감.
+ * 기본은 둘 다 꺼짐 = 월~금만. 켜진 버튼은 진한 청록 + ✓, 꺼진 버튼은 옅은 회색.
+ */
 @Composable
-private fun TitleWithWeekend(text: String, weekend: Boolean, onChange: (Boolean) -> Unit) {
+private fun TitleWithWeekend(text: String, sat: Boolean, sun: Boolean, onSat: (Boolean) -> Unit, onSun: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.weight(1f))
-        Text("주말", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = if (weekend) Teal else SubInk)
+        OptionChip("토", sat) { onSat(!sat) }
         Spacer(Modifier.width(6.dp))
-        Switch(checked = weekend, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = Teal))
+        OptionChip("일", sun) { onSun(!sun) }
     }
 }
 
@@ -384,7 +391,7 @@ private fun pickTime(context: android.content.Context, minutes: Int, step15: Boo
 @Composable
 private fun WorkTab(w: WorkSchedule, onChange: (WorkSchedule) -> Unit, onPickSound: (String) -> Unit) {
     Card {
-        TitleWithWeekend("근무 시간표", w.weekend) { onChange(w.copy(weekend = it)) }
+        TitleWithWeekend("근무 시간표", w.sat, w.sun, onSat = { onChange(w.copy(sat = it)) }, onSun = { onChange(w.copy(sun = it)) })
         Memo(w.memo) { onChange(w.copy(memo = it)) }
         WeekOverview(w)
     }
@@ -397,8 +404,8 @@ private fun WorkTab(w: WorkSchedule, onChange: (WorkSchedule) -> Unit, onPickSou
             Switch(checked = w.sameEveryDay, onCheckedChange = { onChange(w.copy(sameEveryDay = it)) }, colors = SwitchDefaults.colors(checkedTrackColor = Teal))
         }
     }
-    // 주말이 꺼져 있으면 월~금 카드만
-    visibleDays(w.weekend).forEach { i ->
+    // 꺼진 토·일 카드는 숨김
+    visibleDays(w.sat, w.sun).forEach { i ->
         val d = w.days[i]
         WorkDayCard(i, d) { nd ->
             val times = nd.start != d.start || nd.end != d.end
@@ -429,7 +436,7 @@ private fun WorkTab(w: WorkSchedule, onChange: (WorkSchedule) -> Unit, onPickSou
 @Composable
 private fun WeekOverview(w: WorkSchedule) {
     val labelW = 34.dp
-    val shown = visibleDays(w.weekend)
+    val shown = visibleDays(w.sat, w.sun)
     Row(Modifier.fillMaxWidth()) {
         Spacer(Modifier.width(labelW))
         shown.forEach { HeadCell(DAY_NAMES[it], Teal, Modifier.weight(1f)) }
@@ -460,7 +467,7 @@ private fun WeekOverview(w: WorkSchedule) {
                 }
                 val today = w.days[i]
                 // 전날이 숨겨진 주말이면 밤샘 근무도 없음
-                val prev = w.days[(i + 6) % 7].let { if (dayVisible((i + 6) % 7, w.weekend)) it else it.copy(on = false) }
+                val prev = w.days[(i + 6) % 7].let { if (dayVisible((i + 6) % 7, w.sat, w.sun)) it else it.copy(on = false) }
                 val parts = mutableListOf<Pair<Int, Int>>()
                 if (today.on) parts += today.start to minOf(today.end, 1440)
                 if (prev.on && prev.end > 1440) parts += 0 to minOf(prev.end - 1440, 1440)
@@ -712,7 +719,7 @@ private fun ClassGrid(table: ClassTable, rowName: String, clip: Cell?, onCopy: (
     var dayNameEdit by remember { mutableStateOf<Int?>(null) }
     val labelWeight = 1.75f // 세로 화면에서도 "아침자습" · "17:00" 이 잘리지 않게
 
-    val shown = visibleDays(table.weekend) // 주말 꺼짐 → 월~금
+    val shown = visibleDays(table.sat, table.sun) // 토·일을 끄면 월~금
     Row(Modifier.fillMaxWidth()) {
         HeadCell("요일", Teal, Modifier.weight(labelWeight))
         shown.forEach { HeadCell(DAY_NAMES[it], Teal, Modifier.weight(1f)) }

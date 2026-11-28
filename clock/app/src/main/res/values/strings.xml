@@ -14,6 +14,10 @@
     <string name="show_seconds">초침</string>
     <string name="show_seconds_menu">초침...</string>
     <string name="alarm">알람</string>
+    <string name="alarm_menu">알람/스톱워치/타이머</string>
+    <string name="stopwatch">스톱워치</string>
+    <string name="timer">타이머</string>
+    <string name="clock_page_hint">시계 앱에서 [%1$s] 을(를) 누르세요</string>
     <string name="calendar">달력</string>
     <string name="calendar_menu">달력...</string>
     <string name="weather">날씨</string>

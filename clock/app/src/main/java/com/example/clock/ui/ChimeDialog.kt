@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import android.provider.AlarmClock
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CalendarViewWeek
@@ -130,11 +131,23 @@ fun ChimeAlarmButton(
                 value = { stringResource(if (enabled) R.string.chime_state_on else R.string.chime_state_off) },
                 action = { open = true },
             ),
+            // 알람/스톱워치/타이머 → 폰 기본 시계 앱의 그 화면으로 바로
             MenuSection(
-                title = R.string.alarm,
+                title = R.string.alarm_menu,
                 icon = Icons.Filled.Alarm,
-                action = { openSystemAlarms(context) },
-            ),
+            ) { close ->
+                listOf(
+                    Triple(R.string.alarm, Icons.Filled.Alarm, ClockPage.Alarm),
+                    Triple(R.string.stopwatch, Icons.Filled.Timer, ClockPage.Stopwatch),
+                    Triple(R.string.timer, Icons.Filled.HourglassTop, ClockPage.Timer),
+                ).forEach { (label, icon, page) ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(label), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        onClick = { close(); openSystemClock(context, page) },
+                    )
+                }
+            },
             MenuSection(
                 title = R.string.auto_close_section,
                 icon = Icons.Filled.Timer,
@@ -168,12 +181,41 @@ fun ChimeAlarmButton(
     }
 }
 
-/** 시스템 시계 앱의 알람 화면 열기. 시계 앱이 없으면 안내만. */
-private fun openSystemAlarms(context: Context) {
-    val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        context.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
+private enum class ClockPage { Alarm, Stopwatch, Timer }
+
+private const val SAMSUNG_CLOCK = "com.sec.android.app.clockpackage"
+
+/** 폰 기본 시계 앱 (알람 화면을 여는 앱, 삼성 폰은 삼성 시계). 못 찾으면 null. */
+private fun clockPackage(context: Context): String? =
+    runCatching { context.packageManager.resolveActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS), 0)?.activityInfo?.packageName }
+        .getOrNull()?.takeIf { it != "android" } // "android" = 앱 고르기 창
+
+/**
+ * 폰 기본 시계 앱의 알람 / 스톱워치 / 타이머 화면 열기.
+ *  - 삼성 시계: 첫 화면 + 탭 번호 (삼성 시계의 스톱워치 전용 요청은 삼성 앱만 쓸 수 있는 권한이 필요해서 못 씀)
+ *  - 그 밖: 알람·타이머는 안드로이드 표준 요청 (ACTION_SHOW_ALARMS / ACTION_SHOW_TIMERS), 스톱워치는 구글 시계의 요청
+ *  못 열면 시계 앱 첫 화면을 열고 안내, 시계 앱이 없으면 안내만.
+ */
+private fun openSystemClock(context: Context, page: ClockPage) {
+    fun start(i: Intent): Boolean =
+        runCatching { context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+    // 삼성 시계: 첫 화면 + 탭 번호 (0 알람, 1 세계시각, 2 스톱워치, 3 타이머). 이미 열려 있어도 그 탭으로 바뀌고 아래 탭도 보임
+    val tab = when (page) { ClockPage.Alarm -> 0; ClockPage.Stopwatch -> 2; ClockPage.Timer -> 3 }
+    val opened = (clockPackage(context) == SAMSUNG_CLOCK &&
+        start(Intent().setClassName(SAMSUNG_CLOCK, "$SAMSUNG_CLOCK.ClockPackage").putExtra("clockpackage.select.tab", tab))) ||
+        when (page) {
+            ClockPage.Alarm -> start(Intent(AlarmClock.ACTION_SHOW_ALARMS))
+            ClockPage.Timer -> start(Intent(AlarmClock.ACTION_SHOW_TIMERS))
+            ClockPage.Stopwatch -> start(Intent("com.android.deskclock.action.SHOW_STOPWATCH")) // 구글 시계 등
+        }
+    if (opened) return
+    // 그 화면을 못 열면: 시계 앱 첫 화면 + 안내
+    val launch = clockPackage(context)?.let { context.packageManager.getLaunchIntentForPackage(it) }
+    if (launch != null && start(launch)) {
+        Toast.makeText(context, context.getString(R.string.clock_page_hint, context.getString(
+            when (page) { ClockPage.Alarm -> R.string.alarm; ClockPage.Stopwatch -> R.string.stopwatch; ClockPage.Timer -> R.string.timer },
+        )), Toast.LENGTH_LONG).show()
+    } else {
         Toast.makeText(context, R.string.alarm_not_found, Toast.LENGTH_SHORT).show()
     }
 }

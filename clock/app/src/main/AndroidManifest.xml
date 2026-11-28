@@ -42,6 +42,10 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- 기본 시계 앱 찾기 ([시간표...] → 알람/스톱워치/타이머) -->
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
         <!-- 삼성 홈 화면 배치 (폴더) 읽기 -->
         <provider android:authorities="com.sec.android.app.launcher.settings" />
     </queries>

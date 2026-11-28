@@ -52,19 +52,20 @@ data class WorkSchedule(
     val sameEveryDay: Boolean = true,
     val startAlert: AlertSetting = AlertSetting(),
     val endAlert: AlertSetting = AlertSetting(),
-    /** 주말(일·토)도 쓰는지. 기본 꺼짐 = 일요일·토요일은 안 보이고 일정·알림에서도 빠짐. */
-    val weekend: Boolean = false,
+    /** 토요일 / 일요일도 쓰는지 (따로). 기본 꺼짐 = 그 요일은 안 보이고 일정·알림에서도 빠짐. */
+    val sat: Boolean = false,
+    val sun: Boolean = false,
     /** 메모 / 참고사항 (그냥 글자, [텍스트 공유] 에 포함). */
     val memo: String = "",
 ) {
-    val any get() = days.withIndex().any { (i, d) -> d.on && dayVisible(i, weekend) }
+    val any get() = days.withIndex().any { (i, d) -> d.on && dayVisible(i, sat, sun) }
 }
 
-/** 요일이 보이는지: 주말을 끄면 일요일(0)·토요일(6) 은 숨김. */
-fun dayVisible(day: Int, weekend: Boolean) = weekend || day in 1..5
+/** 요일이 보이는지: 월~금은 늘, 토요일(6)·일요일(0) 은 [sat]·[sun] 을 켰을 때만. */
+fun dayVisible(day: Int, sat: Boolean, sun: Boolean) = day in 1..5 || (day == 6 && sat) || (day == 0 && sun)
 
-/** 보이는 요일 번호들 (주말 꺼짐 → 월~금). */
-fun visibleDays(weekend: Boolean): List<Int> = (0..6).filter { dayVisible(it, weekend) }
+/** 보이는 요일 번호들 (일 0 … 토 6 순서). */
+fun visibleDays(sat: Boolean, sun: Boolean): List<Int> = (0..6).filter { dayVisible(it, sat, sun) }
 
 /** 교시: 이름 + 시작·종료 (분). */
 data class Period(val name: String, val start: Int, val end: Int)
@@ -83,12 +84,13 @@ data class ClassTable(
     val periods: List<Period>,
     val dayNames: List<String> = List(7) { "" },
     val cells: List<List<Cell>> = List(periods.size) { List(7) { Cell() } },
-    /** 주말(일·토)도 쓰는지 (기본 꺼짐). */
-    val weekend: Boolean = false,
+    /** 토요일 / 일요일도 쓰는지 (따로, 기본 꺼짐). */
+    val sat: Boolean = false,
+    val sun: Boolean = false,
     /** 메모 / 참고사항. */
     val memo: String = "",
 ) {
-    val any get() = cells.any { row -> row.withIndex().any { (d, c) -> c.hasClass && dayVisible(d, weekend) } }
+    val any get() = cells.any { row -> row.withIndex().any { (d, c) -> c.hasClass && dayVisible(d, sat, sun) } }
 
     fun withCell(p: Int, d: Int, c: Cell) = copy(cells = cells.mapIndexed { i, row -> if (i == p) row.mapIndexed { j, x -> if (j == d) c else x } else row })
     fun withPeriod(p: Int, pr: Period) = copy(periods = periods.mapIndexed { i, x -> if (i == p) pr else x })
@@ -166,7 +168,7 @@ object ScheduleStore {
         .put("periods", JSONArray(t.periods.map { JSONObject().put("n", it.name).put("s", it.start).put("e", it.end) }))
         .put("dayNames", JSONArray(t.dayNames))
         .put("cells", JSONArray(t.cells.map { row -> JSONArray(row.map { JSONObject().put("s", it.subject).put("r", it.room).put("t", it.teacher) }) }))
-        .put("weekend", t.weekend).put("memo", t.memo)
+        .put("sat", t.sat).put("sun", t.sun).put("memo", t.memo)
 
     private fun table(o: JSONObject?, d: ClassTable): ClassTable {
         if (o == null) return d
@@ -182,7 +184,8 @@ object ScheduleStore {
                 val row = cs?.optJSONArray(p)
                 List(7) { dd -> row?.optJSONObject(dd)?.let { Cell(it.optString("s"), it.optString("r"), it.optString("t")) } ?: Cell() }
             },
-            weekend = o.optBoolean("weekend", false),
+            sat = o.optBoolean("sat", o.optBoolean("weekend", false)),
+            sun = o.optBoolean("sun", o.optBoolean("weekend", false)),
             memo = o.optString("memo"),
         )
     }
@@ -194,7 +197,7 @@ object ScheduleStore {
                 .put("days", JSONArray(t.work.days.map { JSONObject().put("on", it.on).put("place", it.place).put("s", it.start).put("e", it.end) }))
                 .put("same", t.work.sameEveryDay)
                 .put("startAlert", alertJson(t.work.startAlert)).put("endAlert", alertJson(t.work.endAlert))
-                .put("weekend", t.work.weekend).put("memo", t.work.memo),
+                .put("sat", t.work.sat).put("sun", t.work.sun).put("memo", t.work.memo),
         )
         .put("school", tableJson(t.school)).put("schoolAlert", alertJson(t.schoolAlert))
         .put("academies", JSONArray(t.academies.map { tableJson(it) })).put("academyAlert", alertJson(t.academyAlert))
@@ -212,7 +215,8 @@ object ScheduleStore {
                 sameEveryDay = w?.optBoolean("same", true) ?: true,
                 startAlert = alert(w?.optJSONObject("startAlert"), d.work.startAlert),
                 endAlert = alert(w?.optJSONObject("endAlert"), d.work.endAlert),
-                weekend = w?.optBoolean("weekend", false) ?: false,
+                sat = w?.optBoolean("sat", w.optBoolean("weekend", false)) ?: false,
+                sun = w?.optBoolean("sun", w.optBoolean("weekend", false)) ?: false,
                 memo = w?.optString("memo").orEmpty(),
             ),
             school = table(o.optJSONObject("school"), d.school),
@@ -246,11 +250,11 @@ fun slots(t: Timetables, from: LocalDate, days: Int): List<Slot> {
         val di = dayIndex(date)
         val base = date.atStartOfDay(zone)
         val epoch = date.toEpochDay()
-        t.work.days[di].takeIf { it.on && it.end > it.start && dayVisible(di, t.work.weekend) }?.let { w ->
+        t.work.days[di].takeIf { it.on && it.end > it.start && dayVisible(di, t.work.sat, t.work.sun) }?.let { w ->
             out += Slot(SlotKind.Work, w.place.ifBlank { "근무" }, "", base.plusMinutes(w.start.toLong()), base.plusMinutes(w.end.toLong()), "w:$epoch")
         }
         fun addTable(table: ClassTable, kind: SlotKind, prefix: String, keyBase: String) {
-            if (!dayVisible(di, table.weekend)) return
+            if (!dayVisible(di, table.sat, table.sun)) return
             table.periods.forEachIndexed { p, pr ->
                 val c = table.cells[p][di]
                 if (!c.hasClass || pr.end <= pr.start) return@forEachIndexed
