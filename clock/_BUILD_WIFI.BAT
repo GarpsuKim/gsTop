@@ -13,7 +13,7 @@ rem because this bat passes its own file name with -PappNameBat.
 rem Keep the format: set "AppIcon=name"
 rem NOTE: keep comments ASCII only. Korean text in rem lines after chcp 65001
 rem       can make cmd misread the file ("'D_WIFI.BAT' is not recognized").
-set "AppIcon=영원한_시계"
+set "AppIcon=영원한_시계3"
 set "AppIdSuffix="
 
 echo 앱 이름: %AppIcon%

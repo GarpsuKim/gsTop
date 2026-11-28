@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,8 +52,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RangeSlider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -70,9 +70,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.verticalDrag
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,7 +103,9 @@ import com.example.clock.schedule.ScheduleStore
 import com.example.clock.schedule.Timetables
 import com.example.clock.schedule.WorkDay
 import com.example.clock.schedule.WorkSchedule
+import com.example.clock.schedule.dayVisible
 import com.example.clock.schedule.hhmm
+import com.example.clock.schedule.visibleDays
 import com.example.clock.schedule.scheduleStatus
 import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
@@ -164,6 +177,10 @@ fun TimetableDialog(onDismiss: () -> Unit) {
     }
     var tab by remember { mutableIntStateOf(0) }
     var clip by remember { mutableStateOf<Cell?>(null) } // 칸 복사·붙여넣기 (학교·학원 공용)
+    var resetAsk by remember { mutableStateOf<String?>(null) } // 초기화 확인: "work" / "school" / "a0" "a1" "a2"
+
+    // 세로 화면으로만 (근무 요일 카드의 세로 슬라이더 배치에 맞춤)
+    LockPortrait()
 
     // 알림 소리 파일 고르기 (어느 알림의 것인지 기억해 둠)
     var soundFor by remember { mutableStateOf<String?>(null) }
@@ -187,6 +204,8 @@ fun TimetableDialog(onDismiss: () -> Unit) {
         pickSound.launch(arrayOf("audio/*"))
     }
 
+    // 세로로 돌아간 뒤 창 크기가 가로 그대로 남지 않게: 화면 방향이 바뀌면 창을 새로 만듦 (내용 상태는 창 밖에 있어 그대로)
+    androidx.compose.runtime.key(androidx.compose.ui.platform.LocalConfiguration.current.orientation) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
       // 이 창만 밝은 테마 (앱은 검은 테마라 흰 바탕에서 글자·버튼·칩이 흐리게 보이므로)
       MaterialTheme(colorScheme = TimetableColors) {
@@ -215,21 +234,31 @@ fun TimetableDialog(onDismiss: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     when (tab) {
-                        0 -> WorkTab(t.work, onChange = { update(t.copy(work = it)) }, onPickSound = ::pickFor)
+                        0 -> {
+                            WorkTab(t.work, onChange = { update(t.copy(work = it)) }, onPickSound = ::pickFor)
+                            ResetButton("초기화") { resetAsk = "work" }
+                            ShareTextButton(Teal) { shareText(context, "근무 시간표", workShareText(t.work)) }
+                        }
                         1 -> {
                             Card {
-                                Title("학교 수업 시간표")
+                                TitleWithWeekend("학교 수업 시간표", t.school.weekend) { update(t.copy(school = t.school.copy(weekend = it))) }
+                                Memo(t.school.memo) { update(t.copy(school = t.school.copy(memo = it))) }
                                 Hint("칸을 누르면 내용, 길게 누르면 편집·복사·붙여넣기. 교시를 누르면 시각을 바꿉니다. 빨강 = 수업, 파랑 = 빈 시간")
                                 ClassGrid(t.school, rowName = "강의실", clip = clip, onCopy = { clip = it }, onChange = { update(t.copy(school = it)) })
                             }
                             Card {
                                 AlertRow("수업 알림", t.schoolAlert, onChange = { update(t.copy(schoolAlert = it)) }, onPickSound = { pickFor("school") })
                             }
+                            ResetButton("초기화") { resetAsk = "school" }
+                            ShareTextButton(Teal) { shareText(context, "학교 수업 시간표", schoolShareText(t.school, t.schoolAlert)) }
                         }
                         else -> {
                             repeat(ACADEMY_COUNT) { i ->
                                 Card {
-                                    Title("학원 ${i + 1}")
+                                    val a = t.academies[i]
+                                    fun setA(n: ClassTable) = update(t.copy(academies = t.academies.mapIndexed { j, x -> if (j == i) n else x }))
+                                    TitleWithWeekend("학원${i + 1}", a.weekend) { setA(a.copy(weekend = it)) }
+                                    Memo(a.memo) { setA(a.copy(memo = it)) }
                                     ClassGrid(
                                         t.academies[i], rowName = "학원명", clip = clip, onCopy = { clip = it },
                                         onChange = { nt -> update(t.copy(academies = t.academies.mapIndexed { j, a -> if (j == i) nt else a })) },
@@ -239,13 +268,57 @@ fun TimetableDialog(onDismiss: () -> Unit) {
                             Card {
                                 AlertRow("학원 알림", t.academyAlert, onChange = { update(t.copy(academyAlert = it)) }, onPickSound = { pickFor("academy") })
                             }
+                            repeat(ACADEMY_COUNT) { i -> ResetButton("학원${i + 1} 초기화") { resetAsk = "a$i" } }
+                            ShareTextButton(Teal) { shareText(context, "학원 수업 시간표", academyShareText(t.academies, t.academyAlert)) }
                         }
                     }
                     Spacer(Modifier.height(24.dp))
                 }
             }
         }
+        // 초기화 확인
+        resetAsk?.let { k ->
+            val what = when (k) {
+                "work" -> "근무 시간표 (요일·장소·시각·출근/퇴근 알림)"
+                "school" -> "학교 수업 시간표 (수업·강의실·교시 시각·수업 알림)"
+                else -> "학원${k.drop(1).toInt() + 1} 시간표 (수업·학원명·교시 시각)"
+            }
+            AlertDialog(
+                onDismissRequest = { resetAsk = null },
+                title = { Text("초기화") },
+                text = { Text("$what 을(를) 처음 상태로 되돌릴까요?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val d = Timetables()
+                        update(
+                            when (k) {
+                                "work" -> t.copy(work = d.work)
+                                "school" -> t.copy(school = d.school, schoolAlert = d.schoolAlert)
+                                else -> { val i = k.drop(1).toInt(); t.copy(academies = t.academies.mapIndexed { j, a -> if (j == i) d.academies[i] else a }) }
+                            },
+                        )
+                        resetAsk = null
+                    }) { Text("초기화", color = ClassRed, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = { TextButton(onClick = { resetAsk = null }) { Text("취소") } },
+            )
+        }
       }
+    }
+    }
+}
+
+/** 빨간 [초기화] 버튼 (탭 맨 아래, 누르면 확인 창). */
+@Composable
+private fun ResetButton(text: String, onClick: () -> Unit) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = ClassRed, contentColor = Color.White),
+    ) {
+        Icon(Icons.Filled.RestartAlt, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text(text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -281,6 +354,21 @@ private fun Title(text: String) = Text(text, fontSize = 17.sp, fontWeight = Font
 @Composable
 private fun Hint(text: String) = Text(text, fontSize = 12.sp, color = SubInk)
 
+/** 제목 + 오른쪽 "주말" 스위치 (켜면 일요일·토요일도, 기본 꺼짐 = 월~금만). */
+@Composable
+private fun TitleWithWeekend(text: String, weekend: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Ink, modifier = Modifier.weight(1f))
+        Text("주말", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = if (weekend) Teal else SubInk)
+        Spacer(Modifier.width(6.dp))
+        Switch(checked = weekend, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = Teal))
+    }
+}
+
+/** 제목 바로 밑 메모 / 참고사항. */
+@Composable
+private fun Memo(value: String, onChange: (String) -> Unit) = MemoField(value, onChange, ink = Ink, accent = Teal)
+
 // ─────────────────────────────── 근무 ───────────────────────────────
 
 /** 시각 고르기 (24시간제). [step15] 면 15분 단위로 맞춤. */
@@ -296,7 +384,8 @@ private fun pickTime(context: android.content.Context, minutes: Int, step15: Boo
 @Composable
 private fun WorkTab(w: WorkSchedule, onChange: (WorkSchedule) -> Unit, onPickSound: (String) -> Unit) {
     Card {
-        Title("근무 시간표")
+        TitleWithWeekend("근무 시간표", w.weekend) { onChange(w.copy(weekend = it)) }
+        Memo(w.memo) { onChange(w.copy(memo = it)) }
         WeekOverview(w)
     }
     Card {
@@ -308,7 +397,9 @@ private fun WorkTab(w: WorkSchedule, onChange: (WorkSchedule) -> Unit, onPickSou
             Switch(checked = w.sameEveryDay, onCheckedChange = { onChange(w.copy(sameEveryDay = it)) }, colors = SwitchDefaults.colors(checkedTrackColor = Teal))
         }
     }
-    w.days.forEachIndexed { i, d ->
+    // 주말이 꺼져 있으면 월~금 카드만
+    visibleDays(w.weekend).forEach { i ->
+        val d = w.days[i]
         WorkDayCard(i, d) { nd ->
             val times = nd.start != d.start || nd.end != d.end
             onChange(
@@ -338,13 +429,14 @@ private fun WorkTab(w: WorkSchedule, onChange: (WorkSchedule) -> Unit, onPickSou
 @Composable
 private fun WeekOverview(w: WorkSchedule) {
     val labelW = 34.dp
+    val shown = visibleDays(w.weekend)
     Row(Modifier.fillMaxWidth()) {
         Spacer(Modifier.width(labelW))
-        DAY_NAMES.forEach { HeadCell(it, Teal, Modifier.weight(1f)) }
+        shown.forEach { HeadCell(DAY_NAMES[it], Teal, Modifier.weight(1f)) }
     }
     Row(Modifier.fillMaxWidth()) {
         Box(Modifier.width(labelW))
-        w.days.forEach { d -> HeadCell(if (d.on) d.place.ifBlank { "근무" } else "-", Sky, Modifier.weight(1f), small = true) }
+        shown.map { w.days[it] }.forEach { d -> HeadCell(if (d.on) d.place.ifBlank { "근무" } else "-", Sky, Modifier.weight(1f), small = true) }
     }
     val h = 240.dp
     Row(Modifier.fillMaxWidth().height(h)) {
@@ -357,7 +449,7 @@ private fun WeekOverview(w: WorkSchedule) {
                 )
             }
         }
-        DAY_NAMES.indices.forEach { i ->
+        shown.forEach { i ->
             BoxWithConstraints(
                 Modifier.weight(1f).fillMaxHeight().padding(horizontal = 1.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFE8EDF2)),
             ) {
@@ -367,7 +459,8 @@ private fun WeekOverview(w: WorkSchedule) {
                     Box(Modifier.fillMaxWidth().height(1.dp).offset(y = colH * (hr / 24f)).background(Line))
                 }
                 val today = w.days[i]
-                val prev = w.days[(i + 6) % 7]
+                // 전날이 숨겨진 주말이면 밤샘 근무도 없음
+                val prev = w.days[(i + 6) % 7].let { if (dayVisible((i + 6) % 7, w.weekend)) it else it.copy(on = false) }
                 val parts = mutableListOf<Pair<Int, Int>>()
                 if (today.on) parts += today.start to minOf(today.end, 1440)
                 if (prev.on && prev.end > 1440) parts += 0 to minOf(prev.end - 1440, 1440)
@@ -398,11 +491,17 @@ private fun HeadCell(text: String, bg: Color, modifier: Modifier, small: Boolean
 }
 
 /**
- * 요일 하나: [켜기] 일요일  [근무 장소 ____]
- *            09:00 ~ 18:00 (9시간)   ← 시각을 누르면 시각 고르기
- *            ●━━━━━━━━━●            ← 15분 간격 타임 슬라이더 (0시 ~ 다음 날 24시)
+ * 요일 하나 (세로 화면):
+ *  [켜기] 일요일  [근무 장소 ____]
+ *   ┃0시          출근  09:00      ← 시각을 누르면 시각 고르기
+ *   ●             퇴근  18:00
+ *   ┃24시               9시간
+ *   ●
+ *   ┃내일 24시
+ * 슬라이더는 카드 왼쪽에 위아래로 (위 = 0시, 아래 = 다음 날 24시, 15분 간격).
+ * 손잡이(●)를 잡아야만 움직임: 오른손으로 화면을 스크롤하다 닿아도 바뀌지 않게.
+ * 꺼진 요일은 흐리게 + 슬라이더 잠금. 장소를 적거나 시각을 고르면 그 요일이 저절로 켜짐.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun WorkDayCard(i: Int, d: WorkDay, onChange: (WorkDay) -> Unit) {
     val context = LocalContext.current
@@ -415,45 +514,122 @@ private fun WorkDayCard(i: Int, d: WorkDay, onChange: (WorkDay) -> Unit) {
             var place by remember(d.place) { mutableStateOf(d.place) }
             OutlinedTextField(
                 value = place,
-                onValueChange = { place = it; onChange(d.copy(place = it)) },
+                // 꺼진 요일도 바로 입력 가능: 장소를 적으면 그 요일이 저절로 켜짐
+                onValueChange = { place = it; onChange(d.copy(place = it, on = d.on || it.isNotBlank())) },
                 placeholder = { Text("근무 장소", fontSize = 14.sp) },
                 singleLine = true,
-                enabled = d.on,
                 modifier = Modifier.weight(1f),
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp),
             )
         }
-        if (d.on) {
-            // 개시·종료 시각 글자 (누르면 시각 고르기)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TimeChip(hhmm(d.start)) { pickTime(context, d.start, true) { v -> onChange(d.copy(start = v, end = if (d.end <= v) v + (d.end - d.start).coerceAtLeast(15) else d.end)) } }
-                Text("  ~  ", fontSize = 16.sp, color = SubInk)
-                TimeChip((if (d.end > 1440) "다음날 " else "") + hhmm(d.end)) {
-                    pickTime(context, d.end, true) { v -> onChange(d.copy(end = if (v <= d.start) v + 1440 else v)) }
-                }
-                Spacer(Modifier.weight(1f))
-                val len = d.end - d.start
-                Text("${len / 60}시간" + if (len % 60 != 0) " ${len % 60}분" else "", fontSize = 13.sp, color = SubInk)
-            }
-            // 타임 슬라이더: 0 ~ 192칸 (15분 × 192 = 48시간 = 오늘 0시 ~ 다음 날 24시)
-            RangeSlider(
-                value = (d.start / 15f)..(d.end / 15f),
-                onValueChange = { r ->
-                    val s = (r.start.toInt()).coerceIn(0, 95) * 15
-                    val e = (r.endInclusive.toInt() * 15).coerceIn(s + 15, s + 1440)
-                    if (s != d.start || e != d.end) onChange(d.copy(start = s, end = e))
-                },
-                valueRange = 0f..192f,
-                steps = 191,
-                colors = SliderDefaults.colors(activeTrackColor = Teal, thumbColor = Teal, inactiveTrackColor = Color(0xFFD5E3EC), activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent),
+        val onDay = d.copy(on = true)
+        Row(Modifier.fillMaxWidth().height(SliderHeight).alpha(if (d.on) 1f else 0.45f)) {
+            VerticalTimeSlider(
+                start = d.start, end = d.end, enabled = d.on,
+                onChange = { s, e -> onChange(d.copy(start = s, end = e)) },
+                modifier = Modifier.width(40.dp).fillMaxHeight(),
             )
-            Row {
-                Text("0시", fontSize = 10.sp, color = SubInk)
-                Spacer(Modifier.weight(1f))
-                Text("24시", fontSize = 10.sp, color = SubInk)
-                Spacer(Modifier.weight(1f))
-                Text("다음날 24시", fontSize = 10.sp, color = SubInk)
+            SliderLabels(Modifier.width(84.dp).fillMaxHeight())
+            // 슬라이더 오른쪽: 1줄 시작 시각, 2줄 종료 시각, 3줄 근무 시간
+            Column(
+                Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("출근", fontSize = 14.sp, color = SubInk, softWrap = false)
+                    Spacer(Modifier.width(8.dp))
+                    TimeChip(hhmm(d.start)) { pickTime(context, d.start, true) { v -> onChange(onDay.copy(start = v, end = if (d.end <= v) v + (d.end - d.start).coerceAtLeast(15) else d.end)) } }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("퇴근", fontSize = 14.sp, color = SubInk, softWrap = false)
+                    Spacer(Modifier.width(8.dp))
+                    TimeChip((if (d.end > 1440) "내일 " else "") + hhmm(d.end)) {
+                        pickTime(context, d.end, true) { v -> onChange(onDay.copy(end = if (v <= d.start) v + 1440 else v)) }
+                    }
+                }
+                val len = d.end - d.start
+                Text(
+                    "${len / 60}시간" + if (len % 60 != 0) " ${len % 60}분" else "",
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink, softWrap = false,
+                )
             }
+        }
+    }
+}
+
+private val SliderHeight = 260.dp
+private val ThumbPad = 20.dp      // 맨 위·아래 손잡이가 잘리지 않게 남기는 여백
+private const val SLIDER_MAX = 2880 // 0시 ~ 다음 날 24시 (분)
+
+/** 슬라이더 옆 눈금 글자: 0시 / 12시 / 24시 / 다음날 12시 / 다음날 24시. */
+@Composable
+private fun SliderLabels(modifier: Modifier) {
+    BoxWithConstraints(modifier) {
+        val track = maxHeight - ThumbPad * 2
+        listOf(0 to "0시", 720 to "12시", 1440 to "24시", 2160 to "내일 12시", 2880 to "내일 24시").forEach { (m, label) ->
+            Text(
+                label, fontSize = 11.sp, color = SubInk, maxLines = 1, softWrap = false,
+                fontWeight = if (m == 1440) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.offset(y = ThumbPad + track * (m / SLIDER_MAX.toFloat()) - 11.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 세로 범위 슬라이더 (15분 간격). 위 = 0시, 아래 = 다음 날 24시.
+ * 손잡이 근처를 눌러 끌 때만 움직이고, 그 밖을 누르면 화면 스크롤로 넘김.
+ */
+@Composable
+private fun VerticalTimeSlider(start: Int, end: Int, enabled: Boolean, onChange: (Int, Int) -> Unit, modifier: Modifier) {
+    val cur by rememberUpdatedState(start to end)
+    val on by rememberUpdatedState(enabled)
+    val cb by rememberUpdatedState(onChange)
+    Canvas(
+        modifier.pointerInput(Unit) {
+            val pad = ThumbPad.toPx()
+            fun yOf(m: Int) = pad + (size.height - 2 * pad) * m / SLIDER_MAX.toFloat()
+            fun minutesAt(y: Float) = (((y - pad) / (size.height - 2 * pad) * 192f).roundToInt().coerceIn(0, 192)) * 15
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                if (!on) return@awaitEachGesture
+                val (s0, e0) = cur
+                val ds = abs(down.position.y - yOf(s0))
+                val de = abs(down.position.y - yOf(e0))
+                if (minOf(ds, de) > 30.dp.toPx()) return@awaitEachGesture // 손잡이가 아니면 스크롤에 양보
+                // 두 손잡이가 겹쳐 있으면 아래쪽(퇴근)을 잡음
+                val grabEnd = de <= ds
+                down.consume()
+                verticalDrag(down.id) { ch ->
+                    ch.consume()
+                    val m = minutesAt(ch.position.y)
+                    val (s, e) = cur
+                    if (grabEnd) {
+                        val ne = m.coerceIn(s + 15, s + 1440)
+                        if (ne != e) cb(s, ne)
+                    } else {
+                        val ns = m.coerceIn(maxOf(0, e - 1440), minOf(1425, e - 15))
+                        if (ns != s) cb(ns, e)
+                    }
+                }
+            }
+        },
+    ) {
+        val pad = ThumbPad.toPx()
+        val cx = size.width / 2
+        fun yOf(m: Int) = pad + (size.height - 2 * pad) * m / SLIDER_MAX.toFloat()
+        // 전체 막대 (옅게) + 12시간마다 눈금 (24시는 길게)
+        drawLine(Color(0xFFD5E3EC), Offset(cx, pad), Offset(cx, size.height - pad), strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round)
+        listOf(0, 720, 1440, 2160, 2880).forEach { m ->
+            val w = if (m == 1440) 14.dp.toPx() else 8.dp.toPx()
+            drawLine(Color(0xFF9FB2BF), Offset(cx - w, yOf(m)), Offset(cx + w, yOf(m)), strokeWidth = 1.5.dp.toPx())
+        }
+        // 근무 구간 (진하게)
+        drawLine(Teal, Offset(cx, yOf(start)), Offset(cx, yOf(end)), strokeWidth = 10.dp.toPx(), cap = StrokeCap.Round)
+        // 손잡이 두 개
+        listOf(start, end).forEach { m ->
+            drawCircle(Teal, radius = 12.dp.toPx(), center = Offset(cx, yOf(m)))
+            drawCircle(Color.White, radius = 4.5.dp.toPx(), center = Offset(cx, yOf(m)))
         }
     }
 }
@@ -461,7 +637,7 @@ private fun WorkDayCard(i: Int, d: WorkDay, onChange: (WorkDay) -> Unit) {
 @Composable
 private fun TimeChip(text: String, onClick: () -> Unit) {
     Text(
-        text, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Teal,
+        text, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Teal, maxLines = 1, softWrap = false,
         modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFE3F0F6)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 4.dp),
     )
 }
@@ -484,9 +660,10 @@ private fun AlertRow(label: String, a: AlertSetting, onChange: (AlertSetting) ->
         IconButton(onClick = { onChange(a.copy(minutesBefore = (a.minutesBefore + 5).coerceAtMost(180))) }) { Icon(Icons.Filled.Add, null, tint = Teal) }
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        FilterChip(selected = a.notify, onClick = { onChange(a.copy(notify = !a.notify)) }, label = { Text("알림") })
-        FilterChip(selected = a.popup, onClick = { onChange(a.copy(popup = !a.popup)) }, label = { Text("팝업창") })
-        FilterChip(selected = a.sound, onClick = { onChange(a.copy(sound = !a.sound)) }, label = { Text("소리") })
+        // 고른 것 = 진한 청록 + 흰 글자 + ✓,  안 고른 것 = 옅은 회색 + 흐린 글자
+        OptionChip("알림", a.notify) { onChange(a.copy(notify = !a.notify)) }
+        OptionChip("팝업창", a.popup) { onChange(a.copy(popup = !a.popup)) }
+        OptionChip("소리", a.sound) { onChange(a.copy(sound = !a.sound)) }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(a.soundName.ifBlank { "기본 알림음" }, fontSize = 13.sp, color = SubInk, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -496,6 +673,27 @@ private fun AlertRow(label: String, a: AlertSetting, onChange: (AlertSetting) ->
             Text("테스트")
         }
     }
+}
+
+@Composable
+private fun OptionChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(text, fontSize = 15.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+        leadingIcon = if (selected) { { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) } } else null,
+        colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+            containerColor = Color(0xFFEEF2F5),
+            labelColor = Color(0xFF9AABB7),
+            selectedContainerColor = Teal,
+            selectedLabelColor = Color.White,
+            selectedLeadingIconColor = Color.White,
+        ),
+        border = androidx.compose.material3.FilterChipDefaults.filterChipBorder(
+            enabled = true, selected = selected,
+            borderColor = Color(0xFFDDE4EA), selectedBorderColor = Teal,
+        ),
+    )
 }
 
 // ─────────────────────────────── 수업 시간표 표 ───────────────────────────────
@@ -512,15 +710,17 @@ private fun ClassGrid(table: ClassTable, rowName: String, clip: Cell?, onCopy: (
     var menu by remember { mutableStateOf<Pair<Int, Int>?>(null) }   // 길게 누르기 메뉴
     var periodEdit by remember { mutableStateOf<Int?>(null) }
     var dayNameEdit by remember { mutableStateOf<Int?>(null) }
-    val labelWeight = 1.35f
+    val labelWeight = 1.75f // 세로 화면에서도 "아침자습" · "17:00" 이 잘리지 않게
 
+    val shown = visibleDays(table.weekend) // 주말 꺼짐 → 월~금
     Row(Modifier.fillMaxWidth()) {
         HeadCell("요일", Teal, Modifier.weight(labelWeight))
-        DAY_NAMES.forEach { HeadCell(it, Teal, Modifier.weight(1f)) }
+        shown.forEach { HeadCell(DAY_NAMES[it], Teal, Modifier.weight(1f)) }
     }
     Row(Modifier.fillMaxWidth()) {
         HeadCell(rowName, Sky, Modifier.weight(labelWeight), small = true)
-        table.dayNames.forEachIndexed { d, name ->
+        shown.forEach { d ->
+            val name = table.dayNames[d]
             Box(Modifier.weight(1f).clickable { dayNameEdit = d }) { HeadCell(name.ifBlank { "+" }.take(3), Sky, Modifier.fillMaxWidth(), small = true) }
         }
     }
@@ -534,11 +734,11 @@ private fun ClassGrid(table: ClassTable, rowName: String, clip: Cell?, onCopy: (
             ) {
                 // 한 글자 덩어리로 (큰 글씨 폰에서도 시각 줄이 잘리지 않게)
                 Text(
-                    "${pr.name}\n${hhmm(pr.start)}", fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Bold,
-                    color = Ink, textAlign = TextAlign.Center, maxLines = 2,
+                    "${pr.name}\n${hhmm(pr.start)}", fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold,
+                    color = Ink, textAlign = TextAlign.Center, maxLines = 2, softWrap = false,
                 )
             }
-            (0 until 7).forEach { d ->
+            shown.forEach { d ->
                 val c = table.cells[p][d]
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     Box(

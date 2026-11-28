@@ -173,7 +173,7 @@ private tailrec fun Context.findActivityOrNull(): Activity? = when (this) {
  *  │ ┌ ☀ 아침  오전 7:30   1회차   (✓) ┐ │   ← 회차 카드: 큰 동그라미 = 먹음 체크 (체크 시각 표시)
  *  │ └  [계획 ◯] 를 끄면 이 회차만 건너뜀 ┘ │
  *  │ …                                   │
- *  └ 기록 초기화                          ┘
+ *  └ 기록 초기화 · [텍스트 공유]           ┘
  * [저장] 해야 반영되고 알람이 맞춰짐. [✕]·[뒤로] 는 바꾼 것을 버리고 닫기.
  */
 @Composable
@@ -209,6 +209,8 @@ fun MedicineDialog(onDismiss: () -> Unit) {
         onDismiss()
     }
 
+    // 세로로 돌아간 뒤 창 크기가 가로 그대로 남지 않게: 화면 방향이 바뀌면 창을 새로 만듦 (내용 상태는 창 밖에 있어 그대로)
+    androidx.compose.runtime.key(androidx.compose.ui.platform.LocalConfiguration.current.orientation) {
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -216,6 +218,11 @@ fun MedicineDialog(onDismiss: () -> Unit) {
         Surface(Modifier.fillMaxSize(), color = PageBg, contentColor = Ink) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 TopBar(onClose = onDismiss, onSave = ::save)
+                // 타이틀 바로 밑: 메모 / 참고사항 (약 이름·먹는 법 등, [저장] 하면 함께 저장, 공유에 포함)
+                MemoField(
+                    value = s.memo, onChange = { s = s.copy(memo = it) }, ink = Ink, accent = Dark,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                )
                 // 타이틀 바로 밑: 약 복용 기간 [−] 7 [+] 일분 (계획은 하루 더)
                 PeriodBar(s, onChange = { s = it })
                 DoseList(
@@ -226,6 +233,7 @@ fun MedicineDialog(onDismiss: () -> Unit) {
                 )
             }
         }
+    }
     }
 
     if (confirmReset) {
@@ -417,6 +425,11 @@ private fun DoseList(s: MedSchedule, onChange: (MedSchedule) -> Unit, onReset: (
                     Text(stringResource(R.string.med_reset_button), color = LateRed)
                 }
             }
+        }
+        // 맨 마지막: [텍스트 공유] (복용 기간·시각·날짜별 회차를 글자로)
+        item {
+            val context = LocalContext.current
+            ShareTextButton(Dark) { shareText(context, "약 먹을 시간", medShareText(context, s)) }
         }
     }
 }

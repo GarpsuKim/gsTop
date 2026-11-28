@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -23,7 +24,9 @@ import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -87,7 +90,7 @@ fun anniversaryValue(): String {
 }
 
 /**
- * 시계 화면 왼쪽 아래: 기념일 줄들 (최대 5줄). 1시간마다(정각) 다시 계산.
+ * 시계 화면 왼쪽 아래: 기념일 줄들 (최대 5줄, 넘으면 [더보기...] → 전체 창). 1시간마다(정각) 다시 계산.
  * 오늘인 것은 노란 글씨로 맨 위.
  */
 @Composable
@@ -104,8 +107,12 @@ fun AnniversaryLines(modifier: Modifier = Modifier) {
             today = LocalDate.now()
         }
     }
-    val lines = annivLines(b, today).take(5)
-    if (lines.isEmpty()) return
+    val all = annivLines(b, today)
+    if (all.isEmpty()) return
+    // 세로 5줄, 가로는 화면 높이가 낮아 왼쪽 위 시간표 글자를 가리지 않게 3줄. 넘는 것은 [더보기...]
+    val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val lines = all.take(if (landscape) 3 else 5)
+    var more by remember { mutableStateOf(false) }
     Column(
         modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -119,6 +126,36 @@ fun AnniversaryLines(modifier: Modifier = Modifier) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        // 다 못 보이면 [더보기...] → 별도 창에 전체
+        if (all.size > lines.size) {
+            Text(
+                "더보기... (${all.size}건)",
+                color = Color(0xFF9FD8FF), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { more = true }.padding(horizontal = 4.dp, vertical = 4.dp),
+            )
+        }
+    }
+    if (more) {
+        AlertDialog(
+            onDismissRequest = { more = false },
+            // 가로 화면에서도 한 줄씩 보이게 넓게
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 720.dp),
+            icon = { Icon(Icons.Filled.Cake, contentDescription = null) },
+            title = { Text("기념일 (${all.size}건)") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    all.forEach { l ->
+                        Text(
+                            l.text, fontSize = 15.sp,
+                            fontWeight = if (l.today) FontWeight.ExtraBold else FontWeight.Normal,
+                            color = if (l.today) Color(0xFFFFE873) else Color.Unspecified,
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { more = false }) { Text("닫기") } },
+        )
     }
 }
 
@@ -180,6 +217,9 @@ fun AnniversaryDialog(onDismiss: () -> Unit) {
                             ) { n -> update(b.copy(anniversaries = b.anniversaries.mapIndexed { j, x -> if (j == i) n else x })) }
                         }
                         if (b.anniversaries.size < ANNIV_MAX) AddButton("기념일 추가") { update(b.copy(anniversaries = b.anniversaries + Anniv(AnnivType.Anniversary))) }
+                        // 맨 마지막: [텍스트 공유] (등록한 기념일 모두를 글자로)
+                        Spacer(Modifier.height(8.dp))
+                        ShareTextButton(ATeal) { shareText(context, "기념일", annivShareText(b)) }
                         Spacer(Modifier.height(24.dp))
                     }
                 }

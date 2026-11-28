@@ -27,7 +27,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatterySaver
+import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
@@ -789,7 +791,8 @@ fun ClockScreen(
                     DigitalDateMenu(settings, onSettingsChange)
                 }
                 // [⏱ 초침 ▾] → off(강한 절전) / 1초 간격(보통 절전) / 부드럽게(절전 없음)  (디지털은 off 없음)
-                SecondHandMenu(settings, onSettingsChange, allowOff = !digitalOnly)
+                // + 구분선 + 배터리 (맨 마지막)
+                SecondHandMenu(settings, onSettingsChange, allowOff = !digitalOnly, battery = battery)
                 // [⧉ 화면 ▾] → 축소 / 上 분할 / 下 분할 (가로: 左/右, 분할 중이면 분할 해제)
                 ScreenMenu(
                     onEnterPip = onEnterPip?.let { pip -> { pip(digitalOnly) } },
@@ -825,16 +828,6 @@ fun ClockScreen(
                 // [🔔 시보·알람 ▾] → 시보 설정 (매시 정각 연주, 앱이 꺼져 있어도 울림) + 구분선 + 시스템 알람 화면
                 //                    + 구분선 + 닫힘 (시계 닫히는 시간)  (모든 모드 공통)
                 ChimeAlarmButton(
-                    battery = battery,
-                    batteryDisplay = settings.batteryDisplay,
-                    batteryFull = settings.batteryFullAlert,
-                    batteryUnplug = settings.batteryUnplugAlert,
-                    batteryLow = settings.batteryLowAlert,
-                    onBatteryChange = { d, f, u, l ->
-                        onSettingsChange(
-                            settings.copy(batteryDisplay = d, batteryFullAlert = f, batteryUnplugAlert = u, batteryLowAlert = l),
-                        )
-                    },
                     autoClose = settings.autoClose,
                     onAutoCloseChange = { onSettingsChange(settings.copy(autoClose = it)) },
                 )
@@ -1544,7 +1537,9 @@ private fun SecondHandMenu(
     settings: ClockSettings,
     onSettingsChange: (ClockSettings) -> Unit,
     allowOff: Boolean,
+    battery: BatteryState?,
 ) {
+    var batteryOpen by remember { mutableStateOf(false) }
     val current = when {
         allowOff && !settings.showSeconds -> SecondHand.Off
         settings.powerMode == PowerMode.Saving -> SecondHand.Tick
@@ -1554,7 +1549,7 @@ private fun SecondHandMenu(
         button = {
             Icon(Icons.Filled.Timer, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.show_seconds), style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.show_seconds_menu), style = MaterialTheme.typography.labelMedium)
         },
     ) { close ->
         SecondHand.entries.filter { allowOff || it != SecondHand.Off }.forEach { h ->
@@ -1570,6 +1565,32 @@ private fun SecondHandMenu(
                 )
             }
         }
+        // 구분선 + 배터리 (화면 표시, 충전 완료·충전기 빠짐·배터리 부족 알림): [시간표...] 에서 옮겨 옴
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.battery_section), style = MaterialTheme.typography.bodyMedium) },
+            leadingIcon = {
+                Icon(
+                    if (battery?.plugged == true) Icons.Filled.BatteryChargingFull else Icons.Filled.BatteryStd,
+                    contentDescription = null, modifier = Modifier.size(18.dp),
+                )
+            },
+            trailingIcon = { Text(batteryValueText(battery), style = MaterialTheme.typography.bodySmall) },
+            onClick = { close(); batteryOpen = true },
+        )
+    }
+    if (batteryOpen) {
+        BatteryDialog(
+            state = battery,
+            display = settings.batteryDisplay,
+            full = settings.batteryFullAlert,
+            unplug = settings.batteryUnplugAlert,
+            low = settings.batteryLowAlert,
+            onChange = { d, f, u, l ->
+                onSettingsChange(settings.copy(batteryDisplay = d, batteryFullAlert = f, batteryUnplugAlert = u, batteryLowAlert = l))
+            },
+            onDismiss = { batteryOpen = false },
+        )
     }
 }
 

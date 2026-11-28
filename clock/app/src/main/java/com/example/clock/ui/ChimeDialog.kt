@@ -16,8 +16,6 @@ import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CalendarViewWeek
 import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.BatteryChargingFull
-import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material3.HorizontalDivider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,25 +80,17 @@ import java.time.format.DateTimeFormatter
  *  - 시보 (켜짐/꺼짐) → 바로 시보 설정 창 (켜기/끄기, 음악 파일, 연주 시간 …)
  *  - 알람            → 바로 시스템 시계 앱의 알람 화면
  *  - 닫힘 (무한/30분 …) → 바로 닫힘 설정 창 ([AutoCloseDialog])
- *  - 배터리 (87% 충전 중 …) → 바로 배터리 설정 창 ([BatteryDialog]: 화면 표시, 충전 완료·충전기 빠짐·배터리 부족 알림)
  * 영역마다 할 일이 하나뿐이라 영역 팝업 없이 바로 실행.
  * 버튼 아이콘으로 시보 켜짐/꺼짐 표시 (설정 창을 닫을 때 다시 읽음).
  */
 @Composable
 fun ChimeAlarmButton(
-    battery: BatteryState?,
-    batteryDisplay: BatteryDisplay,
-    batteryFull: BatteryFullAlert,
-    batteryUnplug: Boolean,
-    batteryLow: BatteryLowAlert,
-    onBatteryChange: (BatteryDisplay, BatteryFullAlert, Boolean, BatteryLowAlert) -> Unit,
     autoClose: AutoClose,
     onAutoCloseChange: (AutoClose) -> Unit,
 ) {
     val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
     var autoCloseOpen by remember { mutableStateOf(false) }
-    var batteryOpen by remember { mutableStateOf(false) }
     var enabled by remember { mutableStateOf(ChimeStore.load(context).enabled) }
 
     SectionedMenuButton(
@@ -151,12 +141,6 @@ fun ChimeAlarmButton(
                 value = { autoCloseValue(autoClose) },
                 action = { autoCloseOpen = true },
             ),
-            MenuSection(
-                title = R.string.battery_section,
-                icon = if (battery?.plugged == true) Icons.Filled.BatteryChargingFull else Icons.Filled.BatteryStd,
-                value = { batteryValueText(battery) },
-                action = { batteryOpen = true },
-            ),
         ),
     ) {
         Icon(
@@ -166,18 +150,6 @@ fun ChimeAlarmButton(
         )
         Spacer(Modifier.width(4.dp))
         Text(stringResource(R.string.chime_alarm), style = MaterialTheme.typography.labelMedium)
-    }
-
-    if (batteryOpen) {
-        BatteryDialog(
-            state = battery,
-            display = batteryDisplay,
-            full = batteryFull,
-            unplug = batteryUnplug,
-            low = batteryLow,
-            onChange = onBatteryChange,
-            onDismiss = { batteryOpen = false },
-        )
     }
 
     if (autoCloseOpen) {

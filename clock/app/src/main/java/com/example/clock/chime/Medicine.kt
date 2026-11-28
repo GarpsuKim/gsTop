@@ -53,6 +53,8 @@ data class MedSchedule(
     val skipped: Set<String> = emptySet(),
     /** 먹은 회차 → 체크한 시각 (밀리초). */
     val taken: Map<String, Long> = emptyMap(),
+    /** 메모 / 참고사항 (약 이름, 먹는 법 등. [텍스트 공유] 에 포함). */
+    val memo: String = "",
 ) {
     /** 계획된 회차인지: 복용 기간 안 + 그때 먹음 + 그 회차만 건너뛰지 않음. (기간 밖은 알림도 없음) */
     fun isPlanned(day: Long, slot: MedSlot) =
@@ -87,6 +89,7 @@ object MedStore {
                 val i = e.indexOf('=')
                 if (i <= 0) null else e.substring(0, i) to (e.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)
             }.toMap(),
+            memo = p.getString("memo", "").orEmpty(),
         )
     }
 
@@ -97,6 +100,7 @@ object MedStore {
             putBoolean("active", s.active)
             putLong("start_day", s.startDay)
             putInt("days", s.days)
+            putString("memo", s.memo)
             MedSlot.entries.forEach {
                 putInt("min_${it.ordinal}", s.minutes[it.ordinal])
                 putBoolean("on_${it.ordinal}", s.slotOn[it.ordinal])

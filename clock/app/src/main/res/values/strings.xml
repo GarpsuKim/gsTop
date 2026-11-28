@@ -12,6 +12,7 @@
     <string name="theme_silver">실버</string>
     <string name="theme_red">레드</string>
     <string name="show_seconds">초침</string>
+    <string name="show_seconds_menu">초침...</string>
     <string name="alarm">알람</string>
     <string name="calendar">달력</string>
     <string name="calendar_menu">달력...</string>
@@ -100,7 +101,7 @@
     <string name="second_hand_off">off (강한 절전)</string>
     <string name="second_hand_tick">1초 간격 (보통 절전)</string>
     <string name="second_hand_smooth">부드럽게 (절전 없음)</string>
-    <string name="chime_alarm">시보·알람</string>
+    <string name="chime_alarm">시간표...</string>
     <string name="chime_settings_item">시보 설정</string>
     <string name="chime_state_on">켜짐</string>
     <string name="chime_state_off">꺼짐</string>
